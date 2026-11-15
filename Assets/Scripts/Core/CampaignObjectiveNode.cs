@@ -18,7 +18,7 @@ namespace Core
 
     /// <summary>
     /// Interactive 3D campaign objective node (C4 gate breach, Fuel Valve / EW Radar sabotage,
-    /// or Extraction LZ flare zone). Supports stand-in-zone arming, [E] boost, and Bravo-6 buddy assist.
+    /// or Extraction LZ flare zone). Supports stand-in-zone arming, [E] boost, and Vanguard-09 buddy assist.
     /// </summary>
     public sealed class CampaignObjectiveNode : MonoBehaviour
     {

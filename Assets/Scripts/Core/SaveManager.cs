@@ -12,6 +12,7 @@ namespace Core
         public int credits = 200;
         public int highScore;
         public int highestWave = 1;
+        public int highestMissionCompleted;
         public int totalKills;
 
         public int armorRank;
@@ -63,6 +64,22 @@ namespace Core
             var mgr = go.GetComponent<SaveManager>();
             if (mgr == null) mgr = go.AddComponent<SaveManager>();
             return mgr;
+        }
+
+        public static bool PendingAutoDeploy { get; set; }
+        public static int SelectedMissionIndex { get; set; } = 1;
+        public static int PendingCarryScore { get; set; }
+        public static int PendingCarryKills { get; set; }
+        public static int PendingCarryCredits { get; set; }
+
+        public void RecordMissionCompleted(int missionIndex)
+        {
+            var clamped = Mathf.Clamp(missionIndex, 1, StoryDirector.CampaignMissionCount);
+            if (clamped > Data.highestMissionCompleted)
+            {
+                Data.highestMissionCompleted = clamped;
+                Save();
+            }
         }
 
         private void Awake()
@@ -264,6 +281,7 @@ namespace Core
 
         private static void NormalizeLists(GameSaveData d)
         {
+            d.highestMissionCompleted = Mathf.Clamp(d.highestMissionCompleted, 0, StoryDirector.CampaignMissionCount);
             d.unlockedWeapons ??= new List<int>();
             if (!d.unlockedWeapons.Contains(0)) d.unlockedWeapons.Add(0);
             d.unlockedSkins ??= new List<int>();
@@ -308,6 +326,7 @@ namespace Core
             sb.Append(d.credits).Append('|')
               .Append(d.highScore).Append('|')
               .Append(d.highestWave).Append('|')
+              .Append(d.highestMissionCompleted).Append('|')
               .Append(d.totalKills).Append('|')
               .Append(d.armorRank).Append('|')
               .Append(d.firepowerRank).Append('|')

@@ -23,8 +23,8 @@ namespace Character
     }
 
     /// <summary>
-    /// AI-controlled Fireteam Bravo-6 squadmate with two-hand weapon IK, cover line-of-sight awareness,
-    /// player muzzle-lane avoidance, CoD downed-recovery/revive state, and regenerating trauma health.
+    /// AI-controlled Vanguard-09 squadmate with two-hand weapon IK, cover line-of-sight awareness,
+    /// player muzzle-lane avoidance, downed-recovery/revive state, and regenerating trauma health.
     /// </summary>
     public sealed class SquadMemberController : MonoBehaviour
     {
@@ -52,9 +52,9 @@ namespace Character
 
         public SquadRole Role { get; private set; }
 
-        public string Callsign { get; private set; } = "CPT. PRICE";
+        public string Callsign { get; private set; } = "MAJ. ROURKE";
 
-        public string RoleTag { get; private set; } = "TF141-ACTUAL";
+        public string RoleTag { get; private set; } = "IRONWOOD-1";
 
         public float CurrentHp { get; private set; } = 150f;
 
@@ -82,21 +82,21 @@ namespace Character
             switch (assignedRole)
             {
                 case SquadRole.SquadLeadHayes:
-                    Callsign = "CPT. PRICE";
-                    RoleTag = "TF141-ACTUAL";
+                    Callsign = "MAJ. ROURKE";
+                    RoleTag = "IRONWOOD-1";
                     _formationOffset = new Vector3(-2.35f, 0f, -0.85f);
                     MaxHp = 175f;
                     break;
                 case SquadRole.MarksmanBishop:
-                    Callsign = "GHOST";
-                    RoleTag = "GHOST-141";
+                    Callsign = "KOZLOWSKI";
+                    RoleTag = "WRAITH-2";
                     _formationOffset = new Vector3(2.65f, 0f, -1.65f);
                     MaxHp = 145f;
                     break;
                 case SquadRole.BreacherTorres:
                 default:
-                    Callsign = "SGT. GAZ";
-                    RoleTag = "GARRICK-3";
+                    Callsign = "CPL. REYES";
+                    RoleTag = "SPARK-3";
                     _formationOffset = new Vector3(2.05f, 0f, 0.95f);
                     MaxHp = 165f;
                     break;

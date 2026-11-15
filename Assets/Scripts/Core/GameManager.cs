@@ -7,12 +7,13 @@ using Feel;
 using UI;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 
 namespace Core
 {
     /// <summary>
     /// Authoritative game state coordinator driving Title <-> Armory, Playing <-> LevelUpDraft,
-    /// Paused, and Ended lifecycles, score/credits tracking, SaveManager persistence, and clean restarts.
+    /// Cutscenes, Paused, Ended, and Multi-Scene Mission Transitions across all 3 campaign acts.
     /// </summary>
     public sealed class GameManager : MonoBehaviour
     {
@@ -21,6 +22,8 @@ namespace Core
         private const string PrefHighScore = "Vanguard_HighScore";
 
         public GameState CurrentState { get; private set; } = GameState.Title;
+
+        public int CurrentMissionIndex { get; private set; } = 1;
 
         private int Score { get; set; }
 
@@ -39,8 +42,29 @@ namespace Core
             }
             Instance = this;
 
+            CurrentMissionIndex = ResolveActiveMissionIndex();
+            StoryDirector.ActiveMissionIndex = CurrentMissionIndex;
+            SaveManager.SelectedMissionIndex = CurrentMissionIndex;
+
             var save = SaveManager.EnsureInstance();
             HighScore = Mathf.Max(save.Data.highScore, PlayerPrefs.GetInt(PrefHighScore, 0));
+        }
+
+        private static int ResolveActiveMissionIndex()
+        {
+            if (EnemySpawner.Instance != null)
+            {
+                return Mathf.Clamp(EnemySpawner.Instance.MissionIndex, 1, StoryDirector.CampaignMissionCount);
+            }
+            var spawner = FindAnyObjectByType<EnemySpawner>();
+            if (spawner != null)
+            {
+                return Mathf.Clamp(spawner.MissionIndex, 1, StoryDirector.CampaignMissionCount);
+            }
+            var sceneName = SceneManager.GetActiveScene().name;
+            if (sceneName.Contains("Mission02", StringComparison.OrdinalIgnoreCase)) return 2;
+            if (sceneName.Contains("Mission03", StringComparison.OrdinalIgnoreCase)) return 3;
+            return 1;
         }
 
         private void OnDestroy()
@@ -53,15 +77,35 @@ namespace Core
 
         private void Start()
         {
+            CurrentMissionIndex = ResolveActiveMissionIndex();
+            StoryDirector.ActiveMissionIndex = CurrentMissionIndex;
+            SaveManager.SelectedMissionIndex = CurrentMissionIndex;
+
             var save = SaveManager.EnsureInstance();
             HighScore = Mathf.Max(HighScore, save.Data.highScore);
-
             Time.timeScale = 1f;
+
+            UIManager.Instance?.UpdateCredits(save.Data.credits, 0);
+            UIManager.Instance?.RefreshArmoryUI();
+            UIManager.Instance?.RefreshMissionSelectUI(CurrentMissionIndex, save.Data.highestMissionCompleted);
+
+            if (SaveManager.PendingAutoDeploy)
+            {
+                SaveManager.PendingAutoDeploy = false;
+                var carryScore = SaveManager.PendingCarryScore;
+                var carryKills = SaveManager.PendingCarryKills;
+                var carryCredits = SaveManager.PendingCarryCredits;
+                SaveManager.PendingCarryScore = 0;
+                SaveManager.PendingCarryKills = 0;
+                SaveManager.PendingCarryCredits = 0;
+
+                DeployCampaign(carryScore, carryKills, carryCredits);
+                return;
+            }
+
             CurrentState = GameState.Title;
             TopDownCameraRig.Instance?.SetTitleMode(true);
             UIManager.Instance?.UpdateScore(0, HighScore);
-            UIManager.Instance?.UpdateCredits(save.Data.credits, 0);
-            UIManager.Instance?.RefreshArmoryUI();
             UIManager.Instance?.ApplyImmediateState(GameState.Title);
         }
 
@@ -113,10 +157,58 @@ namespace Core
             UIManager.Instance?.TransitionToState(GameState.Title);
         }
 
+        public bool HasNextMission => CurrentMissionIndex < StoryDirector.CampaignMissionCount;
+
+        public void SelectTitleMission(int missionIndex)
+        {
+            var target = Mathf.Clamp(missionIndex, 1, StoryDirector.CampaignMissionCount);
+            AudioManager.Instance?.PlayUIClick();
+            SaveManager.SelectedMissionIndex = target;
+
+            if (target == CurrentMissionIndex)
+            {
+                StoryDirector.ActiveMissionIndex = target;
+                var save = SaveManager.EnsureInstance();
+                UIManager.Instance?.RefreshMissionSelectUI(target, save.Data.highestMissionCompleted);
+                return;
+            }
+
+            SaveManager.PendingAutoDeploy = false;
+            SaveManager.PendingCarryScore = 0;
+            SaveManager.PendingCarryKills = 0;
+            SaveManager.PendingCarryCredits = 0;
+            Time.timeScale = 1f;
+            SceneManager.LoadScene(StoryDirector.GetMissionSceneName(target));
+        }
+
+        public void LoadNextMission()
+        {
+            if (!HasNextMission)
+            {
+                ReturnToTitle();
+                return;
+            }
+
+            AudioManager.Instance?.PlayUIClick();
+            var nextIndex = CurrentMissionIndex + 1;
+            SaveManager.SelectedMissionIndex = nextIndex;
+            SaveManager.PendingAutoDeploy = true;
+            SaveManager.PendingCarryScore = Score;
+            SaveManager.PendingCarryKills = Kills;
+            SaveManager.PendingCarryCredits = RunCreditsEarned;
+            Time.timeScale = 1f;
+            SceneManager.LoadScene(StoryDirector.GetMissionSceneName(nextIndex));
+        }
+
         public void DeployCampaign()
         {
+            DeployCampaign(0, 0, 0);
+        }
+
+        private void DeployCampaign(int carryScore, int carryKills, int carryCredits)
+        {
             AudioManager.Instance?.PlayUIClick();
-            PrepareFreshMissionState();
+            PrepareFreshMissionState(carryScore, carryKills, carryCredits);
 
             if (CutsceneDirector.Instance != null)
             {
@@ -134,12 +226,13 @@ namespace Core
         public void StartMission()
         {
             AudioManager.Instance?.PlayUIClick();
-            PrepareFreshMissionState();
+            PrepareFreshMissionState(0, 0, 0);
             EnterCombatWaveOneAfterIntro();
         }
 
-        private void PrepareFreshMissionState()
+        private void PrepareFreshMissionState(int carryScore, int carryKills, int carryCredits)
         {
+            StoryDirector.ActiveMissionIndex = CurrentMissionIndex;
             AudioManager.Instance?.SetPausedDucking(false);
             FeelManager.Instance?.CancelHitStop();
             FeelManager.Instance?.ClearAllFloatingText();
@@ -150,14 +243,14 @@ namespace Core
             StoryDirector.ResetCampaignRun();
             UIManager.Instance?.HideRadioCommsImmediate();
 
-            Score = 0;
-            Kills = 0;
-            RunCreditsEarned = 0;
+            Score = Mathf.Max(0, carryScore);
+            Kills = Mathf.Max(0, carryKills);
+            RunCreditsEarned = Mathf.Max(0, carryCredits);
             Time.timeScale = 1f;
 
             var save = SaveManager.EnsureInstance();
             UIManager.Instance?.UpdateScore(Score, HighScore);
-            UIManager.Instance?.UpdateCredits(save.Data.credits, 0);
+            UIManager.Instance?.UpdateCredits(save.Data.credits, RunCreditsEarned);
             UIManager.Instance?.RefreshWeaponBar();
         }
 
@@ -241,6 +334,11 @@ namespace Core
             var waveReached = EnemySpawner.Instance != null ? EnemySpawner.Instance.CurrentWave : 1;
             var save = SaveManager.EnsureInstance();
             save.RecordRunResult(Score, Kills, waveReached);
+            if (victory)
+            {
+                save.RecordMissionCompleted(CurrentMissionIndex);
+                UIManager.Instance?.RefreshMissionSelectUI(CurrentMissionIndex, save.Data.highestMissionCompleted);
+            }
             HighScore = Mathf.Max(HighScore, save.Data.highScore);
 
             Time.timeScale = 0f;

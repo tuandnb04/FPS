@@ -15,7 +15,7 @@ using UnityEngine.Serialization;
 namespace Enemies
 {
     /// <summary>
-    /// Pooled Echo-7 3-Sector Campaign Director managing sector garrisons, armored IFV encounters,
+    /// Pooled Multi-Mission Campaign Director managing sector garrisons, armored IFV encounters,
     /// interactive C4 breach & sabotage objectives, Extraction LZ, and tactical supply drops.
     /// </summary>
     public sealed class EnemySpawner : MonoBehaviour
@@ -23,7 +23,10 @@ namespace Enemies
         private static readonly int Color1 = Shader.PropertyToID("_Color");
         public static EnemySpawner Instance { get; private set; }
 
-        [Header("Campaign Sector Bounds (Echo-7)")]
+        [Header("Campaign Mission Identity")]
+        [SerializeField] private int missionIndex = 1;
+
+        [Header("Campaign Sector Bounds")]
         [SerializeField] private float sector1HalfWidth = 25.0f;
         [SerializeField] private float sector2HalfWidth = 34.5f;
         [SerializeField] private float sector3HalfWidth = 26.5f;
@@ -81,6 +84,13 @@ namespace Enemies
         private float _stageBeatTimer;
         private bool _transitionPending;
         private bool _stage2BossCleared;
+
+        public int MissionIndex => missionIndex;
+
+        public void SetMissionIndex(int idx)
+        {
+            missionIndex = Mathf.Clamp(idx, 1, StoryDirector.CampaignMissionCount);
+        }
 
         public int CurrentStage { get; private set; } = 1;
 
@@ -140,6 +150,7 @@ namespace Enemies
                 return;
             }
             Instance = this;
+            StoryDirector.ActiveMissionIndex = Mathf.Clamp(missionIndex, 1, StoryDirector.CampaignMissionCount);
 
             _enemyPoolRoot = new GameObject("EnemyPoolRoot").transform;
             _enemyPoolRoot.SetParent(transform, false);
@@ -206,19 +217,23 @@ namespace Enemies
             _objectiveNodes.Clear();
 
             Gate1BreachNode = CreateObjectiveNode(
-                "Obj_Gate1_Breach", ObjectiveNodeKind.GateC4Breach, "BLAST GATE ALPHA",
+                "Obj_Gate1_Breach", ObjectiveNodeKind.GateC4Breach,
+                StoryDirector.GetObjectiveNodeTitle(missionIndex, 0),
                 new Vector3(0f, 0f, -17.5f), 3.3f, 1.55f, true);
 
             FuelValveNode = CreateObjectiveNode(
-                "Obj_S2_FuelValve", ObjectiveNodeKind.FuelValveSabotage, "FUEL MANIFOLD",
+                "Obj_S2_FuelValve", ObjectiveNodeKind.FuelValveSabotage,
+                StoryDirector.GetObjectiveNodeTitle(missionIndex, 1),
                 new Vector3(-16.5f, 0f, -1.2f), 3.4f, 1.65f, true);
 
             RadarTerminalNode = CreateObjectiveNode(
-                "Obj_S2_RadarTerminal", ObjectiveNodeKind.RadarSabotage, "EW RADAR UPLINK",
+                "Obj_S2_RadarTerminal", ObjectiveNodeKind.RadarSabotage,
+                StoryDirector.GetObjectiveNodeTitle(missionIndex, 2),
                 new Vector3(21.5f, 0f, 1.5f), 3.4f, 1.65f, true);
 
             HelipadLzNode = CreateObjectiveNode(
-                "Obj_S3_HelipadLZ", ObjectiveNodeKind.HelipadEvacLZ, "EXTRACTION LZ EVAC-6",
+                "Obj_S3_HelipadLZ", ObjectiveNodeKind.HelipadEvacLZ,
+                StoryDirector.GetObjectiveNodeTitle(missionIndex, 3),
                 new Vector3(0f, 0f, 42.0f), 4.2f, 1.10f, false);
         }
 
@@ -519,7 +534,7 @@ namespace Enemies
                     SetupStage4WardenAndGate2();
                     break;
                 case 5:
-                    SetupStage5VolkovNorthHq();
+                    SetupStage5FinalBossSector();
                     break;
                 case 6:
                     SetupStage6ExtractionLz();
@@ -540,16 +555,41 @@ namespace Enemies
             RadarTerminalNode?.SetState(false, false);
             HelipadLzNode?.SetState(false, false);
 
-            Vector3[] sentries =
+            Vector3[] sentries = missionIndex switch
             {
-                new(-5.8f, 0f, -34.0f),
-                new(5.8f, 0f, -34.0f),
-                new(-8.0f, 0f, -26.5f),
-                new(8.0f, 0f, -26.5f),
-                new(-13.5f, 0f, -29.0f),
-                new(13.0f, 0f, -27.5f),
-                new(-2.4f, 0f, -20.5f),
-                new(2.4f, 0f, -20.5f)
+                2 => new[]
+                {
+                    new Vector3(-7.5f, 0f, -35.0f),
+                    new Vector3(7.5f, 0f, -35.0f),
+                    new Vector3(-9.5f, 0f, -26.0f),
+                    new Vector3(9.5f, 0f, -26.0f),
+                    new Vector3(-16.0f, 0f, -29.5f),
+                    new Vector3(16.0f, 0f, -29.5f),
+                    new Vector3(-3.2f, 0f, -20.5f),
+                    new Vector3(3.2f, 0f, -20.5f)
+                },
+                3 => new[]
+                {
+                    new Vector3(-6.2f, 0f, -34.5f),
+                    new Vector3(6.2f, 0f, -34.5f),
+                    new Vector3(-10.5f, 0f, -27.5f),
+                    new Vector3(10.5f, 0f, -27.5f),
+                    new Vector3(-15.5f, 0f, -24.0f),
+                    new Vector3(15.5f, 0f, -24.0f),
+                    new Vector3(-2.6f, 0f, -20.0f),
+                    new Vector3(2.6f, 0f, -20.0f)
+                },
+                _ => new[]
+                {
+                    new Vector3(-5.8f, 0f, -34.0f),
+                    new Vector3(5.8f, 0f, -34.0f),
+                    new Vector3(-8.0f, 0f, -26.5f),
+                    new Vector3(8.0f, 0f, -26.5f),
+                    new Vector3(-13.5f, 0f, -29.0f),
+                    new Vector3(13.0f, 0f, -27.5f),
+                    new Vector3(-2.4f, 0f, -20.5f),
+                    new Vector3(2.4f, 0f, -20.5f)
+                }
             };
 
             _stage1KillsProgress = 0;
@@ -558,7 +598,8 @@ namespace Enemies
 
             for (var i = 0; i < sentries.Length; i++)
             {
-                var e = SpawnEnemyAt(i == 5 ? EnemyArchetype.Heavy : EnemyArchetype.Chaser, sentries[i]);
+                var makeHeavy = i == 5 || (missionIndex >= 2 && i == 4);
+                var e = SpawnEnemyAt(makeHeavy ? EnemyArchetype.Heavy : EnemyArchetype.Chaser, sentries[i]);
                 e.transform.rotation = Quaternion.LookRotation(Vector3.back, Vector3.up);
                 e.SetGarrisonAlert(i < 4);
             }
@@ -589,15 +630,35 @@ namespace Enemies
             _remainingReinforcements = 3;
             _reinforcementTimer = 6.5f;
 
-            // Garrison defending West Fuel Depot, Container Maze, and East Radar Array
-            Vector3[] rifles =
+            Vector3[] rifles = missionIndex switch
             {
-                new(-16.0f, 0f, -7.5f),
-                new(-18.5f, 0f, 3.5f),
-                new(-6.0f, 0f, 2.5f),
-                new(7.0f, 0f, -3.5f),
-                new(17.5f, 0f, -4.5f),
-                new(23.5f, 0f, 6.0f)
+                2 => new[]
+                {
+                    new Vector3(-9.5f, 0f, -6.5f),
+                    new Vector3(-22.5f, 0f, 3.5f),
+                    new Vector3(-4.0f, 0f, 4.5f),
+                    new Vector3(5.5f, 0f, -4.5f),
+                    new Vector3(22.0f, 0f, -4.5f),
+                    new Vector3(9.5f, 0f, 7.5f)
+                },
+                3 => new[]
+                {
+                    new Vector3(-13.5f, 0f, -6.0f),
+                    new Vector3(-19.5f, 0f, 5.5f),
+                    new Vector3(-6.0f, 0f, 3.5f),
+                    new Vector3(6.5f, 0f, -3.5f),
+                    new Vector3(19.0f, 0f, -5.0f),
+                    new Vector3(23.5f, 0f, 7.0f)
+                },
+                _ => new[]
+                {
+                    new Vector3(-16.0f, 0f, -7.5f),
+                    new Vector3(-18.5f, 0f, 3.5f),
+                    new Vector3(-6.0f, 0f, 2.5f),
+                    new Vector3(7.0f, 0f, -3.5f),
+                    new Vector3(17.5f, 0f, -4.5f),
+                    new Vector3(23.5f, 0f, 6.0f)
+                }
             };
             Vector3[] heavies =
             {
@@ -635,7 +696,7 @@ namespace Enemies
             UIManager.Instance?.ShowMilestoneBanner("THREAT // " + StoryDirector.GetBossCallsign(CurrentStage));
         }
 
-        private void SetupStage5VolkovNorthHq()
+        private void SetupStage5FinalBossSector()
         {
             _remainingReinforcements = 0;
             CutsceneDirector.Instance?.OpenGateImmediate(2);
@@ -647,11 +708,11 @@ namespace Enemies
 
             SpawnBossAt(new Vector3(0f, 0f, 42.0f));
             StoryDirector.NotifyBossSpawned(CurrentStage);
-            UIManager.Instance?.ShowMilestoneBanner("FINAL TARGET // COL. VOLKOV");
+            UIManager.Instance?.ShowMilestoneBanner("FINAL TARGET // " + StoryDirector.GetBossCallsign(5));
 
             if (GameManager.Instance != null && GameManager.Instance.CurrentState == GameState.Playing)
             {
-                GameManager.Instance.TriggerCutscene(CutsceneType.Act3BossVolkov);
+                GameManager.Instance.TriggerCutscene(CutsceneType.FinalBossIntro);
             }
         }
 
@@ -659,7 +720,7 @@ namespace Enemies
         {
             _remainingReinforcements = 0;
             HelipadLzNode?.SetState(true, false);
-            UIManager.Instance?.ShowMilestoneBanner("REACH EXTRACTION LZ EVAC-6!");
+            UIManager.Instance?.ShowMilestoneBanner("REACH " + StoryDirector.GetObjectiveNodeTitle(missionIndex, 3) + "!");
         }
 
         private void Update()
@@ -702,7 +763,7 @@ namespace Enemies
                     _stage2BossCleared = true;
                     Gate1BreachNode?.SetState(true, false);
                     StoryDirector.NotifyGate1C4Ready();
-                    UIManager.Instance?.ShowMilestoneBanner("GATE CLEAR // PLANT C4 AT GATE ALPHA");
+                    UIManager.Instance?.ShowMilestoneBanner("GATE CLEAR // PLANT C4 AT " + StoryDirector.GetObjectiveNodeTitle(missionIndex, 0));
                     SyncMissionHud();
                     break;
                 case 4 when _activeEnemies.Count == 0:
@@ -765,7 +826,7 @@ namespace Enemies
                 SyncMissionHud();
 
                 if (SabotageCompletedCount < 2) return;
-                UIManager.Instance?.ShowMilestoneBanner("EW JAMMING SEVERED // DESTROY WARDEN-02");
+                UIManager.Instance?.ShowMilestoneBanner("TARGETS SABOTAGED // DESTROY " + StoryDirector.GetBossCallsign(4));
                 BeginCampaignStage(4);
                 return;
             }

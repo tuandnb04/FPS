@@ -875,7 +875,7 @@ namespace Character
                 if (!wasDead && enemy.IsDead)
                 {
                     anyKill = true;
-                    FeelManager.Instance?.TriggerKillFeed("PRICE", enemy.DisplayCallsign, "ORDNANCE");
+                    FeelManager.Instance?.TriggerKillFeed("VANCE", enemy.DisplayCallsign, "ORDNANCE");
                 }
             }
             if (anyHit)

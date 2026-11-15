@@ -124,7 +124,7 @@ namespace Combat
                 enemy.ApplyDamage(enemyDamage, enemy.transform.position + Vector3.up * 0.9f, normalizedPush, isCrit: true);
                 if (!wasDead && enemy.IsDead)
                 {
-                    FeelManager.Instance?.TriggerKillFeed("PRICE", enemy.DisplayCallsign, "FUEL DRUM");
+                    FeelManager.Instance?.TriggerKillFeed("VANCE", enemy.DisplayCallsign, "FUEL DRUM");
                 }
             }
 

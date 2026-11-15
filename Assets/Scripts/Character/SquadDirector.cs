@@ -12,9 +12,9 @@ using UnityEngine.Serialization;
 namespace Character
 {
     /// <summary>
-    /// Coordinates Fireteam Bravo-6 (CPT. HAYES, SGT. BISHOP, CPL. TORRES),
+    /// Coordinates Spectre Detachment Vanguard-09 (MAJ. ROURKE, SPEC. KOZLOWSKI, CPL. REYES),
     /// tactical squad orders ([Z] Follow, [X] Hold, [C] Breach), pooled friendly ballistic tracers,
-    /// and cutscene squad staging across Sector Echo-7.
+    /// and cutscene squad staging across all three campaign operations.
     /// </summary>
     public sealed class SquadDirector : MonoBehaviour
     {
@@ -149,9 +149,9 @@ namespace Character
             AudioManager.Instance?.PlayUIClick();
             var msg = order switch
             {
-                SquadOrder.Follow => "Copy! Task Force 141 falling into diamond formation on Lead.",
-                SquadOrder.Hold => "Holding Hajin compound lane! Establishing interlocking crossfire.",
-                _ => "Stack up and breach! Suppressing ahead toward Konni sector!"
+                SquadOrder.Follow => "Copy, Nomad! Vanguard-09 falling into diamond formation on Lead.",
+                SquadOrder.Hold => "Holding perimeter lane! Establishing interlocking crossfire.",
+                _ => "Stack up and breach! Suppressing Ironward positions ahead!"
             };
             StoryDirector.NotifySquadOrder(msg);
         }
@@ -166,9 +166,9 @@ namespace Character
             }
             _members.Clear();
 
-            var ghostHead = skullMaskMesh != null ? skullMaskMesh : helmetMesh;
+            var wraithHead = skullMaskMesh != null ? skullMaskMesh : helmetMesh;
             _members.Add(BuildSquadMemberRig(SquadRole.SquadLeadHayes, Palette.CharacterPrimary, Palette.CoyoteTan, boonieHatMesh != null ? boonieHatMesh : helmetMesh, useVisor: false, rifleM4Mesh, 0.65f, new Vector3(0f, -0.028f, 0.165f), new Vector3(0f, -0.060f, -0.033f), new Vector3(0f, 0.020f, 0.555f), Palette.CharacterPrimary));
-            _members.Add(BuildSquadMemberRig(SquadRole.MarksmanBishop, Palette.SkinCrimsonPrimary, Palette.GuardTowerDark, ghostHead, useVisor: skullMaskMesh == null, rifleMk14Mesh, 0.66f, new Vector3(0f, -0.010f, 0.195f), new Vector3(0f, -0.058f, -0.052f), new Vector3(0f, 0.020f, 0.690f), Palette.SkullMaskBone));
+            _members.Add(BuildSquadMemberRig(SquadRole.MarksmanBishop, Palette.SkinCrimsonPrimary, Palette.GuardTowerDark, wraithHead, useVisor: skullMaskMesh == null, rifleMk14Mesh, 0.66f, new Vector3(0f, -0.010f, 0.195f), new Vector3(0f, -0.058f, -0.052f), new Vector3(0f, 0.020f, 0.690f), Palette.SkullMaskBone));
             _members.Add(BuildSquadMemberRig(SquadRole.BreacherTorres, Palette.SkinGoldPrimary, Palette.CoyoteTan, helmetMesh, useVisor: true, rifleAn94Mesh, 0.66f, new Vector3(0f, -0.024f, 0.180f), new Vector3(0f, -0.060f, -0.038f), new Vector3(0f, 0.017f, 0.598f), Palette.SkinGoldPrimary));
         }
 

@@ -75,8 +75,8 @@ namespace Enemies
         public string DisplayCallsign => Archetype switch
         {
             EnemyArchetype.Boss => _bossDisplayTitle,
-            EnemyArchetype.Heavy => "KONNI JUGGERNAUT",
-            _ => "KONNI OPERATIVE"
+            EnemyArchetype.Heavy => "IRONWARD ENFORCER",
+            _ => "IRONWARD RIFLEMAN"
         };
 
         private float CurrentHp { get; set; }

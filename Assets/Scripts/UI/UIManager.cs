@@ -137,7 +137,7 @@ namespace UI
         [SerializeField] private Image[] radarObjectiveDots;
         [SerializeField] private TextMeshProUGUI radarUavStatusText;
 
-        [Header("Fireteam Bravo-6 Squad Roster & Orders")]
+        [Header("Fireteam Vanguard-09 Squad Roster & Orders")]
         [SerializeField] private TextMeshProUGUI[] squadMemberNames;
         [SerializeField] private Image[] squadMemberBars;
         [SerializeField] private TextMeshProUGUI[] squadMemberStatusTexts;
@@ -159,7 +159,7 @@ namespace UI
         [SerializeField] private Button cinemaSkipButton;
         [SerializeField] private TextMeshProUGUI objectiveBannerText;
 
-        [Header("Modern Warfare 4 Tactical Combat HUD")]
+        [Header("Tactical Combat HUD")]
         [SerializeField] private CanvasGroup hitmarkerGroup;
         [SerializeField] private Image[] hitmarkerTicks;
         [SerializeField] private TextMeshProUGUI killFeedText;
@@ -169,7 +169,7 @@ namespace UI
         [SerializeField] private TextMeshProUGUI nvgStatusText;
         [SerializeField] private Button nvgToggleButton;
 
-        [Header("Core Navigation Buttons")]
+        [Header("Core Navigation & Multi-Mission Buttons")]
         [SerializeField] private Button startButton;
         [SerializeField] private Button hudPauseButton;
         [SerializeField] private Button resumeButton;
@@ -177,6 +177,11 @@ namespace UI
         [SerializeField] private Button pauseTitleButton;
         [SerializeField] private Button endedReplayButton;
         [SerializeField] private Button endedTitleButton;
+        [SerializeField] private Button endedNextMissionButton;
+        [SerializeField] private TextMeshProUGUI endedNextMissionText;
+        [SerializeField] private Button[] missionSelectButtons;
+        [SerializeField] private Image[] missionSelectBgs;
+        [SerializeField] private TextMeshProUGUI[] missionSelectLabels;
 
         private Coroutine _hpTween;
         private Coroutine _xpTween;
@@ -373,6 +378,48 @@ namespace UI
             objectiveBannerText = objectiveText;
         }
 
+        public void BindCampaignUi(
+            Button[] missionBtns,
+            Image[] missionBgs,
+            TextMeshProUGUI[] missionLbls,
+            Button nextMissionBtn,
+            TextMeshProUGUI nextMissionTxt)
+        {
+            missionSelectButtons = missionBtns;
+            missionSelectBgs = missionBgs;
+            missionSelectLabels = missionLbls;
+            endedNextMissionButton = nextMissionBtn;
+            endedNextMissionText = nextMissionTxt;
+        }
+
+        public void RefreshMissionSelectUI(int activeMission, int clearedCount)
+        {
+            if (missionSelectButtons == null) return;
+            for (var i = 0; i < missionSelectButtons.Length; i++)
+            {
+                var idx = i + 1;
+                var selected = idx == activeMission;
+                var cleared = clearedCount >= idx;
+                if (missionSelectBgs != null && i < missionSelectBgs.Length && missionSelectBgs[i] != null)
+                {
+                    missionSelectBgs[i].color = selected
+                        ? Palette.Accent
+                        : (cleared ? Palette.WithAlpha(Palette.HealthGreen, 0.25f) : Palette.SecondaryButtonBg);
+                }
+                if (missionSelectLabels != null && i < missionSelectLabels.Length && missionSelectLabels[i] != null)
+                {
+                    var shortTitle = idx switch
+                    {
+                        1 => "ACT I: PIER",
+                        2 => "ACT II: DEPOT",
+                        _ => "ACT III: PEAK"
+                    };
+                    missionSelectLabels[i].text = cleared ? shortTitle + " [CLR]" : shortTitle;
+                    missionSelectLabels[i].color = selected ? Palette.Shadow : Palette.CharacterSecondary;
+                }
+            }
+        }
+
         public void BindTacticalSquadWidgets(
             Image vignetteImg,
             CanvasGroup ctxGroup,
@@ -499,10 +546,16 @@ namespace UI
             EnsureBarSprites();
             WireButtonsAndSliders();
             RefreshPlatformControls();
-            ApplyImmediateState(GameState.Title);
+            var initialState = GameManager.Instance != null
+                ? GameManager.Instance.CurrentState
+                : (SaveManager.PendingAutoDeploy ? GameState.Cutscene : GameState.Title);
+            ApplyImmediateState(initialState);
             RefreshVolumeLabels();
             RefreshWeaponBar();
             RefreshArmoryUI();
+            var save = SaveManager.EnsureInstance();
+            var activeM = GameManager.Instance != null ? GameManager.Instance.CurrentMissionIndex : StoryDirector.ActiveMissionIndex;
+            RefreshMissionSelectUI(activeM, save.Data.highestMissionCompleted);
         }
 
         private void OnDestroy()
@@ -573,6 +626,21 @@ namespace UI
             {
                 endedTitleButton.onClick.RemoveAllListeners();
                 endedTitleButton.onClick.AddListener(() => GameManager.Instance?.ReturnToTitle());
+            }
+            if (endedNextMissionButton != null)
+            {
+                endedNextMissionButton.onClick.RemoveAllListeners();
+                endedNextMissionButton.onClick.AddListener(() => GameManager.Instance?.LoadNextMission());
+            }
+            if (missionSelectButtons != null)
+            {
+                for (var i = 0; i < missionSelectButtons.Length; i++)
+                {
+                    var mIdx = i + 1;
+                    if (missionSelectButtons[i] == null) continue;
+                    missionSelectButtons[i].onClick.RemoveAllListeners();
+                    missionSelectButtons[i].onClick.AddListener(() => GameManager.Instance?.SelectTitleMission(mIdx));
+                }
             }
             if (nvgToggleButton != null)
             {
@@ -1003,7 +1071,7 @@ namespace UI
             }
             if (radarUavStatusText != null)
             {
-                radarUavStatusText.text = uavOnline ? "UAV SWEEP // LIVE" : "TAC-RADAR // HAJIN DMZ";
+                radarUavStatusText.text = uavOnline ? "UAV SWEEP // LIVE" : StoryDirector.GetMissionTitle(StoryDirector.ActiveMissionIndex);
                 radarUavStatusText.color = uavOnline ? Palette.RadarGreen : Palette.MutedText;
             }
             if (hpFillImage != null && isRegen)
@@ -1449,9 +1517,13 @@ namespace UI
 
         public void PopulateEndedSummary(bool victory, int score, int highScore, int kills, int wave, bool isNewRecord)
         {
+            var mission = StoryDirector.ActiveMissionIndex;
+            var hasNext = victory && (GameManager.Instance != null ? GameManager.Instance.HasNextMission : mission < StoryDirector.CampaignMissionCount);
             if (endedTitleText != null)
             {
-                endedTitleText.text = victory ? "CAMPAIGN VICTORY // SECTOR SECURED" : "K.I.A. // MISSION FAILED";
+                endedTitleText.text = victory
+                    ? (hasNext ? $"ACT 0{mission} COMPLETE // SECTOR SECURED" : "CAMPAIGN VICTORY // PROJECT HELIOS STOPPED")
+                    : $"K.I.A. // MISSION 0{mission} FAILED";
                 endedTitleText.color = victory ? Palette.HealthGreen : Palette.EnemySecondary;
             }
             if (endedAccentStripe != null)
@@ -1460,8 +1532,16 @@ namespace UI
             }
             if (endedScoreText != null) endedScoreText.text = score.ToString("N0") + " PTS";
             if (endedBestText != null) endedBestText.text = isNewRecord ? "NEW RECORD // " + highScore.ToString("N0") : "BEST // " + highScore.ToString("N0");
-            if (endedStatsText != null) endedStatsText.text = "ELIMINATIONS: " + kills + "   |   STAGE REACHED: " + wave + " / " + StoryDirector.FinalCampaignStage;
+            if (endedStatsText != null) endedStatsText.text = $"MISSION 0{mission}/{StoryDirector.CampaignMissionCount}   |   ELIMINATIONS: {kills}   |   STAGE: {wave}/{StoryDirector.FinalCampaignStage}";
             if (endedNarrativeText != null) endedNarrativeText.text = StoryDirector.GetEndedDebrief(victory, wave, kills);
+            if (endedNextMissionButton != null)
+            {
+                endedNextMissionButton.gameObject.SetActive(hasNext);
+                if (hasNext && endedNextMissionText != null)
+                {
+                    endedNextMissionText.text = mission == 1 ? "NEXT: ACT II ->" : "NEXT: ACT III ->";
+                }
+            }
         }
 
         private void OpenIntel()
@@ -1510,7 +1590,8 @@ namespace UI
             if (radioBodyText != null) radioBodyText.text = body;
             if (radioAccentStripe != null)
             {
-                radioAccentStripe.color = callsign.Contains("VOLKOV") ? Palette.EnemySecondary : Palette.Accent;
+                var hostile = callsign.Contains("DRAGIC") || callsign.Contains("KASTNER") || callsign.Contains("RADEK");
+                radioAccentStripe.color = hostile ? Palette.EnemySecondary : Palette.Accent;
             }
 
             if (_radioRoutine != null) StopCoroutine(_radioRoutine);

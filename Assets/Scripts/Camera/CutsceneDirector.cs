@@ -14,14 +14,14 @@ namespace Camera
     {
         IntroInfil,
         Act2GateBreach,
-        Act3BossVolkov,
+        FinalBossIntro,
         VictoryEvac
     }
 
     /// <summary>
-    /// Call-of-Duty-inspired in-engine cutscene director handling widescreen cinema letterbox,
+    /// Tactically framed in-engine cutscene director handling widescreen cinema letterbox,
     /// bottom-left green typewriter mission stamps, multi-sector flyover/orbit camera shots,
-    /// sliding perimeter blast gates, and EVAC-6 Blackhawk extraction sequences.
+    /// sliding perimeter blast gates, and VALKYRIE-6 Blackhawk extraction sequences.
     /// </summary>
     public sealed class CutsceneDirector : MonoBehaviour
     {
@@ -169,15 +169,16 @@ namespace Camera
                 case CutsceneType.Act2GateBreach:
                     OpenGateImmediate(1);
                     break;
-                case CutsceneType.Act3BossVolkov:
+                case CutsceneType.FinalBossIntro:
                     OpenGateImmediate(1);
                     OpenGateImmediate(2);
                     break;
-                case CutsceneType.VictoryEvac when evacChopperRoot != null:
+                case CutsceneType.VictoryEvac when evacChopperRoot != null && StoryDirector.ActiveMissionIndex >= StoryDirector.CampaignMissionCount:
                     evacChopperRoot.gameObject.SetActive(true);
                     evacChopperRoot.SetPositionAndRotation(new Vector3(0f, 0.04f, 42f), Quaternion.Euler(0f, 155f, 0f));
                     _rotorSpinSpeed = 240f;
                     break;
+                case CutsceneType.VictoryEvac:
                 case CutsceneType.IntroInfil:
                     break;
                 default:
@@ -214,8 +215,8 @@ namespace Camera
                 case CutsceneType.Act2GateBreach:
                     yield return RunAct2BreachShot();
                     break;
-                case CutsceneType.Act3BossVolkov:
-                    yield return RunAct3BossVolkovShot();
+                case CutsceneType.FinalBossIntro:
+                    yield return RunFinalBossIntroShot();
                     break;
                 case CutsceneType.VictoryEvac:
                     yield return RunVictoryEvacShot();
@@ -241,14 +242,29 @@ namespace Camera
         {
             SquadDirector.Instance?.PlaceSquadFormation(new Vector3(0f, 0.02f, -43f), Vector3.forward, resetHp: false);
 
-            const string fullStamp = "OPERATION: NIGHTFALL\nHAJIN DMZ // KOREAN PENINSULA // 03:18 HRS\nTASK FORCE 141 - CPT. PRICE, GHOST & GAZ";
-            const string speaker = "CPT. PRICE // TF-141 ACTUAL";
-            const string line1 = "Eyes up, Bravo-6. Kronos mercenaries hold the checkpoint road, central fuel depot, and northern helipad.";
-            const string line2 = "Stack up at South Gate! Clear the garrison and let Hammer blow those blast locks wide open.";
+            var m = StoryDirector.ActiveMissionIndex;
+            var fullStamp = m switch
+            {
+                1 => "ACT I // BLACKWATER PIER\nCOASTAL CUSTOMS DOCKYARD // 21:40 HRS\nVANGUARD-09: VANCE, ROURKE, KOZLOWSKI & REYES",
+                2 => "ACT II // IRON CORRIDOR\nAMBER GORGE RAIL DEPOT // 05:12 HRS\nSPECTRE DETACHMENT // FREIGHT INTERCEPT",
+                _ => "ACT III // SILENT PEAK\nBLACKCREST ALPINE CITADEL // 23:55 HRS\nFINAL ASSAULT // PROJECT HELIOS"
+            };
+            const string speaker = "MAJ. ROURKE // IRONWOOD-1";
+            var line1 = m switch
+            {
+                1 => "Eyes up, Vanguard-09. Ironward mercenaries hold Blackwater Pier, fuel docks, and the northern railhead.",
+                2 => "Dawn clock's ticking. Ironward seized the canyon switchyard — track down Kastner's warhead cargo before tunnel exit.",
+                _ => "Last climb, Spectre. Radek's Helios array is arming above the ridge — push the courtyard and crush Apex-01."
+            };
+            var line2 = m switch
+            {
+                1 => "Stack on the customs jersey barriers! Clear the outer sentries and blow Pier Gate 1.",
+                2 => "Drop the canyon rail pickets and disarm that switchyard gate — keep heads down around the tanker cars.",
+                _ => "Cut through the citadel garrison and hit the Portcullis lock! Reyes, stand by with C4."
+            };
 
-            // Shot 1: Sweeping high establishing drone flyover North -> South across the whole 3-sector compound
             yield return AnimateCameraShot(
-                duration: 2.35f,
+                duration: 2.25f,
                 startPos: new Vector3(14f, 24f, 52f),
                 endPos: new Vector3(-8f, 18f, 4f),
                 startLook: new Vector3(0f, 1.5f, 18f),
@@ -259,9 +275,8 @@ namespace Camera
                 speaker: speaker,
                 caption: line1);
 
-            // Shot 2: Dramatic crane dive toward Fireteam Bravo-6 behind South Checkpoint cover
             yield return AnimateCameraShot(
-                duration: 2.15f,
+                duration: 2.05f,
                 startPos: new Vector3(-8f, 14f, -26f),
                 endPos: new Vector3(0f, 8.2f, -51.5f),
                 startLook: new Vector3(0f, 1.0f, -38f),
@@ -278,13 +293,24 @@ namespace Camera
         {
             SquadDirector.Instance?.PlaceSquadFormation(new Vector3(0f, 0.02f, -19.5f), Vector3.forward, resetHp: false);
 
-            const string fullStamp = "ACT II // HAJIN DEPOT\nBLAST GATE ALPHA: BREACHED";
-            const string speaker = "SGT. GAZ // GARRICK-3";
-            const string line = "Fire in the hole! Gate Alpha is down — Bravo-6 pushing into the fuel depot and radar yard!";
+            var m = StoryDirector.ActiveMissionIndex;
+            var fullStamp = m switch
+            {
+                1 => "ACT I // CONTAINER YARD\nPIER SECURITY GATE: BREACHED",
+                2 => "ACT II // FREIGHT SWITCHYARD\nLOCK GATE: BREACHED",
+                _ => "ACT III // HELIOS PLAZA\nCITADEL PORTCULLIS: BREACHED"
+            };
+            var speaker = m == 2 ? "KOZLOWSKI // WRAITH-2" : "CPL. REYES // SPARK-3";
+            var line = m switch
+            {
+                1 => "Fire in the hole! Pier Gate is down — Vanguard pushing into the container yard and coastal radar array!",
+                2 => "Lock blown clean! Moving into the central freight depot — rig charges on the pump valve and switch matrix!",
+                _ => "Portcullis is open! Overload both Helios capacitor pylons before Radek finishes orbital calibration!"
+            };
 
             var triggeredBlast = false;
             var elapsed = 0f;
-            const float total = 3.2f;
+            const float total = 3.0f;
             while (elapsed < total)
             {
                 elapsed += Time.unscaledDeltaTime;
@@ -313,18 +339,34 @@ namespace Camera
             OpenGateImmediate(1);
         }
 
-        private IEnumerator RunAct3BossVolkovShot()
+        private IEnumerator RunFinalBossIntroShot()
         {
             OpenGateImmediate(1);
             OpenGateImmediate(2);
 
-            const string fullStamp = "ACT III // HAJIN COMMAND HELIPAD\nHVT: KOMANDER VOLKOV  [KONNI BTR-82A]";
-            const string speaker = "VOLKOV // KONNI ENCRYPTED";
-            const string line = "You tore through my outer compound, Vanguard. Finish this on the tarmac - IRONCLAD ALPHA engaging!";
+            var m = StoryDirector.ActiveMissionIndex;
+            var fullStamp = m switch
+            {
+                1 => "ACT I // NORTH RAILHEAD\nHVT: CAPT. MARKO DRAGIC [SIEGE-01]",
+                2 => "ACT II // NORTH GORGE SPUR\nHVT: DIR. ELENA KASTNER [BASTION-02]",
+                _ => "ACT III // SUMMIT HELIPAD\nHVT: COL. ARTEM RADEK [APEX-01]"
+            };
+            var speaker = m switch
+            {
+                1 => "CAPT. DRAGIC // IRONWARD NET",
+                2 => "DIR. KASTNER // IRONWARD NET",
+                _ => "COL. RADEK // APEX-01 ENCRYPTED"
+            };
+            var line = m switch
+            {
+                1 => "The freight train already cleared the switch, Nomad — Siege-01 will put Vanguard-09 in the harbor!",
+                2 => "You burned my rail yard for nothing! Bastion-02 holding the tunnel while Helios climbs Blackcrest Peak!",
+                _ => "You climbed all this way for ghosts, Vance. End of the line — APEX-01 weapons free!"
+            };
 
             AudioManager.Instance?.PlayMilestoneSting();
             yield return AnimateCameraShot(
-                duration: 3.1f,
+                duration: 2.9f,
                 startPos: new Vector3(-13f, 8.8f, 29f),
                 endPos: new Vector3(11f, 9.6f, 34f),
                 startLook: new Vector3(0f, 1.4f, 42f),
@@ -343,15 +385,40 @@ namespace Camera
             PlayerController.Instance?.TeleportTo(new Vector3(-1.4f, 0.02f, 35.5f));
             SquadDirector.Instance?.PlaceSquadFormation(new Vector3(-1.0f, 0.02f, 34.8f), Vector3.forward, resetHp: false);
 
+            var m = StoryDirector.ActiveMissionIndex;
+            if (m < StoryDirector.CampaignMissionCount)
+            {
+                var exfilStamp = m == 1
+                    ? "ACT I COMPLETE // BLACKWATER PIER SECURED\nMANIFEST DECRYPTED -> IRON CORRIDOR NORTH"
+                    : "ACT II COMPLETE // IRON CORRIDOR CLEARED\nNEXT VECTOR -> BLACKCREST CITADEL SUMMIT";
+                var speaker12 = m == 1 ? "DIR. CHEN // AEGIS-ACTUAL" : "MAJ. ROURKE // IRONWOOD-1";
+                var line12 = m == 1
+                    ? "Cargo log cracked! Three Helios warheads left north by rail — inserting Vanguard-09 into Iron Corridor Canyon!"
+                    : "Gorge tunnel's open and Radek's uplink pinged Blackcrest Peak! Lock weapons and push to the summit!";
+
+                yield return AnimateCameraShot(
+                    duration: 2.4f,
+                    startPos: new Vector3(-8f, 6.2f, 28f),
+                    endPos: new Vector3(6f, 9.5f, 49f),
+                    startLook: new Vector3(0f, 1.2f, 36f),
+                    endLook: new Vector3(0f, 2.0f, 54f),
+                    startFov: 48f,
+                    endFov: 54f,
+                    fullStamp: exfilStamp,
+                    speaker: speaker12,
+                    caption: line12);
+                yield break;
+            }
+
             if (evacChopperRoot != null)
             {
                 evacChopperRoot.gameObject.SetActive(true);
             }
             _rotorSpinSpeed = 980f;
 
-            const string fullStamp = "MISSION COMPLETE // HAJIN DMZ SECURED\nEVAC-6 BLACKHAWK TOUCHDOWN";
-            const string speaker = "CPT. PRICE // TF-141 ACTUAL";
-            const string line = "Hot LZ secured! On the bird, Bravo-6 — good fighting today, Vanguard!";
+            const string fullStamp = "OPERATION COMPLETE // PROJECT HELIOS DESTROYED\nVALKYRIE-6 BLACKHAWK TOUCHDOWN";
+            const string speaker = "MAJ. ROURKE // IRONWOOD-1";
+            const string line = "Helios array cold, Radek down! Everyone aboard Valkyrie-6 — Spectre Detachment going home!";
 
             var startFlight = new Vector3(-16f, 24f, 68f);
             var hoverPoint = new Vector3(0f, 5.2f, 44f);

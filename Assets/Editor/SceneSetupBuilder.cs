@@ -29,11 +29,12 @@ namespace TopDownShooter.Editor
     public static class SceneSetupBuilder
     {
         private static readonly int BaseMap = Shader.PropertyToID("_BaseMap");
-        private const string ScenePath = "Assets/Scenes/SampleScene.unity";
+        private static readonly int SkyTint = Shader.PropertyToID("_SkyTint");
+        private static readonly int GroundColor = Shader.PropertyToID("_GroundColor");
+        private static readonly int Exposure = Shader.PropertyToID("_Exposure");
         private const string MaterialsDir = "Assets/Materials";
         private const string TexturesDir = "Assets/Textures";
         private const string FbxAssetPath = "Assets/Models/SM_Vanguard_Assets.fbx";
-        private const string VolumeProfilePath = "Assets/Settings/SampleSceneProfile.asset";
         private const string InputActionsPath = "Assets/InputSystem_Actions.inputactions";
 
         private struct VanguardMeshPack
@@ -87,11 +88,17 @@ namespace TopDownShooter.Editor
             public Mesh EnvSandbagWall;
             public Mesh EnvHMMWV;
             public Mesh PropExplosiveBarrel;
+            public Mesh EnvPineTree;
+            public Mesh EnvRockCluster;
+            public Mesh EnvDmzHill;
+            public Mesh EnvJerseyBarrier;
+            public Mesh EnvRailFlatcar;
         }
 
         private struct ArenaMaterialPack
         {
             public Material Floor;
+            public Material Road;
             public Material Walls;
             public Material Props;
             public Material Trim;
@@ -101,8 +108,14 @@ namespace TopDownShooter.Editor
             public Material Rust;
             public Material FuelSteel;
             public Material DmzEarth;
+            public Material DmzHill;
+            public Material Foliage;
+            public Material Rock;
+            public Material JerseyBarrier;
             public Material Sandbag;
             public Material BarrelHazard;
+            public Material HeliosGlow;
+            public Material RailSteel;
         }
 
         private struct CampaignCutsceneProps
@@ -118,16 +131,16 @@ namespace TopDownShooter.Editor
         [MenuItem("Vanguard/Rebuild Top-Down Shooter Scene")]
         public static void BuildCompleteScene()
         {
+            BuildAllCampaignScenes();
+        }
+
+        [MenuItem("Vanguard/Rebuild All 3 Campaign Scenes")]
+        public static void BuildAllCampaignScenes()
+        {
             EnsureFolders();
             EnsurePhysicsLayersAndMatrix();
             ConfigureUrpAssetOptimization();
 
-            // 1. Persisted 256x256 Compressed PBR Textures & Custom Blender FBX Meshes
-            var floorTex = SaveTextureAsset(CreateAsphaltTexture256(), TexturesDir + "/Tex_ArenaFloorGrid.png", true);
-            var concreteTex = SaveTextureAsset(CreateConcreteTexture256(), TexturesDir + "/Tex_CompoundConcrete.png", true);
-            var dmzEarthTex = SaveTextureAsset(CreateDmzEarthTexture256(), TexturesDir + "/Tex_TerrainDMZ.png", true);
-            var corrugatedTex = SaveTextureAsset(CreateCorrugatedMetalTexture256(), TexturesDir + "/Tex_CorrugatedMetal.png", true);
-            var sandbagTex = SaveTextureAsset(CreateSandbagTexture256(), TexturesDir + "/Tex_SandbagFabric.png", true);
             var solidSprite = SaveSpriteAsset(UISpriteFactory.GetSolidRectSprite().texture, TexturesDir + "/Tex_SolidRect.png");
             var roundedSprite = SaveSpriteAsset(UISpriteFactory.GetRoundedRectSprite().texture, TexturesDir + "/Tex_RoundedRect.png");
             var shieldSprite = SaveSpriteAsset(UISpriteFactory.GetShieldIcon().texture, TexturesDir + "/Tex_ShieldIcon.png");
@@ -138,41 +151,124 @@ namespace TopDownShooter.Editor
 
             var meshes = LoadVanguardMeshes();
 
-            // 2. Persisted Grounded Military Palette Materials & Skybox (All GPU Instanced)
-            var matFloor = SaveOrUpdateLitMaterial("Mat_Floor", Palette.Floor, 0.05f, 0.28f, false, 0f, floorTex, new Vector2(22f, 32f));
-            var matWalls = SaveOrUpdateLitMaterial("Mat_Walls", Palette.Walls, 0.06f, 0.24f, false, 0f, concreteTex, new Vector2(4f, 1.5f));
-            var matProps = SaveOrUpdateLitMaterial("Mat_Props", Palette.Props, 0.06f, 0.26f, false, 0f, concreteTex, new Vector2(2f, 1.5f));
-            var matTrim = SaveOrUpdateLitMaterial("Mat_TrimDark", Palette.Gunmetal, 0.62f, 0.46f, false, 0f);
-            var matPlayerPrimary = SaveOrUpdateLitMaterial("Mat_PlayerPrimary", Palette.CharacterPrimary, 0.12f, 0.34f, false, 0f);
-            var matPlayerSecondary = SaveOrUpdateLitMaterial("Mat_PlayerSecondary", Palette.CoyoteTan, 0.10f, 0.30f, false, 0f);
-            var matAccentEmissive = SaveOrUpdateLitMaterial("Mat_AccentEmissive", Palette.HazardYellow, 0.08f, 0.30f, false, 0f);
-            var matCyanGlow = SaveOrUpdateLitMaterial("Mat_CyanGlow", Palette.NvgGreen, 0.25f, 0.68f, false, 0f);
-            var matHealthGlow = SaveOrUpdateLitMaterial("Mat_HealthEmissive", Palette.SodiumAmber, 0.15f, 0.45f, true, 1.85f);
-            var matContainerRust = SaveOrUpdateLitMaterial("Mat_ContainerRust", Palette.EnemyPrimary, 0.18f, 0.32f, false, 0f, corrugatedTex, new Vector2(2f, 1.2f));
-            var matContainerOlive = SaveOrUpdateLitMaterial("Mat_ContainerOlive", Palette.CharacterPrimary, 0.18f, 0.32f, false, 0f, corrugatedTex, new Vector2(2f, 1.2f));
-            var matFuelSteel = SaveOrUpdateLitMaterial("Mat_FuelSteel", Palette.GuardTowerDark, 0.42f, 0.48f, false, 0f);
-            var matDmzEarth = SaveOrUpdateLitMaterial("Mat_DmzEarth", Palette.DmzRidgeEarth, 0.02f, 0.16f, false, 0f, dmzEarthTex, new Vector2(10f, 4f));
-            var matSandbag = SaveOrUpdateLitMaterial("Mat_Sandbag", Palette.CoyoteTan, 0.04f, 0.20f, false, 0f, sandbagTex, new Vector2(2f, 1.5f));
-            var matBarrelHazard = SaveOrUpdateLitMaterial("Mat_BarrelHazard", Palette.BarrelHazardRed, 0.26f, 0.42f, false, 0f);
-            var matSkybox = SaveOrUpdateSkyboxMaterial("Mat_ArenaSkybox");
+            var scenePaths = new string[StoryDirector.CampaignMissionCount];
+            for (var m = 1; m <= StoryDirector.CampaignMissionCount; m++)
+            {
+                scenePaths[m - 1] = "Assets/Scenes/" + StoryDirector.GetMissionSceneName(m) + ".unity";
+                BuildMissionScene(
+                    m,
+                    scenePaths[m - 1],
+                    meshes,
+                    solidSprite,
+                    roundedSprite,
+                    shieldSprite,
+                    crosshairSprite,
+                    circleSprite,
+                    chevronSprite,
+                    damageVignetteSprite);
+            }
+
+            var buildScenes = new EditorBuildSettingsScene[scenePaths.Length];
+            for (var i = 0; i < scenePaths.Length; i++)
+            {
+                buildScenes[i] = new EditorBuildSettingsScene(scenePaths[i], true);
+            }
+            EditorBuildSettings.scenes = buildScenes;
+
+            if (File.Exists("Assets/Scenes/SampleScene.unity"))
+            {
+                AssetDatabase.DeleteAsset("Assets/Scenes/SampleScene.unity");
+            }
+            if (File.Exists("Assets/Settings/SampleSceneProfile.asset"))
+            {
+                AssetDatabase.DeleteAsset("Assets/Settings/SampleSceneProfile.asset");
+            }
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            EditorSceneManager.OpenScene(scenePaths[0], OpenSceneMode.Single);
+            Debug.Log("[SceneSetupBuilder] Rebuilt all 3 Campaign Scenes and registered them cleanly in EditorBuildSettings.");
+        }
+
+        private static void BuildMissionScene(
+            int missionIndex,
+            string scenePath,
+            VanguardMeshPack meshes,
+            Sprite solidSprite,
+            Sprite roundedSprite,
+            Sprite shieldSprite,
+            Sprite crosshairSprite,
+            Sprite circleSprite,
+            Sprite chevronSprite,
+            Sprite damageVignetteSprite)
+        {
+            var mTag = "_M" + missionIndex;
+            var floorColor = missionIndex switch
+            {
+                1 => Palette.M1ConcreteApron,
+                2 => Palette.RoadAsphalt,
+                _ => Palette.M3CitadelStone
+            };
+            var earthColor = missionIndex switch
+            {
+                1 => Palette.M1PierWater,
+                2 => Palette.M2CanyonEarth,
+                _ => Palette.DmzRidgeEarth
+            };
+            var wallColor = missionIndex switch
+            {
+                1 => Palette.Walls,
+                2 => Palette.M2CanyonEarth,
+                _ => Palette.M3CitadelStone
+            };
+            var hillTint = missionIndex switch
+            {
+                1 => Palette.AmbientSky,
+                2 => Palette.M2CanyonEarth,
+                _ => Palette.ButtonTintIdle
+            };
+
+            // Shared character / weapon / prop materials + per-mission terrain/skybox materials
+            var matFloor = SaveOrUpdateLitMaterial("Mat_Floor" + mTag, floorColor, 0.03f, missionIndex == 1 ? 0.24f : 0.16f, false, 0f);
+            var matRoad = SaveOrUpdateLitMaterial("Mat_RoadAsphalt" + mTag, Palette.RoadAsphalt, 0.02f, 0.15f, false, 0f);
+            var matWalls = SaveOrUpdateLitMaterial("Mat_Walls" + mTag, wallColor, 0.03f, 0.18f, false, 0f);
+            var matProps = SaveOrUpdateLitMaterial("Mat_Props", Palette.Props, 0.03f, 0.20f, false, 0f);
+            var matTrim = SaveOrUpdateLitMaterial("Mat_TrimDark", Palette.Gunmetal, 0.45f, 0.36f, false, 0f);
+            var matPlayerPrimary = SaveOrUpdateLitMaterial("Mat_PlayerPrimary", Palette.CharacterPrimary, 0.06f, 0.24f, false, 0f);
+            var matPlayerSecondary = SaveOrUpdateLitMaterial("Mat_PlayerSecondary", Palette.CoyoteTan, 0.05f, 0.22f, false, 0f);
+            var matAccentEmissive = SaveOrUpdateLitMaterial("Mat_AccentEmissive", Palette.HazardYellow, 0.05f, 0.22f, false, 0f);
+            var matCyanGlow = SaveOrUpdateLitMaterial("Mat_CyanGlow", Palette.NvgGreen, 0.18f, 0.45f, false, 0f);
+            var matHealthGlow = SaveOrUpdateLitMaterial("Mat_HealthEmissive", Palette.SodiumAmber, 0.10f, 0.32f, true, 1.85f);
+            var matHeliosGlow = SaveOrUpdateLitMaterial("Mat_HeliosCyanGlow", Palette.M3HeliosCoreCyan, 0.12f, 0.38f, true, 2.25f);
+            var matContainerRust = SaveOrUpdateLitMaterial("Mat_ContainerRust", Palette.EnemyPrimary, 0.10f, 0.24f, false, 0f);
+            var matContainerOlive = SaveOrUpdateLitMaterial("Mat_ContainerOlive", Palette.CharacterPrimary, 0.10f, 0.24f, false, 0f);
+            var matFuelSteel = SaveOrUpdateLitMaterial("Mat_FuelSteel", Palette.GuardTowerDark, 0.32f, 0.36f, false, 0f);
+            var matRailSteel = SaveOrUpdateLitMaterial("Mat_RailSteel", Palette.M2RailSteel, 0.42f, 0.38f, false, 0f);
+            var matDmzEarth = SaveOrUpdateLitMaterial("Mat_DmzEarth" + mTag, earthColor, missionIndex == 1 ? 0.18f : 0.0f, missionIndex == 1 ? 0.55f : 0.12f, false, 0f);
+            var matDmzHill = SaveOrUpdateLitMaterial("Mat_DmzHill" + mTag, hillTint, 0.0f, 0.14f, false, 0f);
+            var matFoliage = SaveOrUpdateLitMaterial("Mat_DmzFoliage", Palette.DmzPineFoliage, 0.0f, 0.14f, false, 0f);
+            var matRock = SaveOrUpdateLitMaterial("Mat_DmzRock" + mTag, missionIndex == 2 ? Palette.M2CanyonEarth : Palette.ButtonTintIdle, 0.02f, 0.16f, false, 0f);
+            var matJerseyBarrier = SaveOrUpdateLitMaterial("Mat_JerseyBarrier", Palette.ButtonTintIdle, 0.02f, 0.22f, false, 0f);
+            var matSandbag = SaveOrUpdateLitMaterial("Mat_Sandbag", Palette.CoyoteTan, 0.02f, 0.16f, false, 0f);
+            var matBarrelHazard = SaveOrUpdateLitMaterial("Mat_BarrelHazard", Palette.ButtonTintIdle, 0.18f, 0.34f, false, 0f);
+            var matSkybox = SaveOrUpdateSkyboxMaterial("Mat_ArenaSkybox" + mTag, missionIndex);
 
             EnsureAllMaterialsInstanced();
 
-            // 3. Configure URP Global Volume Profile
-            var profile = ConfigureVolumeProfile();
+            var profile = ConfigureVolumeProfile(missionIndex);
 
-            // 4. Open/Reset Scene Hierarchy Cleanly
-            var scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+            var scene = File.Exists(scenePath)
+                ? EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single)
+                : EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             ClearOldGeneratedRoots();
 
-            // 5. Scene Lighting, Fog, Skybox, Camera, Volume
-            ConfigureEnvironmentLighting(matSkybox, profile);
+            ConfigureEnvironmentLighting(matSkybox, profile, missionIndex);
             var mainCam = ConfigureMainCamera();
 
-            // 6. Hajin DMZ 3-Sector Compound Environment + Extraction Blackhawk
             var envMats = new ArenaMaterialPack
             {
                 Floor = matFloor,
+                Road = matRoad,
                 Walls = matWalls,
                 Props = matProps,
                 Trim = matTrim,
@@ -182,19 +278,21 @@ namespace TopDownShooter.Editor
                 Rust = matContainerRust,
                 FuelSteel = matFuelSteel,
                 DmzEarth = matDmzEarth,
+                DmzHill = matDmzHill,
+                Foliage = matFoliage,
+                Rock = matRock,
+                JerseyBarrier = matJerseyBarrier,
                 Sandbag = matSandbag,
-                BarrelHazard = matBarrelHazard
+                BarrelHazard = matBarrelHazard,
+                HeliosGlow = matHeliosGlow,
+                RailSteel = matRailSteel
             };
-            var campaignProps = BuildArenaEnvironment(envMats, meshes);
+            var campaignProps = BuildArenaEnvironment(envMats, meshes, missionIndex);
 
-            // 7. Player Rig (Modern Tactical Operator + 4 Real-World Weapons)
             var inputAsset = AssetDatabase.LoadAssetAtPath<InputActionAsset>(InputActionsPath);
             var player = BuildPlayerRig(inputAsset, matPlayerPrimary, matPlayerSecondary, matCyanGlow, meshes);
-
-            // 8. Cinemachine Top-Down Rig
             var cameraRig = BuildCameraRig(player.transform, mainCam);
 
-            // 9. GameSystems & UI Canvas (SaveManager first before GameManager)
             var systemsRoot = new GameObject("GameSystems");
             var projPoolRoot = new GameObject("ProjectilePoolRoot").transform;
             projPoolRoot.SetParent(systemsRoot.transform, false);
@@ -231,6 +329,7 @@ namespace TopDownShooter.Editor
                 meshes.HeadSkullMask);
 
             var spawner = systemsRoot.AddComponent<EnemySpawner>();
+            spawner.SetMissionIndex(missionIndex);
             spawner.BindMeshes(
                 meshes.ChaserTorso,
                 meshes.ChaserHead,
@@ -250,7 +349,7 @@ namespace TopDownShooter.Editor
                 meshes.PropSabotageTerminal,
                 meshes.PropC4Charge);
 
-            var ui = BuildGameCanvasAndUI(systemsRoot, solidSprite, roundedSprite, shieldSprite, crosshairSprite, circleSprite, chevronSprite, damageVignetteSprite);
+            var ui = BuildGameCanvasAndUI(missionIndex, systemsRoot, solidSprite, roundedSprite, shieldSprite, crosshairSprite, circleSprite, chevronSprite, damageVignetteSprite);
             var cutscene = systemsRoot.AddComponent<CutsceneDirector>();
             cutscene.BindSceneProps(
                 campaignProps.Gate1Left,
@@ -268,9 +367,8 @@ namespace TopDownShooter.Editor
 
             EditorSceneManager.MarkSceneDirty(scene);
             AssetDatabase.SaveAssets();
-            EditorSceneManager.SaveScene(scene, ScenePath);
-            AssetDatabase.Refresh();
-            Debug.Log("[SceneSetupBuilder] Successfully rebuilt Store Edition 2.0 SampleScene.");
+            EditorSceneManager.SaveScene(scene, scenePath);
+            Debug.Log("[SceneSetupBuilder] Rebuilt mission scene: " + scenePath);
         }
 
         private static VanguardMeshPack LoadVanguardMeshes()
@@ -349,6 +447,11 @@ namespace TopDownShooter.Editor
             pack.EnvSandbagWall = Get("Mesh_Env_SandbagWall");
             pack.EnvHMMWV = Get("Mesh_Env_HMMWV");
             pack.PropExplosiveBarrel = Get("Mesh_Prop_ExplosiveBarrel");
+            pack.EnvPineTree = Get("Mesh_Env_PineTree");
+            pack.EnvRockCluster = Get("Mesh_Env_RockCluster");
+            pack.EnvDmzHill = Get("Mesh_Env_DmzHill");
+            pack.EnvJerseyBarrier = Get("Mesh_Env_JerseyBarrier");
+            pack.EnvRailFlatcar = Get("Mesh_Env_RailFlatcar");
 
             Debug.Log("[SceneSetupBuilder] Loaded " + byName.Count + " Blender FBX meshes from " + FbxAssetPath);
             return pack;
@@ -426,144 +529,6 @@ namespace TopDownShooter.Editor
             }
         }
 
-        private static float Hash2D(int x, int y, int seed)
-        {
-            var n = x * 374761393 + y * 668265263 + seed * 1274126177;
-            n = (n ^ (n >> 13)) * 1274126177;
-            return ((n ^ (n >> 16)) & 0x7fffffff) / (float)0x7fffffff;
-        }
-
-        private static Texture2D CreateAsphaltTexture256()
-        {
-            const int size = 256;
-            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true);
-            var pixels = new Color32[size * size];
-            for (var y = 0; y < size; y++)
-            {
-                for (var x = 0; x < size; x++)
-                {
-                    var grain = Hash2D(x, y, 11) * 0.14f + Hash2D(x >> 2, y >> 2, 23) * 0.10f;
-                    var seam = (x % 64 < 2 || y % 64 < 2) ? -0.10f : 0f;
-                    var crack = (Hash2D(x >> 3, y >> 3, 41) > 0.88f && ((x + y * 2) % 13 == 0)) ? -0.14f : 0f;
-                    var v = Mathf.Clamp01(0.72f + grain + seam + crack);
-                    pixels[y * size + x] = new Color(v * 0.96f, v * 0.98f, v, 1f);
-                }
-            }
-            tex.SetPixels32(pixels);
-            tex.Apply(true);
-            return tex;
-        }
-
-        private static Texture2D CreateConcreteTexture256()
-        {
-            const int size = 256;
-            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true);
-            var pixels = new Color32[size * size];
-            for (var y = 0; y < size; y++)
-            {
-                for (var x = 0; x < size; x++)
-                {
-                    var speckle = Hash2D(x, y, 53) * 0.12f + Hash2D(x >> 3, y >> 3, 67) * 0.12f;
-                    var slabJoint = (y % 64 == 0 || x % 128 == 0) ? -0.15f : 0f;
-                    var tieHole = ((x % 64 == 16 || x % 64 == 48) && (y % 64 == 16 || y % 64 == 48) && (x % 64 - 16) * (x % 64 - 16) < 2) ? -0.18f : 0f;
-                    var v = Mathf.Clamp01(0.76f + speckle + slabJoint + tieHole);
-                    pixels[y * size + x] = new Color(v, v * 0.99f, v * 0.95f, 1f);
-                }
-            }
-            tex.SetPixels32(pixels);
-            tex.Apply(true);
-            return tex;
-        }
-
-        private static Texture2D CreateDmzEarthTexture256()
-        {
-            const int size = 256;
-            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true);
-            var pixels = new Color32[size * size];
-            for (var y = 0; y < size; y++)
-            {
-                for (var x = 0; x < size; x++)
-                {
-                    var macro = Hash2D(x >> 4, y >> 4, 91) * 0.20f + Hash2D(x >> 2, y >> 2, 103) * 0.14f;
-                    var fine = Hash2D(x, y, 115) * 0.12f;
-                    var v = Mathf.Clamp01(0.66f + macro + fine);
-                    pixels[y * size + x] = new Color(v * 0.92f, v, v * 0.84f, 1f);
-                }
-            }
-            tex.SetPixels32(pixels);
-            tex.Apply(true);
-            return tex;
-        }
-
-        private static Texture2D CreateCorrugatedMetalTexture256()
-        {
-            const int size = 256;
-            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true);
-            var pixels = new Color32[size * size];
-            for (var y = 0; y < size; y++)
-            {
-                for (var x = 0; x < size; x++)
-                {
-                    var rib = Mathf.Sin((x / 256f) * Mathf.PI * 32f) * 0.14f;
-                    var wear = Hash2D(x >> 1, y >> 2, 137) * 0.10f;
-                    var frame = (y < 10 || y > 246) ? -0.12f : 0f;
-                    var v = Mathf.Clamp01(0.78f + rib + wear + frame);
-                    pixels[y * size + x] = new Color(v, v * 0.98f, v * 0.96f, 1f);
-                }
-            }
-            tex.SetPixels32(pixels);
-            tex.Apply(true);
-            return tex;
-        }
-
-        private static Texture2D CreateSandbagTexture256()
-        {
-            const int size = 256;
-            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true);
-            var pixels = new Color32[size * size];
-            for (var y = 0; y < size; y++)
-            {
-                var row = y / 32;
-                var xShift = (row % 2) * 32;
-                var localY = y % 32;
-                for (var x = 0; x < size; x++)
-                {
-                    var localX = (x + xShift) % 64;
-                    var border = (localY < 3 || localY > 28 || localX < 3 || localX > 60) ? -0.22f : 0f;
-                    var weave = (((x + y) & 1) == 0 ? 0.04f : -0.04f) + Hash2D(x, y, 179) * 0.08f;
-                    var v = Mathf.Clamp01(0.84f + border + weave);
-                    pixels[y * size + x] = new Color(v, v * 0.97f, v * 0.90f, 1f);
-                }
-            }
-            tex.SetPixels32(pixels);
-            tex.Apply(true);
-            return tex;
-        }
-
-        private static Texture2D SaveTextureAsset(Texture2D source, string assetPath, bool repeat)
-        {
-            var png = source.EncodeToPNG();
-            File.WriteAllBytes(assetPath, png);
-            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
-
-            var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
-            if (importer != null)
-            {
-                importer.textureType = TextureImporterType.Default;
-                importer.wrapMode = repeat ? TextureWrapMode.Repeat : TextureWrapMode.Clamp;
-                importer.filterMode = FilterMode.Bilinear;
-                importer.anisoLevel = 4;
-                importer.mipmapEnabled = true;
-                importer.sRGBTexture = true;
-                importer.maxTextureSize = 512;
-                importer.textureCompression = TextureImporterCompression.Compressed;
-                importer.crunchedCompression = true;
-                importer.compressionQuality = 75;
-                importer.SaveAndReimport();
-            }
-            return AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
-        }
-
         private static Sprite SaveSpriteAsset(Texture2D source, string assetPath)
         {
             var png = source.EncodeToPNG();
@@ -589,24 +554,19 @@ namespace TopDownShooter.Editor
             float metallic,
             float smoothness,
             bool emissive,
-            float emissionIntensity,
-            Texture2D mainTex = null,
-            Vector2? tiling = null)
+            float emissionIntensity)
         {
             var path = MaterialsDir + "/" + matName + ".mat";
             var existing = AssetDatabase.LoadAssetAtPath<Material>(path);
-            var generated = Palette.CreateLitMaterial(matName, baseColor, metallic, smoothness, emissive, emissionIntensity, mainTex);
-            if (tiling.HasValue)
-            {
-                generated.mainTextureScale = tiling.Value;
-                if (generated.HasProperty(BaseMap))
-                {
-                    generated.SetTextureScale(BaseMap, tiling.Value);
-                }
-            }
+            var generated = Palette.CreateLitMaterial(matName, baseColor, metallic, smoothness, emissive, emissionIntensity);
 
             if (existing != null)
             {
+                if (existing.HasProperty(BaseMap))
+                {
+                    existing.SetTexture(BaseMap, null);
+                    existing.SetTextureScale(BaseMap, Vector2.one);
+                }
                 existing.shader = generated.shader;
                 existing.CopyPropertiesFromMaterial(generated);
                 existing.enableInstancing = true;
@@ -620,12 +580,33 @@ namespace TopDownShooter.Editor
             return generated;
         }
 
-        private static Material SaveOrUpdateSkyboxMaterial(string matName)
+        private static Material SaveOrUpdateSkyboxMaterial(string matName, int missionIndex)
         {
             var path = MaterialsDir + "/" + matName + ".mat";
             var existing = AssetDatabase.LoadAssetAtPath<Material>(path);
             var generated = Palette.CreateSkyboxMaterial();
             generated.name = matName;
+
+            if (missionIndex == 2)
+            {
+                if (generated.HasProperty("_SkyTint")) generated.SetColor("_SkyTint", Palette.M2DepotSkyTop);
+                if (generated.HasProperty("_GroundColor")) generated.SetColor("_GroundColor", Palette.M2CanyonEarth);
+                if (generated.HasProperty("_AtmosphereThickness")) generated.SetFloat("_AtmosphereThickness", 0.72f);
+                if (generated.HasProperty("_Exposure")) generated.SetFloat("_Exposure", 0.76f);
+            }
+            else if (missionIndex == 3)
+            {
+                if (generated.HasProperty("_SkyTint")) generated.SetColor("_SkyTint", Palette.FromHex("#0D1724"));
+                if (generated.HasProperty("_GroundColor")) generated.SetColor("_GroundColor", Palette.FromHex("#18212C"));
+                if (generated.HasProperty("_AtmosphereThickness")) generated.SetFloat("_AtmosphereThickness", 0.42f);
+                if (generated.HasProperty("_Exposure")) generated.SetFloat("_Exposure", 0.62f);
+            }
+            else
+            {
+                if (generated.HasProperty("_SkyTint")) generated.SetColor("_SkyTint", Palette.SkyboxTop);
+                if (generated.HasProperty("_GroundColor")) generated.SetColor("_GroundColor", Palette.AmbientGround);
+                if (generated.HasProperty("_Exposure")) generated.SetFloat("_Exposure", 0.58f);
+            }
 
             if (existing != null)
             {
@@ -655,13 +636,18 @@ namespace TopDownShooter.Editor
             return comp;
         }
 
-        private static VolumeProfile ConfigureVolumeProfile()
+        private static VolumeProfile ConfigureVolumeProfile(int missionIndex)
         {
-            var profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(VolumeProfilePath);
+            if (!AssetDatabase.IsValidFolder("Assets/Settings"))
+            {
+                AssetDatabase.CreateFolder("Assets", "Settings");
+            }
+            var profilePath = "Assets/Settings/Mission0" + missionIndex + "Profile.asset";
+            var profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(profilePath);
             if (profile == null)
             {
                 profile = ScriptableObject.CreateInstance<VolumeProfile>();
-                AssetDatabase.CreateAsset(profile, VolumeProfilePath);
+                AssetDatabase.CreateAsset(profile, profilePath);
             }
 
             profile.components.RemoveAll(c => c == null);
@@ -676,11 +662,13 @@ namespace TopDownShooter.Editor
             bloom.threshold.overrideState = true;
             bloom.threshold.value = 1.25f;
             bloom.intensity.overrideState = true;
-            bloom.intensity.value = 0.22f;
+            bloom.intensity.value = missionIndex == 3 ? 0.28f : 0.22f;
             bloom.scatter.overrideState = true;
             bloom.scatter.value = 0.55f;
             bloom.tint.overrideState = true;
-            bloom.tint.value = Palette.KeyLightWarm;
+            bloom.tint.value = missionIndex == 2
+                ? Palette.M2KeyLightAmber
+                : (missionIndex == 3 ? Palette.M3HeliosCoreCyan : Palette.KeyLightWarm);
 
             var vignette = EnsureVolumeComponent<Vignette>(profile);
             vignette.active = true;
@@ -694,11 +682,11 @@ namespace TopDownShooter.Editor
             var colorAdj = EnsureVolumeComponent<ColorAdjustments>(profile);
             colorAdj.active = true;
             colorAdj.saturation.overrideState = true;
-            colorAdj.saturation.value = 4f;
+            colorAdj.saturation.value = missionIndex == 2 ? 8f : 4f;
             colorAdj.contrast.overrideState = true;
             colorAdj.contrast.value = 12f;
             colorAdj.postExposure.overrideState = true;
-            colorAdj.postExposure.value = 0.28f;
+            colorAdj.postExposure.value = missionIndex == 2 ? 0.34f : (missionIndex == 3 ? 0.24f : 0.28f);
 
             if (profile.TryGet(out MotionBlur motionBlur) && motionBlur != null)
             {
@@ -736,18 +724,40 @@ namespace TopDownShooter.Editor
             }
         }
 
-        private static void ConfigureEnvironmentLighting(Material skybox, VolumeProfile profile)
+        private static void ConfigureEnvironmentLighting(Material skybox, VolumeProfile profile, int missionIndex)
         {
             RenderSettings.skybox = skybox;
             RenderSettings.ambientMode = AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = Palette.AmbientSky;
-            RenderSettings.ambientEquatorColor = Palette.AmbientEquator;
-            RenderSettings.ambientGroundColor = Palette.AmbientGround;
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.Linear;
-            RenderSettings.fogColor = Palette.SkyboxHorizon;
-            RenderSettings.fogStartDistance = 52f;
-            RenderSettings.fogEndDistance = 158f;
+
+            if (missionIndex == 2)
+            {
+                RenderSettings.ambientSkyColor = Palette.M2DepotSkyHorizon;
+                RenderSettings.ambientEquatorColor = Palette.M2CanyonEarth;
+                RenderSettings.ambientGroundColor = Palette.AmbientGround;
+                RenderSettings.fogColor = Palette.M2DepotSkyHorizon;
+                RenderSettings.fogStartDistance = 62f;
+                RenderSettings.fogEndDistance = 180f;
+            }
+            else if (missionIndex == 3)
+            {
+                RenderSettings.ambientSkyColor = Palette.M3PeakSnow * 0.48f;
+                RenderSettings.ambientEquatorColor = Palette.AmbientEquator;
+                RenderSettings.ambientGroundColor = Palette.AmbientGround;
+                RenderSettings.fogColor = Palette.SkyboxHorizon;
+                RenderSettings.fogStartDistance = 55f;
+                RenderSettings.fogEndDistance = 170f;
+            }
+            else
+            {
+                RenderSettings.ambientSkyColor = Palette.AmbientSky;
+                RenderSettings.ambientEquatorColor = Palette.AmbientEquator;
+                RenderSettings.ambientGroundColor = Palette.AmbientGround;
+                RenderSettings.fogColor = Palette.SkyboxHorizon;
+                RenderSettings.fogStartDistance = 58f;
+                RenderSettings.fogEndDistance = 175f;
+            }
 
             var keyLightGo = GameObject.Find("Directional Light");
             if (keyLightGo == null)
@@ -755,11 +765,15 @@ namespace TopDownShooter.Editor
                 keyLightGo = new GameObject("Directional Light");
                 keyLightGo.AddComponent<Light>();
             }
-            keyLightGo.transform.rotation = Quaternion.Euler(48f, -38f, 0f);
+            keyLightGo.transform.rotation = missionIndex == 2
+                ? Quaternion.Euler(26f, -58f, 0f)
+                : (missionIndex == 3 ? Quaternion.Euler(48f, -32f, 0f) : Quaternion.Euler(44f, -40f, 0f));
             var keyLight = keyLightGo.GetComponent<Light>();
             keyLight.type = LightType.Directional;
-            keyLight.color = Palette.KeyLightWarm;
-            keyLight.intensity = 1.68f;
+            keyLight.color = missionIndex == 2
+                ? Palette.M2KeyLightAmber
+                : (missionIndex == 3 ? Palette.FromHex("#DDEEFF") : Palette.KeyLightWarm);
+            keyLight.intensity = missionIndex == 2 ? 2.15f : (missionIndex == 3 ? 2.05f : 1.85f);
             keyLight.shadows = LightShadows.Soft;
 
             var rimLightGo = new GameObject("DirectionalFillLight")
@@ -771,8 +785,10 @@ namespace TopDownShooter.Editor
             };
             var rimLight = rimLightGo.AddComponent<Light>();
             rimLight.type = LightType.Directional;
-            rimLight.color = Palette.AmbientSky;
-            rimLight.intensity = 0.72f;
+            rimLight.color = missionIndex == 2
+                ? Palette.M2DepotSkyTop
+                : (missionIndex == 3 ? Palette.M3HeliosCoreCyan * 0.75f : Palette.AmbientSky);
+            rimLight.intensity = missionIndex == 2 ? 0.85f : (missionIndex == 3 ? 0.88f : 0.78f);
             rimLight.shadows = LightShadows.None;
 
             var volGo = GameObject.Find("Global Volume");
@@ -824,9 +840,11 @@ namespace TopDownShooter.Editor
 
         private static CampaignCutsceneProps BuildArenaEnvironment(
             ArenaMaterialPack mats,
-            VanguardMeshPack meshes)
+            VanguardMeshPack meshes,
+            int missionIndex)
         {
             var matFloor = mats.Floor;
+            var matRoad = mats.Road;
             var matWalls = mats.Walls;
             var matProps = mats.Props;
             var matTrim = mats.Trim;
@@ -836,13 +854,16 @@ namespace TopDownShooter.Editor
             var matRust = mats.Rust;
             var matFuelSteel = mats.FuelSteel;
             var matDmzEarth = mats.DmzEarth;
+            var matJerseyBarrier = mats.JerseyBarrier;
             var matSandbag = mats.Sandbag;
             var matBarrelHazard = mats.BarrelHazard;
+            var matRailSteel = mats.RailSteel;
+            var matHeliosGlow = mats.HeliosGlow;
 
             var props = new CampaignCutsceneProps();
             var env = new GameObject("ArenaEnvironment");
 
-            // Huge 3-Sector Hajin DMZ Compound Floor (76m x 108m: x[-38..38], z[-52..56])
+            // 3-Sector Playable Compound Floor (76m x 108m: x[-38..38], z[-52..56])
             var floorRoot = new GameObject("ArenaFloor");
             floorRoot.transform.SetParent(env.transform, false);
             var floorCol = floorRoot.AddComponent<BoxCollider>();
@@ -858,18 +879,25 @@ namespace TopDownShooter.Editor
             floorVisual.GetComponent<MeshRenderer>().sharedMaterial = matFloor;
 
             var apron = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            apron.name = "OuterFoundation";
+            apron.name = missionIndex == 1 ? "HarborWaterSurface" : "OuterFoundation";
             apron.transform.SetParent(env.transform, false);
             apron.transform.localPosition = new Vector3(0f, -0.55f, 2f);
-            apron.transform.localScale = new Vector3(156f, 0.4f, 188f);
+            apron.transform.localScale = new Vector3(172f, 0.4f, 204f);
             Object.DestroyImmediate(apron.GetComponent<Collider>());
             apron.GetComponent<MeshRenderer>().sharedMaterial = matDmzEarth;
 
-            // Scenic Hajin DMZ Perimeter Ridges & Mountain Horizon outside playable walls
-            BuildDmzHillsides(env.transform, matDmzEarth, matOlive, matWalls);
+            // Scenic Mid-Poly Perimeter Horizon (Coastal Breakwater / Canyon Gorge / Alpine Peak)
+            BuildDmzHillsides(env.transform, meshes, mats, missionIndex);
 
-            // Central Convoy Asphalt Road Strip & Hazard Road Markings (South Gate -> Helipad)
-            BuildRoadDeck(env.transform, matTrim, matAccent);
+            // Mission-Specific Transit Spine (Pier Road / Twin Steel Rail Corridor / Citadel Causeway)
+            if (missionIndex == 2)
+            {
+                BuildRailCorridorDeck(env.transform, matRoad, matTrim, matRailSteel, matAccent);
+            }
+            else
+            {
+                BuildRoadDeck(env.transform, matRoad, matProps, matAccent);
+            }
 
             // Outer Perimeter Blast Walls framing 3 stepped Sectors
             BuildPerimeterWall(env.transform, "Wall_South", new Vector3(0f, 0f, -52f), new Vector3(57.4f, 2.4f, 1.4f), matWalls, matTrim, matAccent);
@@ -895,69 +923,202 @@ namespace TopDownShooter.Editor
                 matWalls, matTrim, matAccent,
                 out props.Gate2Left, out props.Gate2Right);
 
-            // SECTOR 1 (z: -52..-14): Hajin DMZ South Checkpoint & Convoy Ambush Yard
-            BuildEnvPropMesh(env.transform, "S1_Bunker_West", meshes.EnvBunker, new Vector3(-18.5f, 0f, -24.5f), 18f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
-            BuildEnvPropMesh(env.transform, "S1_Container_SW", meshes.EnvShippingContainer, new Vector3(-14.5f, 0f, -40f), 14f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
-            BuildEnvPropMesh(env.transform, "S1_Container_SE", meshes.EnvShippingContainer, new Vector3(15.5f, 0f, -38f), -12f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
-            BuildEnvPropMesh(env.transform, "S1_Container_NE", meshes.EnvShippingContainer, new Vector3(17.5f, 0f, -22.5f), 86f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
+            if (missionIndex == 2)
+            {
+                // ACT II: IRON CORRIDOR RAIL DEPOT — Armored Tanker Train Consists & Fuel Switchyard
+                // SECTOR 1 (z: -52..-14): Railcar Yard Approach
+                BuildFittedCoverProp(env.transform, "M2_S1_Railcar_W", meshes.EnvRailFlatcar, new Vector3(-14.5f, 0f, -38.5f), 0f, new Vector3(3.0f, 3.8f, 10.6f), matBarrelHazard);
+                BuildFittedCoverProp(env.transform, "M2_S1_Railcar_E", meshes.EnvRailFlatcar, new Vector3(14.5f, 0f, -39.5f), 180f, new Vector3(3.0f, 3.8f, 10.6f), matBarrelHazard);
+                BuildEnvPropMesh(env.transform, "M2_S1_Bunker_West", meshes.EnvBunker, new Vector3(-22.5f, 0f, -24.0f), 18f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+                BuildEnvPropMesh(env.transform, "M2_S1_Container_E", meshes.EnvShippingContainer, new Vector3(22.5f, 0f, -23.0f), 90f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
 
-            BuildFittedCoverProp(env.transform, "S1_HMMWV_West", meshes.EnvHMMWV, new Vector3(-10.5f, 0f, -34.0f), 22f, new Vector3(2.4f, 1.95f, 4.9f), matOlive);
-            BuildFittedCoverProp(env.transform, "S1_HMMWV_East", meshes.EnvHMMWV, new Vector3(10.8f, 0f, -43.5f), -155f, new Vector3(2.4f, 1.95f, 4.9f), matSandbag);
-            BuildFittedCoverProp(env.transform, "S1_Cover_SW", meshes.EnvHescoBarrier, new Vector3(-5.8f, 0f, -38.5f), 12f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
-            BuildFittedCoverProp(env.transform, "S1_Cover_SE", meshes.EnvHescoBarrier, new Vector3(5.8f, 0f, -38.5f), -12f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
-            BuildFittedCoverProp(env.transform, "S1_Cover_MidW", meshes.EnvSandbagWall, new Vector3(-7.8f, 0f, -28.5f), -18f, new Vector3(3.5f, 1.15f, 1.05f), matSandbag);
-            BuildFittedCoverProp(env.transform, "S1_Cover_MidE", meshes.EnvSandbagWall, new Vector3(7.8f, 0f, -28.5f), 18f, new Vector3(3.5f, 1.15f, 1.05f), matSandbag);
-            BuildExplosiveBarrel(env.transform, "Barrel_S1_W", new Vector3(-4.2f, 0f, -32.2f), meshes.PropExplosiveBarrel, matBarrelHazard);
-            BuildExplosiveBarrel(env.transform, "Barrel_S1_E", new Vector3(7.2f, 0f, -23.5f), meshes.PropExplosiveBarrel, matBarrelHazard);
-            BuildFloodlightTower(env.transform, "Pylon_S1_SW", new Vector3(-24.5f, 0f, -48.5f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
-            BuildFloodlightTower(env.transform, "Pylon_S1_SE", new Vector3(24.5f, 0f, -48.5f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
+                BuildFittedCoverProp(env.transform, "M2_S1_HMMWV_W", meshes.EnvHMMWV, new Vector3(-7.8f, 0f, -33.0f), 20f, new Vector3(2.4f, 1.95f, 4.9f), matOlive);
+                BuildFittedCoverProp(env.transform, "M2_S1_HMMWV_E", meshes.EnvHMMWV, new Vector3(7.8f, 0f, -43.0f), -160f, new Vector3(2.4f, 1.95f, 4.9f), matSandbag);
+                BuildFittedCoverProp(env.transform, "M2_S1_Cover_MidW", meshes.EnvSandbagWall, new Vector3(-6.8f, 0f, -24.5f), -16f, new Vector3(3.4f, 1.15f, 1.05f), matSandbag);
+                BuildFittedCoverProp(env.transform, "M2_S1_Cover_MidE", meshes.EnvSandbagWall, new Vector3(6.8f, 0f, -24.5f), 16f, new Vector3(3.4f, 1.15f, 1.05f), matSandbag);
+                BuildFittedCoverProp(env.transform, "M2_S1_Barrier_GateW", meshes.EnvJerseyBarrier, new Vector3(-7.2f, 0f, -16.8f), 28f, new Vector3(2.4f, 0.95f, 0.72f), matJerseyBarrier);
+                BuildFittedCoverProp(env.transform, "M2_S1_Barrier_GateE", meshes.EnvJerseyBarrier, new Vector3(7.2f, 0f, -16.8f), -28f, new Vector3(2.4f, 0.95f, 0.72f), matJerseyBarrier);
+                BuildExplosiveBarrel(env.transform, "Barrel_S1_W", new Vector3(-5.0f, 0f, -30.5f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildExplosiveBarrel(env.transform, "Barrel_S1_E", new Vector3(5.6f, 0f, -20.5f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildFloodlightTower(env.transform, "Pylon_S1_SW", new Vector3(-24.5f, 0f, -48.5f), matTrim, matWalls, matSodiumGlow, Palette.M2KeyLightAmber, meshes.EnvFloodlightTower);
+                BuildFloodlightTower(env.transform, "Pylon_S1_SE", new Vector3(24.5f, 0f, -48.5f), matTrim, matWalls, matSodiumGlow, Palette.M2KeyLightAmber, meshes.EnvFloodlightTower);
 
-            // SECTOR 2 (z: -14..+22): Central Fuel Tank Farm & Cargo Container Depot
-            // Note: Keeps (0, 0, 0), (0, 0, 6), (10, 0, 10), (-16.5, 0, -1.2), and (21.5, 0, 1.5) completely unobstructed!
-            BuildFittedCoverProp(env.transform, "Cover_NW", meshes.EnvHescoBarrier, new Vector3(-5.2f, 0f, 5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matSandbag);
-            BuildFittedCoverProp(env.transform, "Cover_NE", meshes.EnvHescoBarrier, new Vector3(5.2f, 0f, 5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matSandbag);
-            BuildFittedCoverProp(env.transform, "Cover_SW", meshes.EnvSandbagWall, new Vector3(-5.2f, 0f, -5.2f), -45f, new Vector3(3.0f, 1.15f, 1.0f), matSandbag);
-            BuildFittedCoverProp(env.transform, "Cover_SE", meshes.EnvSandbagWall, new Vector3(5.2f, 0f, -5.2f), 45f, new Vector3(3.0f, 1.15f, 1.0f), matSandbag);
-            BuildTacticalCover(env.transform, "Cover_West", new Vector3(-8.2f, 0f, 0f), 90f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matAccent, meshes.TacticalCrate);
-            BuildFittedCoverProp(env.transform, "S2_HMMWV_East", meshes.EnvHMMWV, new Vector3(14.5f, 0f, 15.5f), -118f, new Vector3(2.4f, 1.95f, 4.9f), matOlive);
-            BuildExplosiveBarrel(env.transform, "Barrel_S2_Fuel", new Vector3(-13.2f, 0f, 2.8f), meshes.PropExplosiveBarrel, matBarrelHazard);
-            BuildExplosiveBarrel(env.transform, "Barrel_S2_Cargo", new Vector3(15.2f, 0f, -1.2f), meshes.PropExplosiveBarrel, matBarrelHazard);
-            BuildFloodlightTower(env.transform, "Pylon_NW", new Vector3(-11.8f, 0f, 11.8f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
-            BuildFloodlightTower(env.transform, "Pylon_NE", new Vector3(11.8f, 0f, 11.8f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
+                // SECTOR 2 (z: -14..+22): Canyon Rail Switchyard — Clears (-16.5, -1.2), (21.5, 1.5), (-/+9.5, -6.5), (-/+22.5, 3.5), (-21, 0.5), (18.5, 4.5)
+                BuildFittedCoverProp(env.transform, "M2_S2_Railcar_SW", meshes.EnvRailFlatcar, new Vector3(-14.5f, 0f, -8.5f), 0f, new Vector3(3.0f, 3.8f, 10.2f), matBarrelHazard);
+                BuildFittedCoverProp(env.transform, "M2_S2_Railcar_NW", meshes.EnvRailFlatcar, new Vector3(-14.5f, 0f, 8.8f), 180f, new Vector3(3.0f, 3.8f, 10.2f), matBarrelHazard);
+                BuildFittedCoverProp(env.transform, "M2_S2_Railcar_SE", meshes.EnvRailFlatcar, new Vector3(14.5f, 0f, -8.5f), 180f, new Vector3(3.0f, 3.8f, 10.2f), matBarrelHazard);
+                BuildFittedCoverProp(env.transform, "M2_S2_Railcar_NE", meshes.EnvRailFlatcar, new Vector3(14.5f, 0f, 10.2f), 0f, new Vector3(3.0f, 3.8f, 10.2f), matBarrelHazard);
 
-            // West Fuel Farm Silos & Radar Array
-            BuildEnvPropMesh(env.transform, "S2_FuelTank_1", meshes.EnvFuelTank, new Vector3(-25.5f, 0f, -6.0f), 0f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
-            BuildEnvPropMesh(env.transform, "S2_FuelTank_2", meshes.EnvFuelTank, new Vector3(-25.5f, 0f, 3.5f), 90f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
-            BuildEnvPropMesh(env.transform, "S2_FuelTank_3", meshes.EnvFuelTank, new Vector3(-19.5f, 0f, -1.2f), 180f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
-            BuildEnvPropMesh(env.transform, "S2_FuelTank_4", meshes.EnvFuelTank, new Vector3(-25.5f, 0f, 13.0f), 45f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
-            BuildEnvPropMesh(env.transform, "S2_Radar_West", meshes.EnvRadarDish, new Vector3(-32.5f, 0f, 14.5f), -35f, new Vector3(2.7f, 4.6f, 2.7f), matFuelSteel);
+                BuildFittedCoverProp(env.transform, "Cover_NW", meshes.EnvHescoBarrier, new Vector3(-5.2f, 0f, 5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matSandbag);
+                BuildFittedCoverProp(env.transform, "Cover_NE", meshes.EnvHescoBarrier, new Vector3(5.2f, 0f, 5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matSandbag);
+                BuildFittedCoverProp(env.transform, "Cover_SW", meshes.EnvSandbagWall, new Vector3(-5.2f, 0f, -5.2f), -45f, new Vector3(3.0f, 1.15f, 1.0f), matSandbag);
+                BuildFittedCoverProp(env.transform, "Cover_SE", meshes.EnvSandbagWall, new Vector3(5.2f, 0f, -5.2f), 45f, new Vector3(3.0f, 1.15f, 1.0f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S2_Barrier_GateW", meshes.EnvJerseyBarrier, new Vector3(-7.6f, 0f, 19.6f), 25f, new Vector3(2.4f, 0.95f, 0.72f), matJerseyBarrier);
+                BuildFittedCoverProp(env.transform, "S2_Barrier_GateE", meshes.EnvJerseyBarrier, new Vector3(7.6f, 0f, 19.6f), -25f, new Vector3(2.4f, 0.95f, 0.72f), matJerseyBarrier);
+                BuildTacticalCover(env.transform, "Cover_West", new Vector3(-8.2f, 0f, 0f), 90f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matAccent, meshes.TacticalCrate);
+                BuildExplosiveBarrel(env.transform, "Barrel_S2_Fuel", new Vector3(-10.5f, 0f, 2.2f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildExplosiveBarrel(env.transform, "Barrel_S2_Cargo", new Vector3(10.5f, 0f, 0.5f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildFloodlightTower(env.transform, "Pylon_NW", new Vector3(-9.5f, 0f, 14.5f), matTrim, matWalls, matSodiumGlow, Palette.M2KeyLightAmber, meshes.EnvFloodlightTower);
+                BuildFloodlightTower(env.transform, "Pylon_NE", new Vector3(9.5f, 0f, 14.5f), matTrim, matWalls, matSodiumGlow, Palette.M2KeyLightAmber, meshes.EnvFloodlightTower);
 
-            // East ISO Cargo Container Yard (with iconic 2-story stacked container)
-            BuildEnvPropMesh(env.transform, "S2_Container_E1", meshes.EnvShippingContainer, new Vector3(18.5f, 0f, -5.5f), 0f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
-            BuildEnvPropMesh(env.transform, "S2_Container_E2", meshes.EnvShippingContainer, new Vector3(23.0f, 0f, -5.5f), 0f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
-            BuildEnvPropMesh(env.transform, "S2_Container_E2_Top", meshes.EnvShippingContainer, new Vector3(23.0f, 2.6f, -5.5f), 4f, new Vector3(2.55f, 2.6f, 6.0f), matProps);
-            BuildEnvPropMesh(env.transform, "S2_Container_E3", meshes.EnvShippingContainer, new Vector3(21.5f, 0f, 6.0f), 90f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
-            BuildEnvPropMesh(env.transform, "S2_Container_E4", meshes.EnvShippingContainer, new Vector3(30.5f, 0f, 12.0f), -16f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
+                BuildEnvPropMesh(env.transform, "M2_S2_FuelTank_W1", meshes.EnvFuelTank, new Vector3(-27.5f, 0f, -6.5f), 0f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
+                BuildEnvPropMesh(env.transform, "M2_S2_FuelTank_W2", meshes.EnvFuelTank, new Vector3(-27.5f, 0f, 8.5f), 90f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
+                BuildEnvPropMesh(env.transform, "M2_S2_Radar_W", meshes.EnvRadarDish, new Vector3(-33.0f, 0f, 15.0f), -35f, new Vector3(2.7f, 4.6f, 2.7f), matFuelSteel);
+                BuildEnvPropMesh(env.transform, "M2_S2_Container_E1", meshes.EnvShippingContainer, new Vector3(29.0f, 0f, -6.0f), 0f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
+                BuildEnvPropMesh(env.transform, "M2_S2_Container_E2", meshes.EnvShippingContainer, new Vector3(29.0f, 0f, 10.5f), 12f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
 
-            // SECTOR 3 (z: +22..+56): North Command HQ, Bunkers & EVAC-6 Helipad
-            BuildHelipadMarkings(env.transform, new Vector3(0f, 0.015f, 42f), matTrim, matAccent);
-            BuildEnvPropMesh(env.transform, "S3_Bunker_West", meshes.EnvBunker, new Vector3(-19.5f, 0f, 40.5f), -22f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
-            BuildEnvPropMesh(env.transform, "S3_Bunker_East", meshes.EnvBunker, new Vector3(19.5f, 0f, 40.5f), 22f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
-            BuildEnvPropMesh(env.transform, "S3_Radar_NE", meshes.EnvRadarDish, new Vector3(24.0f, 0f, 50.5f), -140f, new Vector3(2.7f, 4.6f, 2.7f), matFuelSteel);
-            BuildEnvPropMesh(env.transform, "S3_FuelTank_NW", meshes.EnvFuelTank, new Vector3(-23.5f, 0f, 50.0f), 120f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
-            BuildEnvPropMesh(env.transform, "S3_Container_SW", meshes.EnvShippingContainer, new Vector3(-17.5f, 0f, 28.5f), 88f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
-            BuildEnvPropMesh(env.transform, "S3_Container_SE", meshes.EnvShippingContainer, new Vector3(17.5f, 0f, 28.5f), -88f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
-            BuildFittedCoverProp(env.transform, "S3_Hesco_W", meshes.EnvHescoBarrier, new Vector3(-10.8f, 0f, 34.0f), -28f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
-            BuildFittedCoverProp(env.transform, "S3_Hesco_E", meshes.EnvHescoBarrier, new Vector3(10.8f, 0f, 34.0f), 28f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
-            BuildFittedCoverProp(env.transform, "S3_Sandbag_NW", meshes.EnvSandbagWall, new Vector3(-9.5f, 0f, 48.2f), 25f, new Vector3(3.4f, 1.15f, 1.05f), matSandbag);
-            BuildFittedCoverProp(env.transform, "S3_Sandbag_NE", meshes.EnvSandbagWall, new Vector3(9.5f, 0f, 48.2f), -25f, new Vector3(3.4f, 1.15f, 1.05f), matSandbag);
-            BuildFittedCoverProp(env.transform, "S3_HMMWV_NW", meshes.EnvHMMWV, new Vector3(-13.8f, 0f, 47.0f), 145f, new Vector3(2.4f, 1.95f, 4.9f), matOlive);
-            BuildExplosiveBarrel(env.transform, "Barrel_S3_W", new Vector3(-8.2f, 0f, 38.2f), meshes.PropExplosiveBarrel, matBarrelHazard);
-            BuildExplosiveBarrel(env.transform, "Barrel_S3_E", new Vector3(8.5f, 0f, 44.5f), meshes.PropExplosiveBarrel, matBarrelHazard);
-            BuildFloodlightTower(env.transform, "Pylon_S3_NW", new Vector3(-26.5f, 0f, 52.5f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
-            BuildFloodlightTower(env.transform, "Pylon_S3_NE", new Vector3(26.5f, 0f, 52.5f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
+                // SECTOR 3 (z: +22..+56): Rail Terminal Loading Platform & LZ
+                BuildHelipadMarkings(env.transform, new Vector3(0f, 0.015f, 42f), matTrim, matAccent);
+                BuildFittedCoverProp(env.transform, "M2_S3_Railcar_W", meshes.EnvRailFlatcar, new Vector3(-14.5f, 0f, 34.5f), 0f, new Vector3(3.0f, 3.8f, 10.2f), matBarrelHazard);
+                BuildFittedCoverProp(env.transform, "M2_S3_Railcar_E", meshes.EnvRailFlatcar, new Vector3(14.5f, 0f, 34.5f), 180f, new Vector3(3.0f, 3.8f, 10.2f), matBarrelHazard);
+                BuildEnvPropMesh(env.transform, "S3_Bunker_West", meshes.EnvBunker, new Vector3(-22.5f, 0f, 44.5f), -22f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+                BuildEnvPropMesh(env.transform, "S3_Bunker_East", meshes.EnvBunker, new Vector3(22.5f, 0f, 44.5f), 22f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+                BuildFittedCoverProp(env.transform, "S3_Sandbag_NW", meshes.EnvSandbagWall, new Vector3(-8.8f, 0f, 48.2f), 25f, new Vector3(3.4f, 1.15f, 1.05f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S3_Sandbag_NE", meshes.EnvSandbagWall, new Vector3(8.8f, 0f, 48.2f), -25f, new Vector3(3.4f, 1.15f, 1.05f), matSandbag);
+                BuildExplosiveBarrel(env.transform, "Barrel_S3_W", new Vector3(-8.2f, 0f, 38.2f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildExplosiveBarrel(env.transform, "Barrel_S3_E", new Vector3(8.5f, 0f, 44.5f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildFloodlightTower(env.transform, "Pylon_S3_NW", new Vector3(-26.5f, 0f, 52.5f), matTrim, matWalls, matSodiumGlow, Palette.M2KeyLightAmber, meshes.EnvFloodlightTower);
+                BuildFloodlightTower(env.transform, "Pylon_S3_NE", new Vector3(26.5f, 0f, 52.5f), matTrim, matWalls, matSodiumGlow, Palette.M2KeyLightAmber, meshes.EnvFloodlightTower);
+            }
+            else if (missionIndex == 3)
+            {
+                // ACT III: SILENT PEAK ALPINE CITADEL — Fortified Stone Bastions & Project HELIOS Capacitor Pylons
+                // SECTOR 1 (z: -52..-14): Outer Alpine Ridge Checkpoints
+                BuildEnvPropMesh(env.transform, "M3_S1_Bunker_W", meshes.EnvBunker, new Vector3(-18.5f, 0f, -24.5f), 18f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+                BuildEnvPropMesh(env.transform, "M3_S1_Bunker_E", meshes.EnvBunker, new Vector3(18.5f, 0f, -24.5f), -18f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+                BuildFittedCoverProp(env.transform, "S1_HMMWV_West", meshes.EnvHMMWV, new Vector3(-10.5f, 0f, -36.0f), 22f, new Vector3(2.4f, 1.95f, 4.9f), matOlive);
+                BuildFittedCoverProp(env.transform, "S1_HMMWV_East", meshes.EnvHMMWV, new Vector3(10.8f, 0f, -43.5f), -155f, new Vector3(2.4f, 1.95f, 4.9f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S1_Cover_SW", meshes.EnvHescoBarrier, new Vector3(-6.2f, 0f, -38.5f), 12f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S1_Cover_SE", meshes.EnvHescoBarrier, new Vector3(6.2f, 0f, -38.5f), -12f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S1_Barrier_MidW", meshes.EnvJerseyBarrier, new Vector3(-8.2f, 0f, -28.5f), -18f, new Vector3(2.6f, 1.05f, 0.78f), matJerseyBarrier);
+                BuildFittedCoverProp(env.transform, "S1_Barrier_MidE", meshes.EnvJerseyBarrier, new Vector3(8.2f, 0f, -28.5f), 18f, new Vector3(2.6f, 1.05f, 0.78f), matJerseyBarrier);
+                BuildFittedCoverProp(env.transform, "S1_Barrier_GateW", meshes.EnvJerseyBarrier, new Vector3(-7.2f, 0f, -16.8f), 28f, new Vector3(2.4f, 0.95f, 0.72f), matJerseyBarrier);
+                BuildFittedCoverProp(env.transform, "S1_Barrier_GateE", meshes.EnvJerseyBarrier, new Vector3(7.2f, 0f, -16.8f), -28f, new Vector3(2.4f, 0.95f, 0.72f), matJerseyBarrier);
+                BuildExplosiveBarrel(env.transform, "Barrel_S1_W", new Vector3(-4.2f, 0f, -32.2f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildExplosiveBarrel(env.transform, "Barrel_S1_E", new Vector3(7.2f, 0f, -23.5f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildFloodlightTower(env.transform, "Pylon_S1_SW", new Vector3(-24.5f, 0f, -48.5f), matTrim, matWalls, matHeliosGlow, Palette.M3HeliosCoreCyan, meshes.EnvFloodlightTower);
+                BuildFloodlightTower(env.transform, "Pylon_S1_SE", new Vector3(24.5f, 0f, -48.5f), matTrim, matWalls, matHeliosGlow, Palette.M3HeliosCoreCyan, meshes.EnvFloodlightTower);
 
-            // EVAC-6 Blackhawk Helicopter (parked sky-high inactive until Victory Evac Cutscene)
+                // SECTOR 2 (z: -14..+22): Project HELIOS Reactor Courtyard & Twin Capacitor Pylons
+                BuildFittedCoverProp(env.transform, "Cover_NW", meshes.EnvHescoBarrier, new Vector3(-5.2f, 0f, 5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matSandbag);
+                BuildFittedCoverProp(env.transform, "Cover_NE", meshes.EnvHescoBarrier, new Vector3(5.2f, 0f, 5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matSandbag);
+                BuildFittedCoverProp(env.transform, "Cover_SW", meshes.EnvJerseyBarrier, new Vector3(-5.2f, 0f, -5.2f), -45f, new Vector3(2.8f, 1.05f, 0.85f), matJerseyBarrier);
+                BuildFittedCoverProp(env.transform, "Cover_SE", meshes.EnvJerseyBarrier, new Vector3(5.2f, 0f, -5.2f), 45f, new Vector3(2.8f, 1.05f, 0.85f), matJerseyBarrier);
+                BuildFittedCoverProp(env.transform, "S2_Barrier_GateW", meshes.EnvJerseyBarrier, new Vector3(-7.6f, 0f, 19.6f), 25f, new Vector3(2.4f, 0.95f, 0.72f), matJerseyBarrier);
+                BuildFittedCoverProp(env.transform, "S2_Barrier_GateE", meshes.EnvJerseyBarrier, new Vector3(7.6f, 0f, 19.6f), -25f, new Vector3(2.4f, 0.95f, 0.72f), matJerseyBarrier);
+                BuildTacticalCover(env.transform, "Cover_West", new Vector3(-8.2f, 0f, 0f), 90f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matHeliosGlow, meshes.TacticalCrate);
+                BuildExplosiveBarrel(env.transform, "Barrel_S2_Fuel", new Vector3(-13.2f, 0f, 2.8f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildExplosiveBarrel(env.transform, "Barrel_S2_Cargo", new Vector3(15.2f, 0f, -1.2f), meshes.PropExplosiveBarrel, matBarrelHazard);
+
+                // Project HELIOS Capacitor Pylons flanking the West/East Sabotage Terminals (-16.5,-1.2) and (21.5,1.5)
+                BuildFittedCoverProp(env.transform, "M3_HeliosPylon_W", meshes.EnergyPylon, new Vector3(-25.5f, 0f, -1.2f), 0f, new Vector3(2.4f, 4.8f, 2.4f), matFuelSteel);
+                CreateVisualBox("M3_HeliosCore_W", env.transform, new Vector3(-25.5f, 3.2f, -1.2f), new Vector3(1.65f, 0.36f, 1.65f), matHeliosGlow);
+                BuildFittedCoverProp(env.transform, "M3_HeliosPylon_E", meshes.EnergyPylon, new Vector3(27.5f, 0f, 1.5f), 0f, new Vector3(2.4f, 4.8f, 2.4f), matFuelSteel);
+                CreateVisualBox("M3_HeliosCore_E", env.transform, new Vector3(27.5f, 3.2f, 1.5f), new Vector3(1.65f, 0.36f, 1.65f), matHeliosGlow);
+                BuildEnvPropMesh(env.transform, "M3_S2_Bunker_NW", meshes.EnvBunker, new Vector3(-28.5f, 0f, 14.5f), -35f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+                BuildEnvPropMesh(env.transform, "M3_S2_Bunker_NE", meshes.EnvBunker, new Vector3(28.5f, 0f, 14.5f), 35f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+                BuildEnvPropMesh(env.transform, "M3_S2_Radar_SE", meshes.EnvRadarDish, new Vector3(31.5f, 0f, -9.5f), 145f, new Vector3(2.7f, 4.6f, 2.7f), matFuelSteel);
+                BuildFloodlightTower(env.transform, "Pylon_NW", new Vector3(-11.8f, 0f, 11.8f), matTrim, matWalls, matHeliosGlow, Palette.M3HeliosCoreCyan, meshes.EnvFloodlightTower);
+                BuildFloodlightTower(env.transform, "Pylon_NE", new Vector3(11.8f, 0f, 11.8f), matTrim, matWalls, matHeliosGlow, Palette.M3HeliosCoreCyan, meshes.EnvFloodlightTower);
+
+                // SECTOR 3 (z: +22..+56): Summit Bastion, HELIOS Array & VALKYRIE-6 Extraction LZ
+                BuildHelipadMarkings(env.transform, new Vector3(0f, 0.015f, 42f), matTrim, matAccent);
+                BuildEnvPropMesh(env.transform, "S3_Bunker_West", meshes.EnvBunker, new Vector3(-19.5f, 0f, 40.5f), -22f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+                BuildEnvPropMesh(env.transform, "S3_Bunker_East", meshes.EnvBunker, new Vector3(19.5f, 0f, 40.5f), 22f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+                BuildFittedCoverProp(env.transform, "M3_HeliosPylon_NW", meshes.EnergyPylon, new Vector3(-16.0f, 0f, 51.5f), 0f, new Vector3(2.2f, 4.4f, 2.2f), matFuelSteel);
+                CreateVisualBox("M3_HeliosCore_NW", env.transform, new Vector3(-16.0f, 2.95f, 51.5f), new Vector3(1.50f, 0.34f, 1.50f), matHeliosGlow);
+                BuildFittedCoverProp(env.transform, "M3_HeliosPylon_NE", meshes.EnergyPylon, new Vector3(16.0f, 0f, 51.5f), 0f, new Vector3(2.2f, 4.4f, 2.2f), matFuelSteel);
+                CreateVisualBox("M3_HeliosCore_NE", env.transform, new Vector3(16.0f, 2.95f, 51.5f), new Vector3(1.50f, 0.34f, 1.50f), matHeliosGlow);
+                BuildEnvPropMesh(env.transform, "S3_Radar_NE", meshes.EnvRadarDish, new Vector3(24.0f, 0f, 50.5f), -140f, new Vector3(2.7f, 4.6f, 2.7f), matFuelSteel);
+                BuildFittedCoverProp(env.transform, "S3_Hesco_W", meshes.EnvHescoBarrier, new Vector3(-10.8f, 0f, 34.0f), -28f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S3_Hesco_E", meshes.EnvHescoBarrier, new Vector3(10.8f, 0f, 34.0f), 28f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S3_Barrier_NW", meshes.EnvJerseyBarrier, new Vector3(-9.5f, 0f, 48.2f), 25f, new Vector3(2.8f, 1.05f, 0.85f), matJerseyBarrier);
+                BuildFittedCoverProp(env.transform, "S3_Barrier_NE", meshes.EnvJerseyBarrier, new Vector3(9.5f, 0f, 48.2f), -25f, new Vector3(2.8f, 1.05f, 0.85f), matJerseyBarrier);
+                BuildExplosiveBarrel(env.transform, "Barrel_S3_W", new Vector3(-8.2f, 0f, 38.2f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildExplosiveBarrel(env.transform, "Barrel_S3_E", new Vector3(8.5f, 0f, 44.5f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildFloodlightTower(env.transform, "Pylon_S3_NW", new Vector3(-26.5f, 0f, 52.5f), matTrim, matWalls, matHeliosGlow, Palette.M3HeliosCoreCyan, meshes.EnvFloodlightTower);
+                BuildFloodlightTower(env.transform, "Pylon_S3_NE", new Vector3(26.5f, 0f, 52.5f), matTrim, matWalls, matHeliosGlow, Palette.M3HeliosCoreCyan, meshes.EnvFloodlightTower);
+            }
+            else
+            {
+                // ACT I: BLACKWATER PIER DOCKYARD — Harbor Freight Containers, Fuel Bunkers & Dockside Bollards
+                // SECTOR 1 (z: -52..-14): Harbor Dockyard Gate & Staging Apron
+                BuildEnvPropMesh(env.transform, "S1_Bunker_West", meshes.EnvBunker, new Vector3(-18.5f, 0f, -24.5f), 18f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+                BuildEnvPropMesh(env.transform, "S1_Container_SW", meshes.EnvShippingContainer, new Vector3(-14.5f, 0f, -40f), 14f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
+                BuildEnvPropMesh(env.transform, "S1_Container_SE", meshes.EnvShippingContainer, new Vector3(15.5f, 0f, -38f), -12f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
+                BuildEnvPropMesh(env.transform, "S1_Container_NE", meshes.EnvShippingContainer, new Vector3(17.5f, 0f, -22.5f), 86f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
+
+                BuildFittedCoverProp(env.transform, "S1_HMMWV_West", meshes.EnvHMMWV, new Vector3(-10.5f, 0f, -34.0f), 22f, new Vector3(2.4f, 1.95f, 4.9f), matOlive);
+                BuildFittedCoverProp(env.transform, "S1_HMMWV_East", meshes.EnvHMMWV, new Vector3(10.8f, 0f, -43.5f), -155f, new Vector3(2.4f, 1.95f, 4.9f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S1_Cover_SW", meshes.EnvHescoBarrier, new Vector3(-5.8f, 0f, -38.5f), 12f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S1_Cover_SE", meshes.EnvHescoBarrier, new Vector3(5.8f, 0f, -38.5f), -12f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S1_Cover_MidW", meshes.EnvSandbagWall, new Vector3(-7.8f, 0f, -28.5f), -18f, new Vector3(3.5f, 1.15f, 1.05f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S1_Cover_MidE", meshes.EnvSandbagWall, new Vector3(7.8f, 0f, -28.5f), 18f, new Vector3(3.5f, 1.15f, 1.05f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S1_Barrier_SouthW", meshes.EnvJerseyBarrier, new Vector3(-6.8f, 0f, -47.0f), 14f, new Vector3(2.4f, 0.95f, 0.72f), matJerseyBarrier);
+                BuildFittedCoverProp(env.transform, "S1_Barrier_SouthE", meshes.EnvJerseyBarrier, new Vector3(6.8f, 0f, -47.0f), -14f, new Vector3(2.4f, 0.95f, 0.72f), matJerseyBarrier);
+                BuildFittedCoverProp(env.transform, "S1_Barrier_GateW", meshes.EnvJerseyBarrier, new Vector3(-7.2f, 0f, -16.8f), 28f, new Vector3(2.4f, 0.95f, 0.72f), matJerseyBarrier);
+                BuildFittedCoverProp(env.transform, "S1_Barrier_GateE", meshes.EnvJerseyBarrier, new Vector3(7.2f, 0f, -16.8f), -28f, new Vector3(2.4f, 0.95f, 0.72f), matJerseyBarrier);
+                BuildExplosiveBarrel(env.transform, "Barrel_S1_W", new Vector3(-4.2f, 0f, -32.2f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildExplosiveBarrel(env.transform, "Barrel_S1_E", new Vector3(7.2f, 0f, -23.5f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildFloodlightTower(env.transform, "Pylon_S1_SW", new Vector3(-24.5f, 0f, -48.5f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
+                BuildFloodlightTower(env.transform, "Pylon_S1_SE", new Vector3(24.5f, 0f, -48.5f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
+
+                // SECTOR 2 (z: -14..+22): Central Coastal Fuel Tank Farm & Cargo Container Pier
+                // Note: Keeps (0, 0, 0), (0, 0, 6), (10, 0, 10), (-16.5, 0, -1.2), and (21.5, 0, 1.5) completely unobstructed!
+                BuildFittedCoverProp(env.transform, "Cover_NW", meshes.EnvHescoBarrier, new Vector3(-5.2f, 0f, 5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matSandbag);
+                BuildFittedCoverProp(env.transform, "Cover_NE", meshes.EnvHescoBarrier, new Vector3(5.2f, 0f, 5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matSandbag);
+                BuildFittedCoverProp(env.transform, "Cover_SW", meshes.EnvSandbagWall, new Vector3(-5.2f, 0f, -5.2f), -45f, new Vector3(3.0f, 1.15f, 1.0f), matSandbag);
+                BuildFittedCoverProp(env.transform, "Cover_SE", meshes.EnvSandbagWall, new Vector3(5.2f, 0f, -5.2f), 45f, new Vector3(3.0f, 1.15f, 1.0f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S2_Barrier_GateW", meshes.EnvJerseyBarrier, new Vector3(-7.6f, 0f, 19.6f), 25f, new Vector3(2.4f, 0.95f, 0.72f), matJerseyBarrier);
+                BuildFittedCoverProp(env.transform, "S2_Barrier_GateE", meshes.EnvJerseyBarrier, new Vector3(7.6f, 0f, 19.6f), -25f, new Vector3(2.4f, 0.95f, 0.72f), matJerseyBarrier);
+                BuildTacticalCover(env.transform, "Cover_West", new Vector3(-8.2f, 0f, 0f), 90f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matAccent, meshes.TacticalCrate);
+                BuildFittedCoverProp(env.transform, "S2_HMMWV_East", meshes.EnvHMMWV, new Vector3(14.5f, 0f, 15.5f), -118f, new Vector3(2.4f, 1.95f, 4.9f), matOlive);
+                BuildExplosiveBarrel(env.transform, "Barrel_S2_Fuel", new Vector3(-13.2f, 0f, 2.8f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildExplosiveBarrel(env.transform, "Barrel_S2_Cargo", new Vector3(15.2f, 0f, -1.2f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildFloodlightTower(env.transform, "Pylon_NW", new Vector3(-11.8f, 0f, 11.8f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
+                BuildFloodlightTower(env.transform, "Pylon_NE", new Vector3(11.8f, 0f, 11.8f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
+
+                // West Coastal Fuel Silos & Harbor Radar Array
+                BuildEnvPropMesh(env.transform, "S2_FuelTank_1", meshes.EnvFuelTank, new Vector3(-25.5f, 0f, -6.0f), 0f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
+                BuildEnvPropMesh(env.transform, "S2_FuelTank_2", meshes.EnvFuelTank, new Vector3(-25.5f, 0f, 3.5f), 90f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
+                BuildEnvPropMesh(env.transform, "S2_FuelTank_3", meshes.EnvFuelTank, new Vector3(-19.5f, 0f, -1.2f), 180f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
+                BuildEnvPropMesh(env.transform, "S2_FuelTank_4", meshes.EnvFuelTank, new Vector3(-25.5f, 0f, 13.0f), 45f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
+                BuildEnvPropMesh(env.transform, "S2_Radar_West", meshes.EnvRadarDish, new Vector3(-32.5f, 0f, 14.5f), -35f, new Vector3(2.7f, 4.6f, 2.7f), matFuelSteel);
+
+                // East ISO Cargo Container Yard (with 2-story stacked container)
+                BuildEnvPropMesh(env.transform, "S2_Container_E1", meshes.EnvShippingContainer, new Vector3(18.5f, 0f, -5.5f), 0f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
+                BuildEnvPropMesh(env.transform, "S2_Container_E2", meshes.EnvShippingContainer, new Vector3(23.0f, 0f, -5.5f), 0f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
+                BuildEnvPropMesh(env.transform, "S2_Container_E2_Top", meshes.EnvShippingContainer, new Vector3(23.0f, 2.6f, -5.5f), 4f, new Vector3(2.55f, 2.6f, 6.0f), matProps);
+                BuildEnvPropMesh(env.transform, "S2_Container_E3", meshes.EnvShippingContainer, new Vector3(21.5f, 0f, 6.0f), 90f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
+                BuildEnvPropMesh(env.transform, "S2_Container_E4", meshes.EnvShippingContainer, new Vector3(30.5f, 0f, 12.0f), -16f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
+
+                // Dockside Pier Mooring Bollards outside East/West harbor edge
+                for (var bz = -46f; bz <= 50f; bz += 16f)
+                {
+                    CreateVisualBox("PierBollard_W_" + Mathf.RoundToInt(bz), env.transform, new Vector3(-38.8f, 0.35f, bz), new Vector3(0.55f, 0.7f, 0.55f), matTrim);
+                    CreateVisualBox("PierBollard_E_" + Mathf.RoundToInt(bz), env.transform, new Vector3(38.8f, 0.35f, bz), new Vector3(0.55f, 0.7f, 0.55f), matTrim);
+                }
+
+                // SECTOR 3 (z: +22..+56): North Pier Command HQ & VALKYRIE-6 Extraction Helipad
+                BuildHelipadMarkings(env.transform, new Vector3(0f, 0.015f, 42f), matTrim, matAccent);
+                BuildEnvPropMesh(env.transform, "S3_Bunker_West", meshes.EnvBunker, new Vector3(-19.5f, 0f, 40.5f), -22f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+                BuildEnvPropMesh(env.transform, "S3_Bunker_East", meshes.EnvBunker, new Vector3(19.5f, 0f, 40.5f), 22f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+                BuildEnvPropMesh(env.transform, "S3_Radar_NE", meshes.EnvRadarDish, new Vector3(24.0f, 0f, 50.5f), -140f, new Vector3(2.7f, 4.6f, 2.7f), matFuelSteel);
+                BuildEnvPropMesh(env.transform, "S3_FuelTank_NW", meshes.EnvFuelTank, new Vector3(-23.5f, 0f, 50.0f), 120f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
+                BuildEnvPropMesh(env.transform, "S3_Container_SW", meshes.EnvShippingContainer, new Vector3(-17.5f, 0f, 28.5f), 88f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
+                BuildEnvPropMesh(env.transform, "S3_Container_SE", meshes.EnvShippingContainer, new Vector3(17.5f, 0f, 28.5f), -88f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
+                BuildFittedCoverProp(env.transform, "S3_Hesco_W", meshes.EnvHescoBarrier, new Vector3(-10.8f, 0f, 34.0f), -28f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S3_Hesco_E", meshes.EnvHescoBarrier, new Vector3(10.8f, 0f, 34.0f), 28f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S3_Sandbag_NW", meshes.EnvSandbagWall, new Vector3(-9.5f, 0f, 48.2f), 25f, new Vector3(3.4f, 1.15f, 1.05f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S3_Sandbag_NE", meshes.EnvSandbagWall, new Vector3(9.5f, 0f, 48.2f), -25f, new Vector3(3.4f, 1.15f, 1.05f), matSandbag);
+                BuildFittedCoverProp(env.transform, "S3_HMMWV_NW", meshes.EnvHMMWV, new Vector3(-13.8f, 0f, 47.0f), 145f, new Vector3(2.4f, 1.95f, 4.9f), matOlive);
+                BuildExplosiveBarrel(env.transform, "Barrel_S3_W", new Vector3(-8.2f, 0f, 38.2f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildExplosiveBarrel(env.transform, "Barrel_S3_E", new Vector3(8.5f, 0f, 44.5f), meshes.PropExplosiveBarrel, matBarrelHazard);
+                BuildFloodlightTower(env.transform, "Pylon_S3_NW", new Vector3(-26.5f, 0f, 52.5f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
+                BuildFloodlightTower(env.transform, "Pylon_S3_NE", new Vector3(26.5f, 0f, 52.5f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
+            }
+
+            // VALKYRIE-6 Blackhawk Helicopter (parked sky-high inactive until Victory Evac Cutscene)
             BuildBlackhawkProp(env.transform, meshes.VehicleBlackhawk, meshes.VehicleBlackhawkRotor, matOlive, matTrim, out props.EvacChopperRoot, out props.EvacChopperRotor);
 
             // Static batching, occluder flags, and clean layer separation
@@ -966,26 +1127,159 @@ namespace TopDownShooter.Editor
             return props;
         }
 
-        private static void BuildDmzHillsides(Transform parent, Material matEarth, Material matFoliageDark, Material matRock)
+        private static void BuildRailCorridorDeck(Transform parent, Material matBallast, Material matSleepers, Material matRailSteel, Material matAccent)
         {
-            var hills = new GameObject("DMZ_Hillsides");
+            // Central Logistics Apron Spine (keeps player/squad traversal crisp down center)
+            var spine = CreateVisualBox("DepotCenterCauseway", parent, new Vector3(0f, 0.005f, -5f), new Vector3(6.8f, 0.01f, 88f), matSleepers);
+            spine.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+
+            float[] trackX = { -14.5f, 14.5f };
+            for (var t = 0; t < trackX.Length; t++)
+            {
+                var cx = trackX[t];
+                var ballast = CreateVisualBox("RailBallastBed_" + t, parent, new Vector3(cx, 0.008f, 2f), new Vector3(4.6f, 0.016f, 104f), matBallast);
+                ballast.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+
+                var railL = CreateVisualBox("RailSteel_L_" + t, parent, new Vector3(cx - 0.72f, 0.06f, 2f), new Vector3(0.14f, 0.10f, 104f), matRailSteel);
+                railL.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+                var railR = CreateVisualBox("RailSteel_R_" + t, parent, new Vector3(cx + 0.72f, 0.06f, 2f), new Vector3(0.14f, 0.10f, 104f), matRailSteel);
+                railR.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+
+                for (var z = -48f; z <= 52f; z += 2.6f)
+                {
+                    var tie = CreateVisualBox("RailTie_" + t + "_" + Mathf.RoundToInt(z), parent, new Vector3(cx, 0.025f, z), new Vector3(2.8f, 0.05f, 0.28f), matSleepers);
+                    tie.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+                }
+            }
+
+            // Center depot lane dashes
+            for (var z = -47f; z <= 31f; z += 5.5f)
+            {
+                var dash = CreateVisualBox("DepotCenterDash_" + Mathf.RoundToInt(z), parent, new Vector3(0f, 0.012f, z), new Vector3(0.28f, 0.01f, 2.4f), matAccent);
+                dash.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+            }
+        }
+
+        private static void BuildDmzHillsides(Transform parent, VanguardMeshPack meshes, ArenaMaterialPack mats, int missionIndex)
+        {
+            var hills = new GameObject("PerimeterBackdrop");
             hills.transform.SetParent(parent, false);
 
-            var ridgeSpecs = new (string name, Vector3 pos, Vector3 scale, Vector3 euler, Material mat)[]
+            var heightScale = missionIndex == 2 ? 1.38f : (missionIndex == 1 ? 0.85f : 1.25f);
+            var peakSpecs = new (Vector3 pos, float yaw, Vector3 scale)[]
             {
-                ("Ridge_WestNorth", new Vector3(-54f, 3.2f, 38f), new Vector3(24f, 9f, 46f), new Vector3(4f, 8f, -12f), matEarth),
-                ("Ridge_WestSouth", new Vector3(-52f, 2.5f, -20f), new Vector3(22f, 7.5f, 54f), new Vector3(-3f, -10f, -10f), matRock),
-                ("Ridge_EastNorth", new Vector3(54f, 3.4f, 32f), new Vector3(24f, 9.5f, 50f), new Vector3(5f, -9f, 12f), matEarth),
-                ("Ridge_EastSouth", new Vector3(52f, 2.4f, -24f), new Vector3(22f, 7.2f, 52f), new Vector3(-4f, 12f, 11f), matRock),
-                ("Mountain_HorizonNorth", new Vector3(0f, 6.2f, 82f), new Vector3(135f, 16f, 28f), new Vector3(8f, 0f, 0f), matEarth),
-                ("Mountain_HorizonNW", new Vector3(-52f, 7.8f, 76f), new Vector3(52f, 19f, 32f), new Vector3(10f, 16f, 0f), matFoliageDark),
-                ("Mountain_HorizonNE", new Vector3(52f, 7.4f, 76f), new Vector3(52f, 18f, 32f), new Vector3(10f, -16f, 0f), matFoliageDark),
-                ("Ridge_SouthHorizon", new Vector3(0f, 2.2f, -72f), new Vector3(110f, 6.5f, 20f), new Vector3(-6f, 0f, 0f), matEarth)
+                // North Mountain Skyline (z: 70..92)
+                (new Vector3(0f, 0f, 79f), 12f, new Vector3(3.4f, 3.0f, 2.5f)),
+                (new Vector3(-26f, 0f, 75f), -18f, new Vector3(2.8f, 2.4f, 2.3f)),
+                (new Vector3(26f, 0f, 75f), 22f, new Vector3(2.8f, 2.5f, 2.3f)),
+                (new Vector3(-52f, 0f, 70f), 38f, new Vector3(2.6f, 2.7f, 2.4f)),
+                (new Vector3(52f, 0f, 70f), -42f, new Vector3(2.6f, 2.6f, 2.4f)),
+
+                // West Ridges (x: -46..-62)
+                (new Vector3(-47f, 0f, 44f), 84f, new Vector3(1.8f, 1.9f, 1.9f)),
+                (new Vector3(-56f, 0f, 26f), 102f, new Vector3(2.2f, 2.3f, 2.0f)),
+                (new Vector3(-56f, 0f, 4f), 78f, new Vector3(2.1f, 2.1f, 2.1f)),
+                (new Vector3(-54f, 0f, -18f), 96f, new Vector3(2.0f, 1.8f, 2.0f)),
+                (new Vector3(-47f, 0f, -38f), 112f, new Vector3(1.9f, 1.7f, 1.8f)),
+                (new Vector3(-44f, 0f, -56f), 45f, new Vector3(2.1f, 1.6f, 1.8f)),
+
+                // East Ridges (x: +46..+62)
+                (new Vector3(47f, 0f, 44f), -84f, new Vector3(1.8f, 1.9f, 1.9f)),
+                (new Vector3(56f, 0f, 26f), -102f, new Vector3(2.2f, 2.3f, 2.0f)),
+                (new Vector3(56f, 0f, 4f), -78f, new Vector3(2.1f, 2.1f, 2.1f)),
+                (new Vector3(54f, 0f, -18f), -96f, new Vector3(2.0f, 1.8f, 2.0f)),
+                (new Vector3(47f, 0f, -38f), -112f, new Vector3(1.9f, 1.7f, 1.8f)),
+                (new Vector3(44f, 0f, -56f), -45f, new Vector3(2.1f, 1.6f, 1.8f)),
+
+                // South Horizon Foothills (z: -68..-76)
+                (new Vector3(-18f, 0f, -68f), 172f, new Vector3(2.6f, 1.6f, 2.0f)),
+                (new Vector3(18f, 0f, -68f), -170f, new Vector3(2.6f, 1.6f, 2.0f)),
+                (new Vector3(0f, 0f, -74f), 184f, new Vector3(3.1f, 2.0f, 2.2f)),
             };
 
-            foreach (var r in ridgeSpecs)
+            for (var i = 0; i < peakSpecs.Length; i++)
             {
-                var go = CreateVisualPrimitive(r.name, PrimitiveType.Cube, hills.transform, r.pos, r.scale, r.mat, r.euler);
+                var p = peakSpecs[i];
+                PlaceGroundedMesh("HorizonPeak_" + i, meshes.EnvDmzHill, PrimitiveType.Cube, p.pos, new Vector3(12f * p.scale.x, 5.7f * p.scale.y * heightScale, 9f * p.scale.z), p.yaw, mats.DmzHill);
+            }
+
+            // Conifer Pine Groves (dense on Silent Peak Act III, sparse harbor headlands on Act I, omitted in Iron Corridor canyon Act II)
+            if (missionIndex != 2)
+            {
+                var treeCoords = new (float x, float z, float s, float yaw)[]
+                {
+                    (-33.5f, -49f, 1.25f, 18f), (-35.8f, -41f, 1.45f, 84f), (-32.5f, -33f, 1.15f, 142f), (-36.5f, -24f, 1.38f, 210f),
+                    (-43.0f, -10f, 1.32f, 45f), (-42.5f, 0f, 1.48f, 118f), (-44.0f, 12f, 1.28f, 260f), (-35.5f, 29f, 1.42f, 33f),
+                    (-34.2f, 38f, 1.18f, 195f), (-36.8f, 49f, 1.50f, 72f), (-26.5f, 61.5f, 1.35f, 128f), (-14.5f, 63.0f, 1.22f, 285f),
+                    (33.5f, -49f, 1.28f, 52f), (35.8f, -40f, 1.42f, 165f), (32.8f, -31f, 1.16f, 240f), (36.2f, -22f, 1.44f, 310f),
+                    (43.2f, -9f, 1.36f, 22f), (42.8f, 2f, 1.52f, 150f), (44.2f, 14f, 1.30f, 275f), (35.8f, 30f, 1.40f, 64f),
+                    (34.5f, 40f, 1.20f, 218f), (37.0f, 50f, 1.48f, 95f), (26.5f, 61.5f, 1.36f, 180f), (14.5f, 63.0f, 1.26f, 42f),
+                    (-21.5f, -58.5f, 1.30f, 88f), (-9.0f, -59.5f, 1.12f, 174f), (9.5f, -59.5f, 1.18f, 295f), (22.0f, -58.5f, 1.34f, 12f),
+                };
+
+                var count = missionIndex == 1 ? 14 : treeCoords.Length;
+                for (var i = 0; i < count; i++)
+                {
+                    var t = treeCoords[i];
+                    PlaceGroundedMesh("PerimeterPine_" + i, meshes.EnvPineTree, PrimitiveType.Cylinder, new Vector3(t.x, 0f, t.z), new Vector3(2.69f * t.s, 4.15f * t.s, 2.62f * t.s), t.yaw, mats.Foliage);
+                }
+
+                if (missionIndex == 3)
+                {
+                    // Extra outer high-altitude spruce trees crowning Blackcrest Summit
+                    var outerAlpine = new (float x, float z, float s, float yaw)[]
+                    {
+                        (-41f, -34f, 1.55f, 40f), (41f, -34f, 1.55f, 140f), (-48f, -4f, 1.62f, 92f), (48f, -4f, 1.62f, 240f),
+                        (-42f, 36f, 1.58f, 15f), (42f, 36f, 1.58f, 195f), (-31f, 66f, 1.65f, 70f), (31f, 66f, 1.65f, 285f),
+                        (-6f, 66f, 1.52f, 115f), (6f, 66f, 1.52f, 330f), (-28f, -63f, 1.48f, 55f), (28f, -63f, 1.48f, 210f)
+                    };
+                    for (var i = 0; i < outerAlpine.Length; i++)
+                    {
+                        var t = outerAlpine[i];
+                        PlaceGroundedMesh("AlpinePineOuter_" + i, meshes.EnvPineTree, PrimitiveType.Cylinder, new Vector3(t.x, 0f, t.z), new Vector3(2.69f * t.s, 4.15f * t.s, 2.62f * t.s), t.yaw, mats.Foliage);
+                    }
+                }
+            }
+
+            // Faceted Rock Outcrops along outer perimeter base (doubled & larger on Canyon M2)
+            var rockCoords = new (float x, float z, float sx, float sy, float sz, float yaw)[]
+            {
+                (-31.8f, -45f, 1.15f, 1.20f, 1.10f, 25f), (-32.5f, -20f, 1.30f, 1.45f, 1.25f, 110f),
+                (-41.5f, -4f, 1.40f, 1.35f, 1.20f, 200f), (-34.0f, 44f, 1.25f, 1.40f, 1.15f, 70f),
+                (-19.0f, 60.0f, 1.45f, 1.50f, 1.30f, 145f), (19.0f, 60.0f, 1.45f, 1.50f, 1.30f, 35f),
+                (31.8f, -45f, 1.15f, 1.20f, 1.10f, 285f), (32.5f, -20f, 1.30f, 1.45f, 1.25f, 60f),
+                (41.5f, -4f, 1.40f, 1.35f, 1.20f, 170f), (34.0f, 44f, 1.25f, 1.40f, 1.15f, 315f),
+                (-14.5f, -57.0f, 1.25f, 1.20f, 1.15f, 92f), (14.5f, -57.0f, 1.25f, 1.20f, 1.15f, 212f),
+            };
+
+            var rockBoost = missionIndex == 2 ? 1.55f : 1.0f;
+            for (var i = 0; i < rockCoords.Length; i++)
+            {
+                var r = rockCoords[i];
+                PlaceGroundedMesh("PerimeterRock_" + i, meshes.EnvRockCluster, PrimitiveType.Sphere, new Vector3(r.x, 0f, r.z), new Vector3(3.19f * r.sx * rockBoost, 0.93f * r.sy * rockBoost, 2.39f * r.sz * rockBoost), r.yaw, mats.Rock);
+            }
+
+            if (missionIndex == 2)
+            {
+                var canyonBoulders = new (float x, float z, float s, float yaw)[]
+                {
+                    (-42f, -32f, 2.2f, 14f), (42f, -32f, 2.2f, 194f), (-44f, 16f, 2.4f, 88f), (44f, 16f, 2.4f, 268f),
+                    (-36f, 54f, 2.1f, 42f), (36f, 54f, 2.1f, 152f), (0f, 62f, 2.3f, 75f), (0f, -60f, 2.0f, 255f)
+                };
+                for (var i = 0; i < canyonBoulders.Length; i++)
+                {
+                    var b = canyonBoulders[i];
+                    PlaceGroundedMesh("CanyonBoulder_" + i, meshes.EnvRockCluster, PrimitiveType.Sphere, new Vector3(b.x, 0f, b.z), new Vector3(3.19f * b.s, 1.25f * b.s, 2.39f * b.s), b.yaw, mats.Rock);
+                }
+            }
+
+            void PlaceGroundedMesh(string objName, Mesh mesh, PrimitiveType fallback, Vector3 xzPos, Vector3 targetSize, float yaw, Material mat)
+            {
+                var go = CreateVisualMeshFit(objName, mesh, fallback, hills.transform, Vector3.zero, targetSize, mat);
+                var mf = go.GetComponent<MeshFilter>();
+                var minY = mf != null && mf.sharedMesh != null ? mf.sharedMesh.bounds.min.y * go.transform.localScale.y : -0.5f * go.transform.localScale.y;
+                go.transform.localPosition = new Vector3(xzPos.x, -0.35f - minY, xzPos.z);
+                go.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
                 go.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
             }
         }
@@ -1086,10 +1380,15 @@ namespace TopDownShooter.Editor
             }
         }
 
-        private static void BuildRoadDeck(Transform parent, Material matAsphaltDark, Material matStripeYellow)
+        private static void BuildRoadDeck(Transform parent, Material matAsphaltDark, Material matCurb, Material matStripeYellow)
         {
             var road = CreateVisualBox("ConvoyMainRoad", parent, new Vector3(0f, 0.005f, -5f), new Vector3(11.5f, 0.01f, 88f), matAsphaltDark);
             road.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+
+            var curbW = CreateVisualBox("ConvoyCurb_West", parent, new Vector3(-5.90f, 0.03f, -5f), new Vector3(0.32f, 0.06f, 88f), matCurb);
+            curbW.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+            var curbE = CreateVisualBox("ConvoyCurb_East", parent, new Vector3(5.90f, 0.03f, -5f), new Vector3(0.32f, 0.06f, 88f), matCurb);
+            curbE.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
 
             for (var z = -47f; z <= 31f; z += 5.5f)
             {
@@ -1664,6 +1963,7 @@ namespace TopDownShooter.Editor
         }
 
         private static UIManager BuildGameCanvasAndUI(
+            int missionIndex,
             GameObject systemsRoot,
             Sprite solidSprite,
             Sprite roundedSprite,
@@ -1673,6 +1973,8 @@ namespace TopDownShooter.Editor
             Sprite chevronSprite,
             Sprite damageVignetteSprite)
         {
+            StoryDirector.ActiveMissionIndex = missionIndex;
+
             // EventSystem using New Input System UI Module
             var esGo = new GameObject("EventSystem");
             esGo.AddComponent<EventSystem>();
@@ -1703,15 +2005,15 @@ namespace TopDownShooter.Editor
             var nvgStamp = CreateStyledText("NvgHudStamp", nvgOverlayGroup.transform, "AN/PVS-31 NVG // IR GAIN HIGH", 11f, FontStyles.Bold, 3.0f, Palette.WithAlpha(Palette.NvgPhosphor, 0.85f), TextAlignmentOptions.Center);
             SetAnchoredRect(nvgStamp.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -6f), new Vector2(340f, 16f));
 
-            // Fullscreen CoD Crimson Damage Vignette (Non-blocking background overlay)
+            // Fullscreen Crimson Damage Vignette (Non-blocking background overlay)
             var damageVignetteImg = CreateImage("DamageVignette", hudGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, damageVignetteSprite, Palette.WithAlpha(Palette.DamageBloodRed, 0f), false);
 
-            // Top-Left CoD Tactical Radar Minimap
+            // Top-Left Tactical Radar Minimap
             var radarBox = CreatePanel("TacticalRadarBox", hudGroup.transform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -20f), new Vector2(182f, 182f), roundedSprite, Palette.HudDarkGlass);
             radarBox.GetComponent<Image>().raycastTarget = false;
             CreateImage("RadarAccentTop", radarBox, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-18f, 3f), solidSprite, Palette.SquadBlue, false);
 
-            var radarUavTxt = CreateStyledText("RadarUavStatusText", radarBox, "TAC-RADAR // HAJIN DMZ", 10f, FontStyles.Bold, 1.8f, Palette.MutedText, TextAlignmentOptions.Center);
+            var radarUavTxt = CreateStyledText("RadarUavStatusText", radarBox, StoryDirector.GetMissionTitle(missionIndex), 10f, FontStyles.Bold, 1.8f, Palette.MutedText, TextAlignmentOptions.Center);
             SetAnchoredRect(radarUavTxt.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -15f), new Vector2(168f, 18f));
 
             var radarFieldRt = CreatePanel("RadarField", radarBox, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -12f), new Vector2(142f, 142f), roundedSprite, Palette.WithAlpha(Palette.Shadow, 0.72f));
@@ -1754,13 +2056,13 @@ namespace TopDownShooter.Editor
             radioCg.interactable = false;
             radioCg.blocksRaycasts = false;
             var radioStripe = CreateImage("RadioAccentStripe", radioRt, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(6f, 0f), new Vector2(4f, 68f), solidSprite, Palette.Accent, false);
-            var radioCallsignTxt = CreateStyledText("RadioCallsignText", radioRt, "OVERWATCH // TAC-NET CH-04", 12f, FontStyles.Bold, 2.0f, Palette.Accent, TextAlignmentOptions.TopLeft);
+            var radioCallsignTxt = CreateStyledText("RadioCallsignText", radioRt, "AEGIS-ACTUAL // TAC-NET CH-04", 12f, FontStyles.Bold, 2.0f, Palette.Accent, TextAlignmentOptions.TopLeft);
             SetAnchoredRect(radioCallsignTxt.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -10f), new Vector2(368f, 20f));
             var radioBodyTxt = CreateStyledText("RadioBodyText", radioRt, "", 12.5f, FontStyles.Normal, 0.7f, Palette.CharacterSecondary, TextAlignmentOptions.TopLeft);
             radioBodyTxt.textWrappingMode = TextWrappingModes.Normal;
             SetAnchoredRect(radioBodyTxt.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -32f), new Vector2(368f, 54f));
 
-            // Bottom-Left Combined Fireteam Bravo-6 Squad Roster, Orders & Operator Vitals Card
+            // Bottom-Left Combined Spectre Detachment Squad Roster, Orders & Operator Vitals Card
             var sqCard = CreatePanel("StatusCard_Left", hudGroup.transform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(24f, 20f), new Vector2(420f, 232f), roundedSprite, Palette.HudDarkGlass);
             CreateImage("CardAccentTop", sqCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 3f), solidSprite, Palette.SquadBlue, false);
 
@@ -1779,7 +2081,7 @@ namespace TopDownShooter.Editor
                 if (olbl != null) olbl.characterSpacing = 1.3f;
             }
 
-            string[] defaultSqNames = { "CPT. PRICE", "GHOST", "SGT. GAZ" };
+            string[] defaultSqNames = { "MAJ. ROURKE", "KOZLOWSKI", "CPL. REYES" };
             var sqNames = new TextMeshProUGUI[3];
             var sqBars = new Image[3];
             var sqStatuses = new TextMeshProUGUI[3];
@@ -1799,7 +2101,7 @@ namespace TopDownShooter.Editor
             CreateImage("SquadVitalsDivider", sqCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -138f), new Vector2(-32f, 1f), solidSprite, Palette.WithAlpha(Palette.CharacterSecondary, 0.16f), false);
             CreateIcon("ShieldIcon", sqCard, new Vector2(0f, 0f), new Vector2(36f, 48f), new Vector2(38f, 38f), shieldSprite, Palette.HealthGreen);
 
-            var hpLabel = CreateStyledText("HPLabel", sqCard, "YOU // TF-141 ACTUAL", 11.5f, FontStyles.Bold, 2.5f, Palette.MutedText, TextAlignmentOptions.BottomLeft);
+            var hpLabel = CreateStyledText("HPLabel", sqCard, "YOU // NOMAD-1", 11.5f, FontStyles.Bold, 2.5f, Palette.MutedText, TextAlignmentOptions.BottomLeft);
             SetAnchoredRect(hpLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(72f, 64f), new Vector2(190f, 20f));
 
             var hpValueText = CreateStyledText("HPValueText", sqCard, "100 / 100", 15f, FontStyles.Bold, 2f, Palette.CharacterSecondary, TextAlignmentOptions.BottomRight);
@@ -1824,11 +2126,11 @@ namespace TopDownShooter.Editor
             dashBg.rectTransform.offsetMax = new Vector2(-16f, 25f);
             var dashFill = CreateFilledBar("DashBarFill", dashBg.transform, roundedSprite, Palette.Accent);
 
-            // Top-Center Mission Act, Hostile Status & Score Pill (Replaces arcade Wave counter)
+            // Top-Center Mission Act, Hostile Status & Score Pill
             var centerPill = CreatePanel("StatusPill_Center", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -20f), new Vector2(520f, 68f), roundedSprite, Palette.PanelSurface);
             CreateImage("PillAccent", centerPill, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 3f), solidSprite, Palette.Accent, false);
 
-            var waveText = CreateStyledText("WaveText", centerPill, "ACT I: HAJIN DMZ INSERTION", 15f, FontStyles.Bold, 2.4f, Palette.CharacterSecondary, TextAlignmentOptions.TopLeft);
+            var waveText = CreateStyledText("WaveText", centerPill, StoryDirector.GetActLabel(1), 15f, FontStyles.Bold, 2.4f, Palette.CharacterSecondary, TextAlignmentOptions.TopLeft);
             SetAnchoredRect(waveText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(20f, -11f), new Vector2(310f, 24f));
 
             var enemiesText = CreateStyledText("EnemiesText", centerPill, "8 HOSTILES IN SECTOR", 12f, FontStyles.Bold, 2.2f, Palette.EnemySecondary, TextAlignmentOptions.BottomLeft);
@@ -1840,14 +2142,14 @@ namespace TopDownShooter.Editor
             // Top-Center Objective Banner + Boss Bar below StatusPill_Center
             var objPill = CreatePanel("ObjectivePill_Center", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -96f), new Vector2(520f, 32f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.97f));
             CreateImage("ObjAccentLeft", objPill, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(6f, 0f), new Vector2(4f, 18f), solidSprite, Palette.C4Amber, false);
-            var objectiveText = CreateStyledText("ObjectiveBannerText", objPill, "OBJ I // BREACH HAJIN CHECKPOINT (0/8)", 12f, FontStyles.Bold, 2.2f, Palette.Accent, TextAlignmentOptions.Center);
+            var objectiveText = CreateStyledText("ObjectiveBannerText", objPill, StoryDirector.GetSectorObjective(1), 12f, FontStyles.Bold, 2.2f, Palette.Accent, TextAlignmentOptions.Center);
             StretchRect(objectiveText.rectTransform);
 
             // Boss Encounter Health Bar (anchored cleanly beneath Objective Pill)
             var bossRoot = CreatePanel("BossBarRoot", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -136f), new Vector2(540f, 56f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.94f));
             CreateImage("BossBarAccent", bossRoot, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 3f), solidSprite, Palette.EnemySecondary, false);
 
-            var bossNameText = CreateStyledText("BossNameText", bossRoot, "KONNI IFV 'VIPER-01'", 13f, FontStyles.Bold, 3.5f, Palette.EnemySecondary, TextAlignmentOptions.TopLeft);
+            var bossNameText = CreateStyledText("BossNameText", bossRoot, StoryDirector.GetBossCallsign(2), 13f, FontStyles.Bold, 3.5f, Palette.EnemySecondary, TextAlignmentOptions.TopLeft);
             SetAnchoredRect(bossNameText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -10f), new Vector2(300f, 20f));
 
             var bossHpText = CreateStyledText("BossHpText", bossRoot, "380 / 380", 13f, FontStyles.Bold, 2f, Palette.CharacterSecondary, TextAlignmentOptions.TopRight);
@@ -1879,7 +2181,7 @@ namespace TopDownShooter.Editor
 
             var hudPauseBtn = CreateButton("HUD_PauseButton", rightCard, "| |", new Vector2(1f, 0.5f), new Vector2(-14f, 0f), new Vector2(56f, 52f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
 
-            // Top-Right Rolling CoD Killfeed (non-blocking text stack below StatusCard_Right)
+            // Top-Right Rolling Tactical Killfeed (non-blocking text stack below StatusCard_Right)
             var killFeedTxt = CreateStyledText("KillFeedText", hudGroup.transform, string.Empty, 12f, FontStyles.Bold, 1.3f, Palette.CharacterSecondary, TextAlignmentOptions.TopRight);
             SetAnchoredRect(killFeedTxt.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-24f, -110f), new Vector2(360f, 70f));
 
@@ -1919,7 +2221,7 @@ namespace TopDownShooter.Editor
             ctxGroup.blocksRaycasts = false;
             ctxGroup.interactable = false;
             CreateImage("CtxAccentLeft", ctxPill, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(6f, 0f), new Vector2(4f, 20f), solidSprite, Palette.C4Amber, false);
-            var ctxText = CreateStyledText("ContextPromptText", ctxPill, "[E] PLANT C4 ON BLAST GATE ALPHA", 12.5f, FontStyles.Bold, 2.0f, Palette.C4Amber, TextAlignmentOptions.Center);
+            var ctxText = CreateStyledText("ContextPromptText", ctxPill, "[E] PLANT C4 AT " + StoryDirector.GetObjectiveNodeTitle(missionIndex, 0), 12.5f, FontStyles.Bold, 2.0f, Palette.C4Amber, TextAlignmentOptions.Center);
             StretchRect(ctxText.rectTransform);
 
             // Bottom-Center 6-Weapon Loadout Bar
@@ -1983,7 +2285,7 @@ namespace TopDownShooter.Editor
             var milestoneTxt = CreateStyledText("MilestoneText", bannerRt, "KILLSTREAK // ONLINE", 18.5f, FontStyles.Bold, 3.2f, Palette.Accent, TextAlignmentOptions.Center);
             StretchRect(milestoneTxt.rectTransform);
 
-            // Reticle Crosshair & Center CoD Hitmarker (4 diagonal ticks)
+            // Reticle Crosshair & Center Hitmarker (4 diagonal ticks)
             var crosshairImg = CreateImage("Crosshair", hudGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(36f, 36f), crosshairSprite, Palette.WithAlpha(Palette.Accent, 0.9f), false);
 
             var hitmarkerGo = new GameObject("HitmarkerGroup");
@@ -2010,31 +2312,52 @@ namespace TopDownShooter.Editor
             var titleGroup = CreateFullScreenGroup("TitlePanel", canvasGo.transform);
             CreateImage("TitleScrim", titleGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.WithAlpha(Palette.Shadow, 0.36f), true);
 
-            var titleCard = CreatePanel("TitleCard", titleGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(760f, 470f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.93f));
+            var titleCard = CreatePanel("TitleCard", titleGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(820f, 540f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.93f));
             CreateImage("TitleAccentTop", titleCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 5f), solidSprite, Palette.Accent, false);
 
-            var gameTitle = CreateStyledText("GameTitleText", titleCard, "TASK FORCE // 141", 46f, FontStyles.Bold, 6f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
-            SetAnchoredRect(gameTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -58f), new Vector2(680f, 70f));
+            var gameTitle = CreateStyledText("GameTitleText", titleCard, StoryDirector.OperationTitle, 44f, FontStyles.Bold, 6f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
+            SetAnchoredRect(gameTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -52f), new Vector2(740f, 66f));
 
-            var subtitle = CreateStyledText("SubtitleText", titleCard, "OPERATION NIGHTFALL // HAJIN DMZ", 15.5f, FontStyles.Bold, 4f, Palette.Accent, TextAlignmentOptions.Center);
-            SetAnchoredRect(subtitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -114f), new Vector2(660f, 28f));
+            var subtitle = CreateStyledText("SubtitleText", titleCard, StoryDirector.GetMissionTitle(missionIndex) + "  //  " + StoryDirector.GetMissionSubtitle(missionIndex), 14.5f, FontStyles.Bold, 3.2f, Palette.Accent, TextAlignmentOptions.Center);
+            SetAnchoredRect(subtitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -102f), new Vector2(760f, 26f));
 
-            var titleBrief = CreateStyledText("TitleBriefText", titleCard, "Lead TF-141 (Capt. Price, Ghost, Gaz & Pvt. Park) into Hajin DMZ: breach Border Gate Alpha, sabotage Konni fuel & SAM radar, and eliminate Komander Volkov.", 13.5f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
+            var missionBriefCopy = missionIndex switch
+            {
+                1 => "Lead Spectre Detachment (Maj. Rourke, Spec. Kozlowski & Cpl. Reyes) into Blackwater Pier: breach customs gate, sabotage coastal radar & fuel lines, and eliminate Capt. Dragic.",
+                2 => "Ambush Ironward's armored rail convoy inside Iron Corridor Gorge: smash Goliath-02 armor, cut switchyard power, and eliminate Dir. Elena Kastner.",
+                _ => "Assault Blackcrest Alpine Citadel by moonlight: overload twin Project HELIOS capacitor pylons, defeat Col. Artem Radek, and extract aboard Blackhawk VALKYRIE-6."
+            };
+            var titleBrief = CreateStyledText("TitleBriefText", titleCard, missionBriefCopy, 13.5f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
             titleBrief.textWrappingMode = TextWrappingModes.Normal;
-            SetAnchoredRect(titleBrief.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -152f), new Vector2(700f, 46f));
+            SetAnchoredRect(titleBrief.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -144f), new Vector2(740f, 48f));
 
-            var titleBest = CreateStyledText("TitleHighScoreText", titleCard, "HIGH SCORE // 0", 16f, FontStyles.Bold, 3f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
-            SetAnchoredRect(titleBest.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 24f), new Vector2(460f, 28f));
+            var titleBest = CreateStyledText("TitleHighScoreText", titleCard, "HIGH SCORE // 0", 15.5f, FontStyles.Bold, 3f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
+            SetAnchoredRect(titleBest.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 66f), new Vector2(460f, 26f));
 
-            var titleCredits = CreateStyledText("TitleCreditsText", titleCard, "FUNDS // 200 CR", 16f, FontStyles.Bold, 3f, Palette.CreditGold, TextAlignmentOptions.Center);
-            SetAnchoredRect(titleCredits.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -6f), new Vector2(460f, 26f));
+            var titleCredits = CreateStyledText("TitleCreditsText", titleCard, "FUNDS // 200 CR", 15.5f, FontStyles.Bold, 3f, Palette.CreditGold, TextAlignmentOptions.Center);
+            SetAnchoredRect(titleCredits.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 38f), new Vector2(460f, 24f));
+
+            // 3-Act Mission Selector Strip
+            var mBtns = new Button[StoryDirector.CampaignMissionCount];
+            var mBgs = new Image[StoryDirector.CampaignMissionCount];
+            var mLbls = new TextMeshProUGUI[StoryDirector.CampaignMissionCount];
+            string[] missionShortLabels = { "ACT I: PIER", "ACT II: DEPOT", "ACT III: PEAK" };
+            for (var i = 0; i < StoryDirector.CampaignMissionCount; i++)
+            {
+                var mx = -224f + i * 224f;
+                var mb = CreateButton("MissionSelectBtn_" + i, titleCard, missionShortLabels[i], new Vector2(0.5f, 0.5f), new Vector2(mx, -16f), new Vector2(210f, 40f), roundedSprite, (i + 1 == missionIndex) ? Palette.SquadBlue : Palette.SecondaryButtonBg, Palette.CharacterSecondary, 12.5f);
+                mBtns[i] = mb;
+                mBgs[i] = mb.GetComponent<Image>();
+                mLbls[i] = mb.GetComponentInChildren<TextMeshProUGUI>();
+                if (mLbls[i] != null) mLbls[i].characterSpacing = 1.4f;
+            }
 
             var controlsHint = CreateStyledText("ControlsHintText", titleCard, "WASD MOVE · MOUSE FIRE · [R] RELOAD · [N] NVG · [G] FRAG · [F] MORTAR · [E] C4/REVIVE · [Z/X/C] ORDERS", 10.5f, FontStyles.Bold, 1.3f, Palette.MutedText, TextAlignmentOptions.Center);
-            SetAnchoredRect(controlsHint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 30f), new Vector2(700f, 24f));
+            SetAnchoredRect(controlsHint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 30f), new Vector2(760f, 24f));
 
-            var startBtn = CreateButton("StartMissionButton", titleCard, "DEPLOY", new Vector2(0.5f, 0.5f), new Vector2(-216f, -82f), new Vector2(204f, 58f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
-            var armoryBtn = CreateButton("TitleArmoryButton", titleCard, "ARMORY", new Vector2(0.5f, 0.5f), new Vector2(0f, -82f), new Vector2(204f, 58f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
-            var intelBtn = CreateButton("TitleIntelButton", titleCard, "INTEL DOSSIER", new Vector2(0.5f, 0.5f), new Vector2(216f, -82f), new Vector2(204f, 58f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 17f);
+            var startBtn = CreateButton("StartMissionButton", titleCard, "DEPLOY", new Vector2(0.5f, 0.5f), new Vector2(-216f, -98f), new Vector2(204f, 56f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
+            var armoryBtn = CreateButton("TitleArmoryButton", titleCard, "ARMORY", new Vector2(0.5f, 0.5f), new Vector2(0f, -98f), new Vector2(204f, 56f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
+            var intelBtn = CreateButton("TitleIntelButton", titleCard, "INTEL DOSSIER", new Vector2(0.5f, 0.5f), new Vector2(216f, -98f), new Vector2(204f, 56f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 17f);
 
             // 3. PAUSE PANEL
             var pauseGroup = CreateFullScreenGroup("PausePanel", canvasGo.transform);
@@ -2057,11 +2380,11 @@ namespace TopDownShooter.Editor
             var endedGroup = CreateFullScreenGroup("EndedPanel", canvasGo.transform);
             CreateImage("EndedScrim", endedGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.ScrimDark, true);
 
-            var endedCard = CreatePanel("EndedCard", endedGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(600f, 476f), roundedSprite, Palette.PanelSurface);
+            var endedCard = CreatePanel("EndedCard", endedGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(680f, 490f), roundedSprite, Palette.PanelSurface);
             var endedAccent = CreateImage("EndedAccentTop", endedCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 5f), solidSprite, Palette.EnemySecondary, false);
 
             var endedTitle = CreateStyledText("EndedTitleText", endedCard, "K.I.A. // MISSION FAILED", 30f, FontStyles.Bold, 4.5f, Palette.EnemySecondary, TextAlignmentOptions.Center);
-            SetAnchoredRect(endedTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -48f), new Vector2(540f, 50f));
+            SetAnchoredRect(endedTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -48f), new Vector2(600f, 50f));
 
             var endedScore = CreateStyledText("EndedScoreText", endedCard, "0 PTS", 44f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.Center);
             SetAnchoredRect(endedScore.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 84f), new Vector2(460f, 56f));
@@ -2069,18 +2392,23 @@ namespace TopDownShooter.Editor
             var endedBest = CreateStyledText("EndedBestText", endedCard, "BEST // 0", 18f, FontStyles.Bold, 3.5f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
             SetAnchoredRect(endedBest.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 34f), new Vector2(460f, 28f));
 
-            var endedStats = CreateStyledText("EndedStatsText", endedCard, "ELIMINATIONS: 0   |   WAVE REACHED: 1", 15f, FontStyles.Bold, 2f, Palette.MutedText, TextAlignmentOptions.Center);
-            SetAnchoredRect(endedStats.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -6f), new Vector2(500f, 24f));
+            var endedStats = CreateStyledText("EndedStatsText", endedCard, "ELIMINATIONS: 0   |   STAGE REACHED: 1", 15f, FontStyles.Bold, 2f, Palette.MutedText, TextAlignmentOptions.Center);
+            SetAnchoredRect(endedStats.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -6f), new Vector2(540f, 24f));
 
             var endedCredits = CreateStyledText("EndedCreditsText", endedCard, "EARNED +0 CR   |   FUNDS: 200 CR", 15f, FontStyles.Bold, 2f, Palette.CreditGold, TextAlignmentOptions.Center);
-            SetAnchoredRect(endedCredits.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -40f), new Vector2(520f, 24f));
+            SetAnchoredRect(endedCredits.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -40f), new Vector2(560f, 24f));
 
             var endedNarrative = CreateStyledText("EndedNarrativeText", endedCard, "", 13f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
             endedNarrative.textWrappingMode = TextWrappingModes.Normal;
-            SetAnchoredRect(endedNarrative.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -90f), new Vector2(520f, 58f));
+            SetAnchoredRect(endedNarrative.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -90f), new Vector2(580f, 58f));
 
-            var eReplayBtn = CreateButton("EndedReplayButton", endedCard, "REDEPLOY", new Vector2(0.5f, 0.5f), new Vector2(-115f, -168f), new Vector2(205f, 54f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
-            var eTitleBtn = CreateButton("EndedTitleButton", endedCard, "HQ MENU", new Vector2(0.5f, 0.5f), new Vector2(115f, -168f), new Vector2(205f, 54f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
+            var nextMissionDefault = missionIndex < StoryDirector.CampaignMissionCount
+                ? (missionIndex == 1 ? "NEXT: ACT II ->" : "NEXT: ACT III ->")
+                : "NEXT MISSION";
+            var eReplayBtn = CreateButton("EndedReplayButton", endedCard, "REDEPLOY", new Vector2(0.5f, 0.5f), new Vector2(-220f, -168f), new Vector2(200f, 54f), roundedSprite, Palette.Accent, Palette.Shadow, 19f);
+            var eNextMissionBtn = CreateButton("EndedNextMissionButton", endedCard, nextMissionDefault, new Vector2(0.5f, 0.5f), new Vector2(0f, -168f), new Vector2(204f, 54f), roundedSprite, Palette.HealthGreen, Palette.Shadow, 16.5f);
+            eNextMissionBtn.gameObject.SetActive(missionIndex < StoryDirector.CampaignMissionCount);
+            var eTitleBtn = CreateButton("EndedTitleButton", endedCard, "HQ MENU", new Vector2(0.5f, 0.5f), new Vector2(220f, -168f), new Vector2(200f, 54f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
 
             // 5. ARMORY & LOADOUT MODAL PANEL
             var armoryGroup = CreateFullScreenGroup("ArmoryPanel", canvasGo.transform);
@@ -2211,7 +2539,7 @@ namespace TopDownShooter.Editor
             var intelCard = CreatePanel("IntelCard", intelGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(880f, 590f), roundedSprite, Palette.PanelSurface);
             CreateImage("IntelAccentTop", intelCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-36f, 4f), solidSprite, Palette.Accent, false);
 
-            var intelHeader = CreateStyledText("IntelHeaderText", intelCard, "TAC-NET INTEL DOSSIER // OPERATION NIGHTFALL", 21f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.MidlineLeft);
+            var intelHeader = CreateStyledText("IntelHeaderText", intelCard, "TAC-NET INTEL DOSSIER // " + StoryDirector.OperationTitle, 21f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.MidlineLeft);
             SetAnchoredRect(intelHeader.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(34f, -42f), new Vector2(810f, 40f));
 
             var intelBodyText = CreateStyledText("IntelBodyText", intelCard, StoryDirector.BuildIntelDossierText(0), 13.5f, FontStyles.Normal, 0.6f, Palette.CharacterSecondary, TextAlignmentOptions.TopLeft);
@@ -2220,7 +2548,7 @@ namespace TopDownShooter.Editor
 
             var intelCloseBtn = CreateButton("IntelCloseButton", intelCard, "CLOSE DOSSIER", new Vector2(0.5f, 0f), new Vector2(0f, 40f), new Vector2(240f, 48f), roundedSprite, Palette.Accent, Palette.Shadow, 17f);
 
-            // 8. CALL-OF-DUTY WIDESCREEN CUTSCENE LETTERBOX OVERLAY
+            // 8. WIDESCREEN CUTSCENE LETTERBOX OVERLAY
             var cinemaGroup = CreateFullScreenGroup("CinemaOverlay", canvasGo.transform);
             cinemaGroup.alpha = 0f;
             cinemaGroup.interactable = false;
@@ -2229,10 +2557,10 @@ namespace TopDownShooter.Editor
             CreateImage("TopCinemaBar", cinemaGroup.transform, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, 0f), new Vector2(0f, 100f), solidSprite, Palette.Shadow, true);
             var bottomCinemaBar = CreatePanel("BottomCinemaBar", cinemaGroup.transform, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0f, 0f), new Vector2(0f, 136f), solidSprite, Palette.Shadow);
 
-            var cinemaStampTxt = CreateStyledText("CinemaMissionStampText", bottomCinemaBar, "OPERATION: NIGHTFALL\nHAJIN DMZ // KOREA", 17f, FontStyles.Bold, 2.2f, Palette.HealthGreen, TextAlignmentOptions.BottomLeft);
+            var cinemaStampTxt = CreateStyledText("CinemaMissionStampText", bottomCinemaBar, StoryDirector.GetMissionTitle(missionIndex) + "\n" + StoryDirector.GetMissionSubtitle(missionIndex), 17f, FontStyles.Bold, 2.2f, Palette.HealthGreen, TextAlignmentOptions.BottomLeft);
             SetAnchoredRect(cinemaStampTxt.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(42f, 20f), new Vector2(540f, 96f));
 
-            var cinemaSpeakerTxt = CreateStyledText("CinemaSpeakerText", bottomCinemaBar, "CPT. PRICE // TF-141 ACTUAL", 13f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.Center);
+            var cinemaSpeakerTxt = CreateStyledText("CinemaSpeakerText", bottomCinemaBar, "MAJ. ROURKE // IRONWOOD-1", 13f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.Center);
             SetAnchoredRect(cinemaSpeakerTxt.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(30f, -14f), new Vector2(680f, 24f));
 
             var cinemaDialogueTxt = CreateStyledText("CinemaDialogueText", bottomCinemaBar, "", 15.5f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.Top);
@@ -2286,6 +2614,10 @@ namespace TopDownShooter.Editor
                 hitmarkerGroup, hmTicks, killFeedTxt,
                 ammoHudTxt, reloadProgressFill,
                 nvgOverlayGroup, nvgStatusTxt, nvgToggleBtn);
+
+            ui.BindCampaignUi(
+                mBtns, mBgs, mLbls,
+                eNextMissionBtn, eNextMissionBtn.GetComponentInChildren<TextMeshProUGUI>());
 
             OptimizeCanvasRaycastTargets(canvasGo);
 

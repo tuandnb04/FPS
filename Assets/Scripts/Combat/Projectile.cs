@@ -190,7 +190,7 @@ namespace Combat
                                 FeelManager.Instance?.TriggerHitmarker(killed);
                                 if (killed)
                                 {
-                                    FeelManager.Instance?.TriggerKillFeed("PRICE", enemy.DisplayCallsign, "5.56");
+                                    FeelManager.Instance?.TriggerKillFeed("VANCE", enemy.DisplayCallsign, "5.56");
                                 }
                                 VFXManager.Instance?.Play(VfxKind.HitSpark, hit.point, _projectileTint);
                                 AudioManager.Instance?.PlayHit();
@@ -261,7 +261,7 @@ namespace Combat
                 if (!wasDead && enemy.IsDead)
                 {
                     anyKill = true;
-                    FeelManager.Instance?.TriggerKillFeed("PRICE", enemy.DisplayCallsign, "HE");
+                    FeelManager.Instance?.TriggerKillFeed("VANCE", enemy.DisplayCallsign, "HE");
                 }
             }
 
