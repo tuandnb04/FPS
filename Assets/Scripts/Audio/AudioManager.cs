@@ -21,6 +21,7 @@ namespace TopDownShooter.Audio
 
         private AudioSource musicSource;
         private AudioSource sfxSource;
+        private AudioSource gunSfxSource;
 
         private AudioClip shootClip;
         private AudioClip hitClip;
@@ -90,16 +91,9 @@ namespace TopDownShooter.Audio
         private void EnsureAudioSources()
         {
             var sources = GetComponents<AudioSource>();
-            if (sources.Length >= 2)
-            {
-                musicSource = sources[0];
-                sfxSource = sources[1];
-            }
-            else
-            {
-                musicSource = gameObject.AddComponent<AudioSource>();
-                sfxSource = gameObject.AddComponent<AudioSource>();
-            }
+            musicSource = sources.Length > 0 ? sources[0] : gameObject.AddComponent<AudioSource>();
+            sfxSource = sources.Length > 1 ? sources[1] : gameObject.AddComponent<AudioSource>();
+            gunSfxSource = sources.Length > 2 ? sources[2] : gameObject.AddComponent<AudioSource>();
 
             musicSource.loop = true;
             musicSource.playOnAwake = false;
@@ -108,6 +102,10 @@ namespace TopDownShooter.Audio
             sfxSource.loop = false;
             sfxSource.playOnAwake = false;
             sfxSource.spatialBlend = 0f;
+
+            gunSfxSource.loop = false;
+            gunSfxSource.playOnAwake = false;
+            gunSfxSource.spatialBlend = 0f;
             ApplyVolumes();
         }
 
@@ -177,11 +175,21 @@ namespace TopDownShooter.Audio
             {
                 sfxSource.volume = sfxVolume;
             }
+            if (gunSfxSource != null)
+            {
+                gunSfxSource.volume = sfxVolume;
+            }
         }
 
-        public void PlayShoot()
+        public void PlayShoot(float pitchMultiplier = 1f, float volumeScale = 0.55f)
         {
-            PlayOneShotWithPitch(shootClip, UnityEngine.Random.Range(0.95f, 1.06f), 0.55f);
+            AudioSource src = gunSfxSource != null ? gunSfxSource : sfxSource;
+            if (src == null || shootClip == null || sfxVolume <= 0.001f)
+            {
+                return;
+            }
+            src.pitch = Mathf.Clamp(pitchMultiplier * UnityEngine.Random.Range(0.97f, 1.03f), 0.45f, 1.85f);
+            src.PlayOneShot(shootClip, volumeScale);
         }
 
         public void PlayHit()

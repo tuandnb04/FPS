@@ -28,8 +28,9 @@ namespace TopDownShooter.UI
     {
         public static UIManager Instance { get; private set; }
 
-        private static readonly string[] WeaponNames = { "M4A1 CARBINE", "M870 SHOTGUN", "MK14 SNIPER", "RPG-7 LAUNCHER" };
-        private static readonly int[] WeaponCosts = { 0, 150, 300, 450 };
+        private static readonly string[] WeaponNames = { "M4A1 CARBINE", "M870 SHOTGUN", "MK14 SNIPER", "RPG-7 LAUNCHER", "AN-94 ABAKAN", "VECTOR .45 SMG" };
+        private static readonly string[] WeaponShortTags = { "5.56 AUTO", "12G PUMP", "AP PIERCE", "HE ROCKET", "2X BURST", "1100 RPM" };
+        private static readonly int[] WeaponCosts = { 0, 150, 300, 450, 140, 200 };
         private static readonly string[] SkinNames = { "RANGER OLIVE", "DESERT TAN", "NIGHT OPS" };
         private static readonly int[] SkinCosts = { 0, 180, 280 };
         private static readonly string[] UpgradeKeys = { "armor", "firepower", "thruster", "greed" };
@@ -65,6 +66,7 @@ namespace TopDownShooter.UI
         [SerializeField] private Button[] weaponSlotButtons;
         [SerializeField] private Image[] weaponSlotBgs;
         [SerializeField] private TextMeshProUGUI[] weaponSlotLabels;
+        [SerializeField] private GameObject mobileTouchControlsRoot;
         [SerializeField] private VirtualJoystick leftJoystick;
         [SerializeField] private VirtualJoystick rightJoystick;
         [SerializeField] private Button touchDashButton;
@@ -132,8 +134,32 @@ namespace TopDownShooter.UI
         public float ArmoryAlpha => armoryGroup != null ? armoryGroup.alpha : 0f;
         public float DraftAlpha => draftGroup != null ? draftGroup.alpha : 0f;
         public bool IsBossBarVisible => bossBarRoot != null && bossBarRoot.gameObject.activeSelf;
+        public static bool? ForceMobileControlsOverride { get; set; }
         public VirtualJoystick LeftJoystick => leftJoystick;
         public VirtualJoystick RightJoystick => rightJoystick;
+        public bool IsMobileTouchControlsVisible => mobileTouchControlsRoot != null && mobileTouchControlsRoot.activeSelf;
+
+        public static bool ShouldShowMobileControls()
+        {
+            if (ForceMobileControlsOverride.HasValue)
+            {
+                return ForceMobileControlsOverride.Value;
+            }
+            return Application.isMobilePlatform || SystemInfo.deviceType == DeviceType.Handheld;
+        }
+
+        public void RefreshPlatformControls()
+        {
+            if (mobileTouchControlsRoot == null && hudGroup != null)
+            {
+                Transform found = hudGroup.transform.Find("MobileTouchControls");
+                if (found != null) mobileTouchControlsRoot = found.gameObject;
+            }
+            if (mobileTouchControlsRoot != null)
+            {
+                mobileTouchControlsRoot.SetActive(ShouldShowMobileControls());
+            }
+        }
 
         public void BindCore(
             CanvasGroup title, CanvasGroup hud, CanvasGroup pause, CanvasGroup ended, CanvasGroup armory, CanvasGroup draft,
@@ -198,11 +224,13 @@ namespace TopDownShooter.UI
             Button[] upgBtns, TextMeshProUGUI[] upgRankLbls, TextMeshProUGUI[] upgCostLbls,
             Button[] shopWpnBtns, TextMeshProUGUI[] shopWpnLbls,
             Button[] shopSkinBtns, TextMeshProUGUI[] shopSkinLbls,
-            Button[] drftBtns, TextMeshProUGUI[] drftTitles, TextMeshProUGUI[] drftRanks, TextMeshProUGUI[] drftDescs)
+            Button[] drftBtns, TextMeshProUGUI[] drftTitles, TextMeshProUGUI[] drftRanks, TextMeshProUGUI[] drftDescs,
+            GameObject touchControlsRoot = null)
         {
             weaponSlotButtons = wButtons;
             weaponSlotBgs = wBgs;
             weaponSlotLabels = wLabels;
+            mobileTouchControlsRoot = touchControlsRoot;
             leftJoystick = leftStick;
             rightJoystick = rightStick;
             touchDashButton = dashBtn;
@@ -219,6 +247,7 @@ namespace TopDownShooter.UI
             draftTitles = drftTitles;
             draftRanks = drftRanks;
             draftDescs = drftDescs;
+            RefreshPlatformControls();
         }
 
         private void Awake()
@@ -235,6 +264,7 @@ namespace TopDownShooter.UI
         {
             EnsureBarSprites();
             WireButtonsAndSliders();
+            RefreshPlatformControls();
             ApplyImmediateState(GameState.Title);
             RefreshVolumeLabels();
             RefreshWeaponBar();
@@ -452,14 +482,23 @@ namespace TopDownShooter.UI
 
         private void Update()
         {
-            if (crosshairRect != null && hudGroup != null && hudGroup.alpha > 0.5f && Mouse.current != null)
+            if (crosshairRect != null)
             {
-                crosshairRect.position = Mouse.current.position.ReadValue();
+                bool showCrosshair = !ShouldShowMobileControls() && hudGroup != null && hudGroup.alpha > 0.5f && Mouse.current != null;
+                if (crosshairRect.gameObject.activeSelf != showCrosshair)
+                {
+                    crosshairRect.gameObject.SetActive(showCrosshair);
+                }
+                if (showCrosshair)
+                {
+                    crosshairRect.position = Mouse.current.position.ReadValue();
+                }
             }
         }
 
         public void ApplyImmediateState(GameState state)
         {
+            RefreshPlatformControls();
             if (transitionTween != null)
             {
                 StopCoroutine(transitionTween);
@@ -480,6 +519,7 @@ namespace TopDownShooter.UI
 
         public void TransitionToState(GameState state)
         {
+            RefreshPlatformControls();
             if (transitionTween != null)
             {
                 StopCoroutine(transitionTween);
@@ -681,9 +721,11 @@ namespace TopDownShooter.UI
                     bool equipped = d.selectedWeapon == i;
                     if (shopWeaponLabels != null && i < shopWeaponLabels.Length && shopWeaponLabels[i] != null)
                     {
-                        shopWeaponLabels[i].text = equipped
-                            ? $"{WeaponNames[i]}\n[EQUIPPED]"
-                            : (unlocked ? $"{WeaponNames[i]}\n[EQUIP]" : $"{WeaponNames[i]}\n[{WeaponCosts[i]} CR]");
+                        string tag = i < WeaponShortTags.Length ? WeaponShortTags[i] : string.Empty;
+                        string status = equipped ? "[EQUIPPED]" : (unlocked ? "[EQUIP]" : $"[{WeaponCosts[i]} CR]");
+                        shopWeaponLabels[i].text = string.IsNullOrEmpty(tag)
+                            ? $"{WeaponNames[i]}\n{status}"
+                            : $"{WeaponNames[i]}\n{tag} · {status}";
                     }
                     if (shopWeaponButtons[i] != null)
                     {

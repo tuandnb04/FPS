@@ -37,6 +37,7 @@ namespace TopDownShooter.Core
         public static SaveManager Instance { get; private set; }
 
         public const int MaxUpgradeRank = 5;
+        public const int WeaponCount = 6;
         private const string SaveFileName = "vanguard_save.dat";
         private const string EncryptionKey = "VANGUARD_NEON_STORE_2026_KEY!";
 
@@ -204,7 +205,7 @@ namespace TopDownShooter.Core
 
         public bool TryUnlockOrEquipWeapon(int id, int cost)
         {
-            if (id < 0 || id > 3) return false;
+            if (id < 0 || id >= WeaponCount) return false;
             if (IsWeaponUnlocked(id))
             {
                 Data.selectedWeapon = id;

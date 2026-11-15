@@ -50,6 +50,8 @@ namespace TopDownShooter.Editor
             public Mesh WeaponShotgun;
             public Mesh WeaponRailgun;
             public Mesh WeaponRocket;
+            public Mesh WeaponAN94;
+            public Mesh WeaponVectorSMG;
 
             public Mesh ChaserTorso;
             public Mesh ChaserHead;
@@ -207,6 +209,8 @@ namespace TopDownShooter.Editor
             pack.WeaponShotgun = Get("Mesh_Weapon_Shotgun");
             pack.WeaponRailgun = Get("Mesh_Weapon_Railgun");
             pack.WeaponRocket = Get("Mesh_Weapon_Rocket");
+            pack.WeaponAN94 = Get("Mesh_Weapon_AN94");
+            pack.WeaponVectorSMG = Get("Mesh_Weapon_VectorSMG");
 
             pack.ChaserTorso = Get("Mesh_ChaserTorso");
             pack.ChaserHead = Get("Mesh_ChaserHead");
@@ -761,43 +765,69 @@ namespace TopDownShooter.Editor
                 meshes.PlayerUpperArm, meshes.PlayerForearm, matPrimary, matWeaponSteel,
                 out Transform rightElbowPivot, out MeshRenderer rightUpperRenderer, out MeshRenderer rightForearmRenderer);
 
-            // 4 Switchable Modern Military Firearms mounted under WeaponAnchor with exact grip & muzzle nodes
+            // 6 Switchable Modern Military Firearms mounted dead-straight under WeaponAnchor with exact grip & muzzle nodes
             GameObject weaponAnchor = new GameObject("WeaponAnchor");
             weaponAnchor.transform.SetParent(visualRoot.transform, false);
-            weaponAnchor.transform.localPosition = new Vector3(0.13f, 1.17f, 0.46f);
+            weaponAnchor.transform.localPosition = new Vector3(0.11f, 1.18f, 0.43f);
 
-            GameObject[] weaponVisuals = new GameObject[4];
-            Transform[] weaponLeftGrips = new Transform[4];
-            Transform[] weaponRightGrips = new Transform[4];
-            Transform[] weaponMuzzleTips = new Transform[4];
+            GameObject[] weaponVisuals = new GameObject[SaveManager.WeaponCount];
+            Transform[] weaponLeftGrips = new Transform[SaveManager.WeaponCount];
+            Transform[] weaponRightGrips = new Transform[SaveManager.WeaponCount];
+            Transform[] weaponMuzzleTips = new Transform[SaveManager.WeaponCount];
 
             weaponVisuals[0] = BuildWeaponModel(
                 "Weapon_PulseRifle", weaponAnchor.transform, meshes.WeaponPulseRifle, 0.65f,
-                Vector3.zero, new Vector3(2f, -16f, -4f), matWeaponSteel,
-                new Vector3(0f, -0.028f, 0.215f), new Vector3(0f, -0.060f, -0.033f), new Vector3(0f, 0.020f, 0.555f),
+                Vector3.zero, Vector3.zero, matWeaponSteel,
+                new Vector3(0f, -0.028f, 0.165f), new Vector3(0f, -0.060f, -0.033f), new Vector3(0f, 0.020f, 0.555f),
                 out weaponLeftGrips[0], out weaponRightGrips[0], out weaponMuzzleTips[0]);
 
             weaponVisuals[1] = BuildWeaponModel(
                 "Weapon_Shotgun", weaponAnchor.transform, meshes.WeaponShotgun, 0.68f,
-                Vector3.zero, new Vector3(2f, -16f, -4f), matWeaponSteel,
-                new Vector3(0f, -0.012f, 0.225f), new Vector3(0f, -0.060f, -0.055f), new Vector3(0f, 0.030f, 0.515f),
+                Vector3.zero, Vector3.zero, matWeaponSteel,
+                new Vector3(0f, -0.012f, 0.180f), new Vector3(0f, -0.060f, -0.055f), new Vector3(0f, 0.030f, 0.515f),
                 out weaponLeftGrips[1], out weaponRightGrips[1], out weaponMuzzleTips[1]);
 
             weaponVisuals[2] = BuildWeaponModel(
                 "Weapon_Railgun", weaponAnchor.transform, meshes.WeaponRailgun, 0.66f,
-                new Vector3(0f, 0f, -0.02f), new Vector3(2f, -16f, -4f), matWeaponSteel,
-                new Vector3(0f, -0.010f, 0.225f), new Vector3(0f, -0.058f, -0.052f), new Vector3(0f, 0.020f, 0.690f),
+                new Vector3(0f, 0f, -0.02f), Vector3.zero, matWeaponSteel,
+                new Vector3(0f, -0.010f, 0.195f), new Vector3(0f, -0.058f, -0.052f), new Vector3(0f, 0.020f, 0.690f),
                 out weaponLeftGrips[2], out weaponRightGrips[2], out weaponMuzzleTips[2]);
 
             weaponVisuals[3] = BuildWeaponModel(
                 "Weapon_Rocket", weaponAnchor.transform, meshes.WeaponRocket, 0.85f,
-                new Vector3(0.14f, 0.21f, -0.14f), new Vector3(0f, -2f, 0f), matPrimary,
+                new Vector3(0.14f, 0.21f, -0.14f), Vector3.zero, matPrimary,
                 new Vector3(0f, -0.068f, 0.136f), new Vector3(0f, -0.068f, -0.034f), new Vector3(0f, 0.025f, 0.595f),
                 out weaponLeftGrips[3], out weaponRightGrips[3], out weaponMuzzleTips[3]);
+
+            weaponVisuals[4] = BuildWeaponModel(
+                "Weapon_AN94", weaponAnchor.transform, meshes.WeaponAN94, 0.66f,
+                Vector3.zero, Vector3.zero, matWeaponSteel,
+                new Vector3(0f, -0.024f, 0.180f), new Vector3(0f, -0.060f, -0.038f), new Vector3(0f, 0.017f, 0.598f),
+                out weaponLeftGrips[4], out weaponRightGrips[4], out weaponMuzzleTips[4]);
+
+            weaponVisuals[5] = BuildWeaponModel(
+                "Weapon_VectorSMG", weaponAnchor.transform, meshes.WeaponVectorSMG, 0.65f,
+                new Vector3(0f, 0f, 0.02f), Vector3.zero, matWeaponSteel,
+                new Vector3(0f, -0.042f, 0.165f), new Vector3(0f, -0.060f, -0.032f), new Vector3(0f, 0.014f, 0.362f),
+                out weaponLeftGrips[5], out weaponRightGrips[5], out weaponMuzzleTips[5]);
 
             GameObject muzzlePoint = new GameObject("MuzzlePoint");
             muzzlePoint.transform.SetParent(weaponAnchor.transform, false);
             muzzlePoint.transform.SetPositionAndRotation(weaponMuzzleTips[0].position, weaponMuzzleTips[0].rotation);
+
+            Material matLaser = SaveOrUpdateLitMaterial("Mat_LaserSight", Palette.EnemySecondary, 0f, 0f, true, 0.95f);
+            GameObject laserGo = new GameObject("LaserSight");
+            laserGo.transform.SetParent(muzzlePoint.transform, false);
+            LineRenderer laserLine = laserGo.AddComponent<LineRenderer>();
+            laserLine.sharedMaterial = matLaser;
+            laserLine.shadowCastingMode = ShadowCastingMode.Off;
+            laserLine.receiveShadows = false;
+            laserLine.useWorldSpace = true;
+            laserLine.startWidth = 0.006f;
+            laserLine.endWidth = 0.003f;
+            laserLine.startColor = Palette.EnemySecondary;
+            laserLine.endColor = Palette.Accent;
+            laserLine.enabled = false;
 
             // Legs
             GameObject leftLegPivot = new GameObject("LeftLegPivot");
@@ -819,6 +849,7 @@ namespace TopDownShooter.Editor
             motion.BindPivots(visualRoot.transform, headPivot.transform, leftArmPivot, rightArmPivot, leftLegPivot.transform, rightLegPivot.transform, secondaryPivot.transform);
             motion.BindWeaponArmIk(leftElbowPivot, rightElbowPivot, weaponAnchor.transform, weaponLeftGrips[0], weaponRightGrips[0], 0.34f, 0.35f);
             weapon.BindReferences(muzzlePoint.transform, motion, null);
+            weapon.BindLaserSight(laserLine);
             weapon.BindWeaponVisuals(weaponVisuals);
             weapon.BindWeaponGrips(weaponLeftGrips, weaponRightGrips, weaponMuzzleTips);
 
@@ -1063,24 +1094,25 @@ namespace TopDownShooter.Editor
 
             Button hudPauseBtn = CreateButton("HUD_PauseButton", rightCard, "| |", new Vector2(1f, 0.5f), new Vector2(-14f, 0f), new Vector2(56f, 52f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
 
-            // Bottom-Center 4-Weapon Loadout Bar
-            RectTransform weaponBar = CreatePanel("WeaponLoadoutBar", hudGroup.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 22f), new Vector2(680f, 62f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.90f));
+            // Bottom-Center 6-Weapon Loadout Bar
+            RectTransform weaponBar = CreatePanel("WeaponLoadoutBar", hudGroup.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 22f), new Vector2(976f, 64f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.90f));
             CreateImage("WeaponBarAccent", weaponBar, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0f, 1f), new Vector2(-28f, 2f), solidSprite, Palette.Accent, false);
 
-            Button[] wpnBtns = new Button[4];
-            Image[] wpnBgs = new Image[4];
-            TextMeshProUGUI[] wpnLbls = new TextMeshProUGUI[4];
-            string[] wpnSlotDefault = { "[1] M4A1 CARBINE", "[2] M870 SHOTGUN", "[3] MK14 SNIPER", "[4] RPG-7" };
-            for (int i = 0; i < 4; i++)
+            Button[] wpnBtns = new Button[SaveManager.WeaponCount];
+            Image[] wpnBgs = new Image[SaveManager.WeaponCount];
+            TextMeshProUGUI[] wpnLbls = new TextMeshProUGUI[SaveManager.WeaponCount];
+            string[] wpnSlotDefault = { "[1] M4A1 CARBINE", "[2] M870 SHOTGUN", "[3] MK14 SNIPER", "[4] RPG-7", "[5] AN-94 ABAKAN", "[6] VECTOR .45 SMG" };
+            for (int i = 0; i < SaveManager.WeaponCount; i++)
             {
-                float slotX = -246f + i * 164f;
-                Button b = CreateButton("WeaponSlot_" + i, weaponBar, wpnSlotDefault[i], new Vector2(0.5f, 0.5f), new Vector2(slotX, 0f), new Vector2(154f, 44f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 12.5f);
+                float slotX = -395f + i * 158f;
+                Button b = CreateButton("WeaponSlot_" + i, weaponBar, wpnSlotDefault[i], new Vector2(0.5f, 0.5f), new Vector2(slotX, 0f), new Vector2(150f, 44f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 11.2f);
                 wpnBtns[i] = b;
                 wpnBgs[i] = b.GetComponent<Image>();
                 wpnLbls[i] = b.GetComponentInChildren<TextMeshProUGUI>();
+                if (wpnLbls[i] != null) wpnLbls[i].characterSpacing = 1.6f;
             }
 
-            // Mobile / Touch Controls (Simultaneous Twin Virtual Joysticks + Touch Dash)
+            // Mobile / Touch Controls (Shown strictly on mobile/handheld devices, hidden on PC)
             GameObject touchRoot = new GameObject("MobileTouchControls");
             touchRoot.transform.SetParent(hudGroup.transform, false);
             RectTransform touchRt = touchRoot.AddComponent<RectTransform>();
@@ -1145,7 +1177,7 @@ namespace TopDownShooter.Editor
             TextMeshProUGUI titleCredits = CreateStyledText("TitleCreditsText", titleCard, "FUNDS // 200 CR", 16f, FontStyles.Bold, 3f, Palette.CreditGold, TextAlignmentOptions.Center);
             SetAnchoredRect(titleCredits.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -6f), new Vector2(460f, 26f));
 
-            TextMeshProUGUI controlsHint = CreateStyledText("ControlsHintText", titleCard, "WASD / STICK MOVE  ·  MOUSE / AIM FIRE  ·  1-4 WEAPONS  ·  SHIFT SPRINT  ·  ESC PAUSE", 11.5f, FontStyles.Bold, 1.8f, Palette.MutedText, TextAlignmentOptions.Center);
+            TextMeshProUGUI controlsHint = CreateStyledText("ControlsHintText", titleCard, "WASD MOVE  ·  MOUSE AIM / FIRE  ·  1-6 WEAPONS  ·  SHIFT SPRINT  ·  ESC PAUSE", 11.5f, FontStyles.Bold, 1.8f, Palette.MutedText, TextAlignmentOptions.Center);
             SetAnchoredRect(controlsHint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 32f), new Vector2(660f, 24f));
 
             Button startBtn = CreateButton("StartMissionButton", titleCard, "DEPLOY", new Vector2(0.5f, 0.5f), new Vector2(-132f, -78f), new Vector2(244f, 60f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
@@ -1233,23 +1265,27 @@ namespace TopDownShooter.Editor
                 upgCostLbls[i] = buyBtn.GetComponentInChildren<TextMeshProUGUI>();
             }
 
-            // Right Column Top: 4 Unlockable Firearms
+            // Right Column Top: 6 Unlockable Firearms (2x3 Tactical Grid)
             TextMeshProUGUI rightWpnHdr = CreateStyledText("WeaponsSectionTitle", armoryCard, "WEAPONS ARSENAL", 14f, FontStyles.Bold, 3.5f, Palette.Accent, TextAlignmentOptions.MidlineLeft);
             SetAnchoredRect(rightWpnHdr.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(235f, 212f), new Vector2(440f, 26f));
 
-            Button[] shopWpnBtns = new Button[4];
-            TextMeshProUGUI[] shopWpnLbls = new TextMeshProUGUI[4];
-            for (int i = 0; i < 4; i++)
+            Button[] shopWpnBtns = new Button[SaveManager.WeaponCount];
+            TextMeshProUGUI[] shopWpnLbls = new TextMeshProUGUI[SaveManager.WeaponCount];
+            for (int i = 0; i < SaveManager.WeaponCount; i++)
             {
-                float wy = 166f - i * 62f;
-                Button wb = CreateButton("ShopWeapon_" + i, armoryCard, "WEAPON " + i, new Vector2(0.5f, 0.5f), new Vector2(235f, wy), new Vector2(440f, 52f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 14f);
+                int col = i % 2;
+                int row = i / 2;
+                float wx = col == 0 ? 122f : 348f;
+                float wy = 162f - row * 64f;
+                Button wb = CreateButton("ShopWeapon_" + i, armoryCard, "WEAPON " + i, new Vector2(0.5f, 0.5f), new Vector2(wx, wy), new Vector2(214f, 54f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 11.5f);
                 shopWpnBtns[i] = wb;
                 shopWpnLbls[i] = wb.GetComponentInChildren<TextMeshProUGUI>();
+                if (shopWpnLbls[i] != null) shopWpnLbls[i].characterSpacing = 1.6f;
             }
 
             // Right Column Bottom: 3 Tactical Uniform Camo Patterns
             TextMeshProUGUI rightSkinHdr = CreateStyledText("SkinsSectionTitle", armoryCard, "CAMO UNIFORMS", 14f, FontStyles.Bold, 3.5f, Palette.CreditGold, TextAlignmentOptions.MidlineLeft);
-            SetAnchoredRect(rightSkinHdr.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(235f, -74f), new Vector2(440f, 26f));
+            SetAnchoredRect(rightSkinHdr.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(235f, -48f), new Vector2(440f, 26f));
 
             Button[] shopSkinBtns = new Button[3];
             TextMeshProUGUI[] shopSkinLbls = new TextMeshProUGUI[3];
@@ -1257,7 +1293,7 @@ namespace TopDownShooter.Editor
             for (int i = 0; i < 3; i++)
             {
                 float sx = 85f + i * 150f;
-                Button sb = CreateButton("ShopSkin_" + i, armoryCard, "CAMO " + i, new Vector2(0.5f, 0.5f), new Vector2(sx, -132f), new Vector2(138f, 70f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 12f);
+                Button sb = CreateButton("ShopSkin_" + i, armoryCard, "CAMO " + i, new Vector2(0.5f, 0.5f), new Vector2(sx, -114f), new Vector2(138f, 70f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 12f);
                 CreateImage("Swatch", sb.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -6f), new Vector2(96f, 5f), solidSprite, skinSwatches[i], false);
                 shopSkinBtns[i] = sb;
                 shopSkinLbls[i] = sb.GetComponentInChildren<TextMeshProUGUI>();
@@ -1328,7 +1364,8 @@ namespace TopDownShooter.Editor
                 upgBtns, upgRankLbls, upgCostLbls,
                 shopWpnBtns, shopWpnLbls,
                 shopSkinBtns, shopSkinLbls,
-                drftBtns, drftTitles, drftRanks, drftDescs);
+                drftBtns, drftTitles, drftRanks, drftDescs,
+                touchRoot);
 
             return ui;
         }

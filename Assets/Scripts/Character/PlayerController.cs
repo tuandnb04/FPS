@@ -103,6 +103,8 @@ namespace TopDownShooter.Character
         private bool simulatedDash;
         private bool autoPlayBot;
         private float botAngle;
+        private Vector3? latestAimWorldTarget;
+        private Vector3 latestAimDir = Vector3.forward;
 
         public float CurrentHp => currentHp;
         public float MaxHp => currentMaxHp;
@@ -267,12 +269,11 @@ namespace TopDownShooter.Character
             currentMaxHp = permMaxHp + skillHp;
             currentHp = Mathf.Min(currentHp > 0f ? currentHp : currentMaxHp, currentMaxHp);
 
-            RecalculateDerivedStats();
-
             if (weaponController != null)
             {
-                weaponController.EquipWeapon((WeaponType)Mathf.Clamp(d.selectedWeapon, 0, 3));
+                weaponController.EquipWeapon((WeaponType)Mathf.Clamp(d.selectedWeapon, 0, SaveManager.WeaponCount - 1));
             }
+            RecalculateDerivedStats();
             ApplySkinTint(d.selectedSkin);
             UIManager.Instance?.RefreshWeaponBar();
         }
@@ -289,7 +290,8 @@ namespace TopDownShooter.Character
             int multiRank = skillRanks[(int)RogueliteSkillId.MultiShot];
             int critRank = skillRanks[(int)RogueliteSkillId.CritPayload];
 
-            currentMoveSpeed = baseMoveSpeed + d.thrusterRank * 0.35f + speedRank * 0.45f;
+            float weaponSpeedMult = weaponController != null ? weaponController.MoveSpeedMultiplier : 1f;
+            currentMoveSpeed = (baseMoveSpeed + d.thrusterRank * 0.35f + speedRank * 0.45f) * weaponSpeedMult;
             float permCooldownMult = Mathf.Max(0.55f, 1f - d.thrusterRank * 0.08f);
             float skillCooldownMult = Mathf.Pow(0.85f, dashRank);
             currentDashCooldown = Mathf.Max(0.45f, baseDashCooldown * permCooldownMult * skillCooldownMult);
@@ -325,13 +327,14 @@ namespace TopDownShooter.Character
 
         public bool TrySwitchWeapon(int weaponIndex)
         {
-            if (weaponIndex < 0 || weaponIndex > 3) return false;
+            if (weaponIndex < 0 || weaponIndex >= SaveManager.WeaponCount) return false;
             SaveManager save = SaveManager.EnsureInstance();
             if (!save.IsWeaponUnlocked(weaponIndex)) return false;
 
             save.Data.selectedWeapon = weaponIndex;
             save.Save();
             weaponController?.EquipWeapon((WeaponType)weaponIndex);
+            RecalculateDerivedStats();
             AudioManager.Instance?.PlayUIClick();
             UIManager.Instance?.RefreshWeaponBar();
             return true;
@@ -388,9 +391,14 @@ namespace TopDownShooter.Character
             if (GameManager.Instance != null && GameManager.Instance.CurrentState != GameState.Playing)
             {
                 characterMotion?.StepMotion(Vector3.zero, 0f, isAimingWeapon: true);
+                weaponController?.UpdateAimVisuals(false, null, transform.forward);
                 return;
             }
-            if (isDead) return;
+            if (isDead)
+            {
+                weaponController?.UpdateAimVisuals(false, null, transform.forward);
+                return;
+            }
 
             CheckWeaponHotkeys();
 
@@ -410,7 +418,9 @@ namespace TopDownShooter.Character
                 ApplyDamageFlash(Mathf.Clamp01(damageFlashTimer / 0.14f));
             }
 
-            ReadInputs(out Vector2 moveVec, out Vector3 aimDir, out bool fireHeld, out bool dashPressed);
+            ReadInputs(out Vector2 moveVec, out Vector3 aimDir, out bool fireHeld, out bool dashPressed, out Vector3? aimWorldTarget);
+            latestAimDir = aimDir;
+            latestAimWorldTarget = aimWorldTarget;
 
             // Dash activation
             if (dashPressed && dashTimer <= 0f && dashCooldownTimer <= 0f)
@@ -448,11 +458,13 @@ namespace TopDownShooter.Character
                 transform.position += horizontalVelocity * dt;
             }
 
-            // Aim orientation & camera look-ahead
+            // Aim orientation & camera look-ahead (snap body yaw on fire so gun barrel aligns 1:1 with bullet)
             if (aimDir.sqrMagnitude > 0.001f)
             {
                 Quaternion targetRot = Quaternion.LookRotation(aimDir, Vector3.up);
-                transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, 1f - Mathf.Exp(-20f * dt));
+                transform.rotation = fireHeld
+                    ? targetRot
+                    : Quaternion.Slerp(transform.rotation, targetRot, 1f - Mathf.Exp(-45f * dt));
                 TopDownCameraRig.Instance?.UpdateAimLookAhead(aimDir);
             }
 
@@ -461,7 +473,13 @@ namespace TopDownShooter.Character
             prevYaw = currentYaw;
 
             characterMotion?.StepMotion(horizontalVelocity, yawRate, isAimingWeapon: true);
-            weaponController?.TryFire(fireHeld, aimDir);
+            weaponController?.TryFire(fireHeld, aimDir, aimWorldTarget);
+        }
+
+        private void LateUpdate()
+        {
+            bool showLaser = Time.timeScale > 0.01f && !isDead && GameManager.Instance != null && GameManager.Instance.CurrentState == GameState.Playing;
+            weaponController?.UpdateAimVisuals(showLaser, latestAimWorldTarget, latestAimDir);
         }
 
         private void CheckWeaponHotkeys()
@@ -471,10 +489,33 @@ namespace TopDownShooter.Character
             else if (Keyboard.current.digit2Key.wasPressedThisFrame) TrySwitchWeapon(1);
             else if (Keyboard.current.digit3Key.wasPressedThisFrame) TrySwitchWeapon(2);
             else if (Keyboard.current.digit4Key.wasPressedThisFrame) TrySwitchWeapon(3);
+            else if (Keyboard.current.digit5Key.wasPressedThisFrame) TrySwitchWeapon(4);
+            else if (Keyboard.current.digit6Key.wasPressedThisFrame) TrySwitchWeapon(5);
         }
 
-        private void ReadInputs(out Vector2 moveVec, out Vector3 aimDir, out bool fireHeld, out bool dashPressed)
+        private Vector3 ComputeAimDirectionToWorldTarget(Vector3 worldTarget, Transform muzzleTf)
         {
+            Vector3 centerToTarget = worldTarget - transform.position;
+            centerToTarget.y = 0f;
+            float dist = centerToTarget.magnitude;
+            if (dist < 0.05f) return transform.forward;
+
+            float lateralOffset = muzzleTf != null ? transform.InverseTransformPoint(muzzleTf.position).x : 0.11f;
+            float bearingRad = Mathf.Atan2(centerToTarget.x, centerToTarget.z);
+            if (dist > Mathf.Abs(lateralOffset) + 0.55f)
+            {
+                float parallaxRad = Mathf.Asin(Mathf.Clamp(lateralOffset / dist, -0.55f, 0.55f));
+                float correctedRad = bearingRad - parallaxRad;
+                return new Vector3(Mathf.Sin(correctedRad), 0f, Mathf.Cos(correctedRad));
+            }
+            return centerToTarget / dist;
+        }
+
+        private void ReadInputs(out Vector2 moveVec, out Vector3 aimDir, out bool fireHeld, out bool dashPressed, out Vector3? aimWorldTarget)
+        {
+            aimWorldTarget = null;
+            Transform muzzleTf = weaponController != null ? weaponController.MuzzleTransform : null;
+
             if (hasSimulatedInput)
             {
                 moveVec = simulatedMove;
@@ -483,9 +524,8 @@ namespace TopDownShooter.Character
                 simulatedDash = false;
                 if (simulatedAimPoint.HasValue)
                 {
-                    Vector3 diff = simulatedAimPoint.Value - transform.position;
-                    diff.y = 0f;
-                    aimDir = diff.sqrMagnitude > 0.001f ? diff.normalized : transform.forward;
+                    aimWorldTarget = simulatedAimPoint.Value;
+                    aimDir = ComputeAimDirectionToWorldTarget(simulatedAimPoint.Value, muzzleTf);
                 }
                 else
                 {
@@ -524,23 +564,20 @@ namespace TopDownShooter.Character
 
             fireHeld = attackAction != null && attackAction.IsPressed();
 
-            // Raycast PC mouse cursor onto player elevation plane
+            // Raycast PC mouse cursor onto exact active muzzle elevation plane so crosshair and bullet trajectory align 1:1
             aimDir = transform.forward;
             UnityEngine.Camera cam = UnityEngine.Camera.main;
             if (cam != null && Mouse.current != null)
             {
                 Vector2 screenPos = Mouse.current.position.ReadValue();
                 Ray ray = cam.ScreenPointToRay(screenPos);
-                Plane groundPlane = new Plane(Vector3.up, new Vector3(0f, transform.position.y + 0.9f, 0f));
-                if (groundPlane.Raycast(ray, out float enter))
+                float muzzleY = muzzleTf != null ? muzzleTf.position.y : (transform.position.y + 1.18f);
+                Plane muzzlePlane = new Plane(Vector3.up, new Vector3(0f, muzzleY, 0f));
+                if (muzzlePlane.Raycast(ray, out float enter))
                 {
                     Vector3 hitWorld = ray.GetPoint(enter);
-                    Vector3 flat = hitWorld - transform.position;
-                    flat.y = 0f;
-                    if (flat.sqrMagnitude > 0.01f)
-                    {
-                        aimDir = flat.normalized;
-                    }
+                    aimWorldTarget = hitWorld;
+                    aimDir = ComputeAimDirectionToWorldTarget(hitWorld, muzzleTf);
                 }
             }
             else if (moveVec.sqrMagnitude > 0.01f)
