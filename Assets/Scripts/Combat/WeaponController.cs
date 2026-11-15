@@ -1,12 +1,13 @@
 using System.Collections.Generic;
+using Audio;
+using Character;
+using Core;
+using Feel;
+using UI;
 using UnityEngine;
 using UnityEngine.Pool;
-using TopDownShooter.Audio;
-using TopDownShooter.Character;
-using TopDownShooter.Core;
-using TopDownShooter.Feel;
 
-namespace TopDownShooter.Combat
+namespace Combat
 {
     public enum WeaponType
     {
@@ -14,8 +15,8 @@ namespace TopDownShooter.Combat
         ScatterShotgun = 1,   // [2] M870 Shotgun
         PlasmaRailgun = 2,    // [3] MK14 EBR Sniper
         HellfireLauncher = 3, // [4] RPG-7 Launcher
-        AN94Abakan = 4,       // [5] AN-94 Abakan (2-Round Hyperburst -> Auto)
-        VectorSMG = 5         // [6] KRISS Vector .45 SMG (1100 RPM + Mobility)
+        An94Abakan = 4,       // [5] AN-94 Abakan (2-Round Hyperburst -> Auto)
+        VectorSmg = 5         // [6] KRISS Vector .45 SMG (1100 RPM + Mobility)
     }
 
     /// <summary>
@@ -35,43 +36,55 @@ namespace TopDownShooter.Combat
         [SerializeField] private float projectileSpeed = 36f;
         [SerializeField] private float baseDamage = 26f;
 
-        private ObjectPool<Projectile> projectilePool;
-        private readonly List<Projectile> allCreatedProjectiles = new List<Projectile>();
-        private Material boltMaterial;
-        private float fireCooldown;
-        private int weaponTier = 1;
-        private WeaponType currentWeapon = WeaponType.PulseRifle;
+        private ObjectPool<Projectile> _projectilePool;
+        private readonly List<Projectile> _allCreatedProjectiles = new();
+        private Material _boltMaterial;
+        private float _fireCooldown;
+        private int _weaponTier = 1;
+        private static readonly int[] MagazineCapacities = { 30, 8, 12, 4, 30, 25 };
+        private static readonly float[] ReloadDurations = { 1.15f, 1.35f, 1.25f, 1.55f, 1.20f, 0.95f };
+        private readonly int[] _ammoInMag = { 30, 8, 12, 4, 30, 25 };
+        private float _reloadTimer;
+        private float _reloadDuration = 1.15f;
         [SerializeField] private GameObject[] weaponVisuals = new GameObject[SaveManager.WeaponCount];
         [SerializeField] private Transform[] weaponLeftGrips = new Transform[SaveManager.WeaponCount];
         [SerializeField] private Transform[] weaponRightGrips = new Transform[SaveManager.WeaponCount];
         [SerializeField] private Transform[] weaponMuzzleTips = new Transform[SaveManager.WeaponCount];
 
         // AN-94 hyperburst state
-        private bool an94HyperburstReady = true;
-        private int queuedFollowupShots;
-        private float queuedFollowupTimer;
-        private float queuedFollowupInterval = 0.036f;
-        private float queuedFollowupDamage;
-        private bool queuedFollowupCrit;
-        private Vector3 lastAimDirection = Vector3.forward;
-        private Vector3? lastAimWorldPoint;
+        private bool _an94HyperburstReady = true;
+        private float _queuedFollowupTimer;
+        private float _queuedFollowupInterval = 0.036f;
+        private float _queuedFollowupDamage;
+        private bool _queuedFollowupCrit;
+        private Vector3 _lastAimDirection = Vector3.forward;
 
         // Meta + Roguelite modifiers
-        private float permanentDamageMult = 1f;
-        private float skillDamageMult = 1f;
-        private float skillFireRateMult = 1f;
-        private int skillBonusProjectiles;
-        private float skillCritChance;
+        private float _permanentDamageMult = 1f;
+        private float _skillDamageMult = 1f;
+        private float _skillFireRateMult = 1f;
+        private int _skillBonusProjectiles;
+        private float _skillCritChance;
 
-        public WeaponType CurrentWeapon => currentWeapon;
+        public WeaponType CurrentWeapon { get; private set; } = WeaponType.PulseRifle;
+
+        public bool IsReloading => _reloadTimer > 0f;
+        public int CurrentMagAmmo => _ammoInMag[Mathf.Clamp((int)CurrentWeapon, 0, _ammoInMag.Length - 1)];
+        public int CurrentMagCapacity => MagazineCapacities[Mathf.Clamp((int)CurrentWeapon, 0, MagazineCapacities.Length - 1)];
+        public float ReloadProgress => _reloadDuration > 0.001f ? Mathf.Clamp01(1f - _reloadTimer / _reloadDuration) : 1f;
         public Transform MuzzleTransform => GetActiveMuzzleTransform();
-        public int QueuedFollowupShots => queuedFollowupShots;
+        private int QueuedFollowupShots { get; set; }
+
         public int TotalShotsFired { get; private set; }
         public Vector3 LastFiredOrigin { get; private set; }
-        public Vector3 LastFiredDirection { get; private set; }
-        public float MoveSpeedMultiplier => currentWeapon == WeaponType.VectorSMG
-            ? 1.12f
-            : (currentWeapon == WeaponType.HellfireLauncher ? 0.94f : 1.0f);
+        public Vector3 LastFiredDirection { get; private set; } = Vector3.forward;
+
+        public float MoveSpeedMultiplier => CurrentWeapon switch
+        {
+            WeaponType.VectorSmg => 1.12f,
+            WeaponType.HellfireLauncher => 0.94f,
+            _ => 1.0f
+        };
 
         public void BindReferences(Transform muzzle, ProceduralCharacterMotion motion, Transform poolRoot)
         {
@@ -99,12 +112,12 @@ namespace TopDownShooter.Combat
         {
             if (projectilePoolRoot == null)
             {
-                GameObject rootGo = new GameObject("ProjectilePoolRoot");
+                var rootGo = new GameObject("ProjectilePoolRoot");
                 projectilePoolRoot = rootGo.transform;
             }
 
-            boltMaterial = Palette.CreateLitMaterial("Mat_ProjectileBoltRuntime", Palette.Accent, 0.1f, 0.25f, true, 1.45f);
-            projectilePool = new ObjectPool<Projectile>(
+            _boltMaterial = Palette.CreateLitMaterial("Mat_ProjectileBoltRuntime", Palette.Accent, 0.1f, 0.25f, true, 1.45f);
+            _projectilePool = new ObjectPool<Projectile>(
                 createFunc: CreateProjectileInstance,
                 actionOnGet: p => p.gameObject.SetActive(true),
                 actionOnRelease: p => p.gameObject.SetActive(false),
@@ -120,77 +133,110 @@ namespace TopDownShooter.Combat
 
         private Projectile CreateProjectileInstance()
         {
-            GameObject go = new GameObject("Projectile_Bolt");
+            var go = new GameObject("Projectile_Bolt");
             go.transform.SetParent(projectilePoolRoot, false);
 
-            GameObject meshGo = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            var meshGo = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             meshGo.name = "BoltVisual";
             meshGo.transform.SetParent(go.transform, false);
             meshGo.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             meshGo.transform.localScale = new Vector3(0.13f, 0.28f, 0.13f);
 
-            Collider c = meshGo.GetComponent<Collider>();
+            var c = meshGo.GetComponent<Collider>();
             if (c != null) Destroy(c);
 
-            MeshRenderer mr = meshGo.GetComponent<MeshRenderer>();
+            var mr = meshGo.GetComponent<MeshRenderer>();
             if (mr != null)
             {
-                mr.sharedMaterial = boltMaterial;
+                mr.sharedMaterial = _boltMaterial;
                 mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             }
 
-            Projectile proj = go.AddComponent<Projectile>();
+            var proj = go.AddComponent<Projectile>();
             go.SetActive(false);
-            allCreatedProjectiles.Add(proj);
+            _allCreatedProjectiles.Add(proj);
             return proj;
         }
 
         private void Update()
         {
-            float dt = Time.deltaTime;
-            if (fireCooldown > 0f)
+            var dt = Time.deltaTime;
+            if (_fireCooldown > 0f)
             {
-                fireCooldown = Mathf.Max(0f, fireCooldown - dt);
+                _fireCooldown = Mathf.Max(0f, _fireCooldown - dt);
             }
 
-            if (queuedFollowupShots > 0 && dt > 0f)
+            if (_reloadTimer > 0f)
             {
-                queuedFollowupTimer -= dt;
-                while (queuedFollowupShots > 0 && queuedFollowupTimer <= 0f)
+                _reloadTimer = Mathf.Max(0f, _reloadTimer - dt);
+                var wIdx = Mathf.Clamp((int)CurrentWeapon, 0, MagazineCapacities.Length - 1);
+                if (_reloadTimer <= 0f)
                 {
-                    queuedFollowupShots--;
-                    queuedFollowupTimer += queuedFollowupInterval;
-                    FireAN94FollowupRound();
+                    _ammoInMag[wIdx] = MagazineCapacities[wIdx];
+                    UIManager.Instance?.UpdateAmmoHud(_ammoInMag[wIdx], MagazineCapacities[wIdx], false, 1f);
                 }
+                else
+                {
+                    UIManager.Instance?.UpdateAmmoHud(_ammoInMag[wIdx], MagazineCapacities[wIdx], true, ReloadProgress);
+                }
+            }
+
+            if (QueuedFollowupShots <= 0 || !(dt > 0f)) return;
+            _queuedFollowupTimer -= dt;
+            while (QueuedFollowupShots > 0 && _queuedFollowupTimer <= 0f)
+            {
+                QueuedFollowupShots--;
+                _queuedFollowupTimer += _queuedFollowupInterval;
+                FireAn94FollowupRound();
             }
         }
 
         public void SetWeaponTier(int level)
         {
-            weaponTier = Mathf.Max(1, level);
+            _weaponTier = Mathf.Max(1, level);
         }
 
         public void EquipWeapon(WeaponType weapon)
         {
-            currentWeapon = weapon;
-            fireCooldown = Mathf.Min(fireCooldown, 0.05f);
-            queuedFollowupShots = 0;
-            an94HyperburstReady = true;
+            CurrentWeapon = weapon;
+            _fireCooldown = Mathf.Min(_fireCooldown, 0.05f);
+            QueuedFollowupShots = 0;
+            _reloadTimer = 0f;
+            _an94HyperburstReady = true;
             RefreshWeaponVisuals();
+            UIManager.Instance?.UpdateAmmoHud(CurrentMagAmmo, CurrentMagCapacity, false, 1f);
+        }
+
+        public bool StartReload(bool quiet = false)
+        {
+            var wIdx = Mathf.Clamp((int)CurrentWeapon, 0, MagazineCapacities.Length - 1);
+            if (_reloadTimer > 0f || _ammoInMag[wIdx] >= MagazineCapacities[wIdx])
+            {
+                return false;
+            }
+            QueuedFollowupShots = 0;
+            _reloadDuration = ReloadDurations[wIdx];
+            _reloadTimer = _reloadDuration;
+            if (!quiet)
+            {
+                AudioManager.Instance?.PlayReload();
+            }
+            UIManager.Instance?.UpdateAmmoHud(_ammoInMag[wIdx], MagazineCapacities[wIdx], true, 0f);
+            return true;
         }
 
         public void SetStatModifiers(float permDmgMult, float dmgMult, float rateMult, int bonusProj, float critChance)
         {
-            permanentDamageMult = Mathf.Max(0.5f, permDmgMult);
-            skillDamageMult = Mathf.Max(0.5f, dmgMult);
-            skillFireRateMult = Mathf.Max(0.5f, rateMult);
-            skillBonusProjectiles = Mathf.Max(0, bonusProj);
-            skillCritChance = Mathf.Clamp01(critChance);
+            _permanentDamageMult = Mathf.Max(0.5f, permDmgMult);
+            _skillDamageMult = Mathf.Max(0.5f, dmgMult);
+            _skillFireRateMult = Mathf.Max(0.5f, rateMult);
+            _skillBonusProjectiles = Mathf.Max(0, bonusProj);
+            _skillCritChance = Mathf.Clamp01(critChance);
         }
 
         private Transform GetActiveMuzzleTransform()
         {
-            int idx = (int)currentWeapon;
+            var idx = (int)CurrentWeapon;
             if (weaponMuzzleTips != null && idx >= 0 && idx < weaponMuzzleTips.Length && weaponMuzzleTips[idx] != null)
             {
                 return weaponMuzzleTips[idx];
@@ -200,14 +246,14 @@ namespace TopDownShooter.Combat
 
         private Vector3 GetMuzzlePosition(Vector3 fallbackDir)
         {
-            Transform active = GetActiveMuzzleTransform();
+            var active = GetActiveMuzzleTransform();
             return active != null ? active.position : transform.position + Vector3.up * 1.18f + fallbackDir * 0.85f;
         }
 
         private void SyncMuzzlePointToActiveTip()
         {
-            int idx = (int)currentWeapon;
-            Transform muzzleTip = (weaponMuzzleTips != null && idx >= 0 && idx < weaponMuzzleTips.Length) ? weaponMuzzleTips[idx] : null;
+            var idx = (int)CurrentWeapon;
+            var muzzleTip = (weaponMuzzleTips != null && idx >= 0 && idx < weaponMuzzleTips.Length) ? weaponMuzzleTips[idx] : null;
             if (muzzlePoint != null && muzzleTip != null)
             {
                 muzzlePoint.SetPositionAndRotation(muzzleTip.position, muzzleTip.rotation);
@@ -217,8 +263,8 @@ namespace TopDownShooter.Combat
         private void RefreshWeaponVisuals()
         {
             if (weaponVisuals == null) return;
-            int idx = (int)currentWeapon;
-            for (int i = 0; i < weaponVisuals.Length; i++)
+            var idx = (int)CurrentWeapon;
+            for (var i = 0; i < weaponVisuals.Length; i++)
             {
                 if (weaponVisuals[i] != null)
                 {
@@ -226,26 +272,26 @@ namespace TopDownShooter.Combat
                 }
             }
 
-            Transform leftGrip = (weaponLeftGrips != null && idx >= 0 && idx < weaponLeftGrips.Length) ? weaponLeftGrips[idx] : null;
-            Transform rightGrip = (weaponRightGrips != null && idx >= 0 && idx < weaponRightGrips.Length) ? weaponRightGrips[idx] : null;
+            var leftGrip = (weaponLeftGrips != null && idx >= 0 && idx < weaponLeftGrips.Length) ? weaponLeftGrips[idx] : null;
+            var rightGrip = (weaponRightGrips != null && idx >= 0 && idx < weaponRightGrips.Length) ? weaponRightGrips[idx] : null;
             characterMotion?.SetWeaponGripTargets(leftGrip, rightGrip);
 
             SyncMuzzlePointToActiveTip();
         }
 
-        public Vector3 GetFlatBarrelForward()
+        private Vector3 GetFlatBarrelForward()
         {
-            Transform active = GetActiveMuzzleTransform();
+            var active = GetActiveMuzzleTransform();
             if (active != null)
             {
-                Vector3 fwd = new Vector3(active.forward.x, 0f, active.forward.z);
+                var fwd = new Vector3(active.forward.x, 0f, active.forward.z);
                 if (fwd.sqrMagnitude > 0.0001f)
                 {
                     return fwd.normalized;
                 }
             }
 
-            Vector3 bodyFwd = new Vector3(transform.forward.x, 0f, transform.forward.z);
+            var bodyFwd = new Vector3(transform.forward.x, 0f, transform.forward.z);
             return bodyFwd.sqrMagnitude > 0.0001f ? bodyFwd.normalized : Vector3.forward;
         }
 
@@ -259,7 +305,7 @@ namespace TopDownShooter.Combat
         {
             if (exactAimWorldPoint.HasValue)
             {
-                Vector3 toTarget = exactAimWorldPoint.Value - spawnPos;
+                var toTarget = exactAimWorldPoint.Value - spawnPos;
                 toTarget.y = 0f;
                 if (toTarget.sqrMagnitude > 0.25f)
                 {
@@ -272,63 +318,68 @@ namespace TopDownShooter.Combat
                 return new Vector3(flatAimDirection.x, 0f, flatAimDirection.z).normalized;
             }
 
-            Transform active = GetActiveMuzzleTransform();
-            if (active != null)
-            {
-                Vector3 fwd = new Vector3(active.forward.x, 0f, active.forward.z);
-                if (fwd.sqrMagnitude > 0.001f)
-                {
-                    return fwd.normalized;
-                }
-            }
-
-            return new Vector3(transform.forward.x, 0f, transform.forward.z).normalized;
+            var active = GetActiveMuzzleTransform();
+            if (active == null) return new Vector3(transform.forward.x, 0f, transform.forward.z).normalized;
+            var fwd = new Vector3(active.forward.x, 0f, active.forward.z);
+            return fwd.sqrMagnitude > 0.001f ? fwd.normalized : new Vector3(transform.forward.x, 0f, transform.forward.z).normalized;
         }
 
         public bool TryFire(bool triggerHeld, Vector3 flatAimDirection, Vector3? exactAimWorldPoint = null)
         {
-            lastAimDirection = flatAimDirection.sqrMagnitude > 0.001f
+            _lastAimDirection = flatAimDirection.sqrMagnitude > 0.001f
                 ? new Vector3(flatAimDirection.x, 0f, flatAimDirection.z).normalized
                 : transform.forward;
-            lastAimWorldPoint = exactAimWorldPoint;
 
             if (!triggerHeld)
             {
-                if (currentWeapon == WeaponType.AN94Abakan && queuedFollowupShots == 0)
-                {
-                    an94HyperburstReady = true;
-                    fireCooldown = Mathf.Min(fireCooldown, 0.065f);
-                }
+                if (CurrentWeapon != WeaponType.An94Abakan || QueuedFollowupShots != 0) return false;
+                _an94HyperburstReady = true;
+                _fireCooldown = Mathf.Min(_fireCooldown, 0.065f);
                 return false;
             }
 
-            if (fireCooldown > 0f)
+            if (_reloadTimer > 0f)
             {
                 return false;
             }
 
-            SyncMuzzlePointToActiveTip();
-            Vector3 spawnPos = GetMuzzlePosition(lastAimDirection);
-            Vector3 dir = ResolveMuzzleFireDirection(spawnPos, lastAimDirection, exactAimWorldPoint);
+            var wIdx = Mathf.Clamp((int)CurrentWeapon, 0, MagazineCapacities.Length - 1);
+            if (_ammoInMag[wIdx] <= 0)
+            {
+                StartReload();
+                return false;
+            }
 
-            float dmgScale = permanentDamageMult * skillDamageMult * (1f + (weaponTier - 1) * 0.10f);
-            bool isCrit = UnityEngine.Random.value < skillCritChance;
+            if (_fireCooldown > 0f)
+            {
+                return false;
+            }
+
+            _ammoInMag[wIdx] = Mathf.Max(0, _ammoInMag[wIdx] - 1);
+            UIManager.Instance?.UpdateAmmoHud(_ammoInMag[wIdx], MagazineCapacities[wIdx], false, 1f);
+
+            SyncMuzzlePointToActiveTip();
+            var spawnPos = GetMuzzlePosition(_lastAimDirection);
+            var dir = ResolveMuzzleFireDirection(spawnPos, _lastAimDirection, exactAimWorldPoint);
+
+            var dmgScale = _permanentDamageMult * _skillDamageMult * (1f + (_weaponTier - 1) * 0.10f);
+            var isCrit = Random.value < _skillCritChance;
             if (isCrit) dmgScale *= 1.65f;
 
-            switch (currentWeapon)
+            switch (CurrentWeapon)
             {
                 case WeaponType.ScatterShotgun:
                 {
-                    fireCooldown = 0.48f / skillFireRateMult;
-                    int pellets = 6 + skillBonusProjectiles;
-                    float totalArc = 26f;
-                    float pelletDmg = 19f * dmgScale;
-                    for (int i = 0; i < pellets; i++)
+                    _fireCooldown = 0.48f / _skillFireRateMult;
+                    var pellets = 6 + _skillBonusProjectiles;
+                    const float totalArc = 26f;
+                    var pelletDmg = 19f * dmgScale;
+                    for (var i = 0; i < pellets; i++)
                     {
-                        float t = pellets == 1 ? 0.5f : (float)i / (pellets - 1);
-                        float yaw = Mathf.Lerp(-totalArc * 0.5f, totalArc * 0.5f, t);
-                        Quaternion rot = Quaternion.LookRotation(Quaternion.Euler(0f, yaw, 0f) * dir, Vector3.up);
-                        SpawnBolt(spawnPos, rot, 34f, pelletDmg, 0.62f, 0, 0f, Palette.Accent, new Vector3(0.055f, 0.26f, 0.055f), isCrit);
+                        var t = pellets == 1 ? 0.5f : (float)i / (pellets - 1);
+                        var yaw = Mathf.Lerp(-totalArc * 0.5f, totalArc * 0.5f, t);
+                        var rot = Quaternion.LookRotation(Quaternion.Euler(0f, yaw, 0f) * dir, Vector3.up);
+                        SpawnBolt(spawnPos, rot, 34f, pelletDmg, 0.62f, 0, 0f, Palette.Accent, new Vector3(0.024f, 0.28f, 0.024f), isCrit);
                     }
                     VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.Accent);
                     FeelManager.Instance?.TriggerCameraShake(0.16f);
@@ -339,14 +390,14 @@ namespace TopDownShooter.Combat
                 }
                 case WeaponType.PlasmaRailgun:
                 {
-                    fireCooldown = 0.52f / skillFireRateMult;
-                    float slugDmg = 84f * dmgScale;
-                    int shots = 1 + Mathf.Min(1, skillBonusProjectiles);
-                    Vector3 rightAxis = Vector3.Cross(Vector3.up, dir).normalized;
-                    for (int i = 0; i < shots; i++)
+                    _fireCooldown = 0.52f / _skillFireRateMult;
+                    var slugDmg = 84f * dmgScale;
+                    var shots = 1 + Mathf.Min(1, _skillBonusProjectiles);
+                    var rightAxis = Vector3.Cross(Vector3.up, dir).normalized;
+                    for (var i = 0; i < shots; i++)
                     {
-                        Vector3 origin = shots == 1 ? spawnPos : spawnPos + rightAxis * ((i == 0 ? -0.045f : 0.045f));
-                        SpawnBolt(origin, Quaternion.LookRotation(dir, Vector3.up), 62f, slugDmg, 1.15f, 3, 0f, Palette.RailgunCyan, new Vector3(0.065f, 0.82f, 0.065f), isCrit);
+                        var origin = shots == 1 ? spawnPos : spawnPos + rightAxis * ((i == 0 ? -0.045f : 0.045f));
+                        SpawnBolt(origin, Quaternion.LookRotation(dir, Vector3.up), 62f, slugDmg, 1.15f, 3, 0f, Palette.RailgunCyan, new Vector3(0.036f, 0.88f, 0.036f), isCrit);
                     }
                     VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.RailgunCyan);
                     FeelManager.Instance?.TriggerCameraShake(0.20f);
@@ -357,14 +408,14 @@ namespace TopDownShooter.Combat
                 }
                 case WeaponType.HellfireLauncher:
                 {
-                    fireCooldown = 0.68f / skillFireRateMult;
-                    float rocketDmg = 70f * dmgScale;
-                    int rockets = 1 + Mathf.Min(1, skillBonusProjectiles);
-                    for (int i = 0; i < rockets; i++)
+                    _fireCooldown = 0.68f / _skillFireRateMult;
+                    var rocketDmg = 70f * dmgScale;
+                    var rockets = 1 + Mathf.Min(1, _skillBonusProjectiles);
+                    for (var i = 0; i < rockets; i++)
                     {
-                        float yaw = rockets == 1 ? 0f : (i == 0 ? -3f : 3f);
-                        Quaternion rot = Quaternion.LookRotation(Quaternion.Euler(0f, yaw, 0f) * dir, Vector3.up);
-                        SpawnBolt(spawnPos, rot, 26f, rocketDmg, 1.7f, 0, 2.95f, Palette.RocketOrange, new Vector3(0.15f, 0.36f, 0.15f), isCrit);
+                        var yaw = rockets == 1 ? 0f : (i == 0 ? -3f : 3f);
+                        var rot = Quaternion.LookRotation(Quaternion.Euler(0f, yaw, 0f) * dir, Vector3.up);
+                        SpawnBolt(spawnPos, rot, 26f, rocketDmg, 1.7f, 0, 2.95f, Palette.RocketOrange, new Vector3(0.095f, 0.34f, 0.095f), isCrit);
                     }
                     VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.RocketOrange);
                     FeelManager.Instance?.TriggerCameraShake(0.22f);
@@ -373,20 +424,20 @@ namespace TopDownShooter.Combat
                     AudioManager.Instance?.PlayShoot(0.55f, 0.68f);
                     break;
                 }
-                case WeaponType.AN94Abakan:
+                case WeaponType.An94Abakan:
                 {
-                    if (an94HyperburstReady)
+                    if (_an94HyperburstReady)
                     {
-                        an94HyperburstReady = false;
-                        float burstRoundDmg = 28f * dmgScale;
-                        SpawnBolt(spawnPos, Quaternion.LookRotation(dir, Vector3.up), 44f, burstRoundDmg, 1.35f, 0, 0f, Palette.RailgunCyan, new Vector3(0.056f, 0.44f, 0.056f), isCrit);
+                        _an94HyperburstReady = false;
+                        var burstRoundDmg = 28f * dmgScale;
+                        SpawnBolt(spawnPos, Quaternion.LookRotation(dir, Vector3.up), 44f, burstRoundDmg, 1.35f, 0, 0f, Palette.RailgunCyan, new Vector3(0.028f, 0.52f, 0.028f), isCrit);
 
-                        queuedFollowupShots = 1 + Mathf.Min(2, skillBonusProjectiles);
-                        queuedFollowupInterval = 0.036f / skillFireRateMult;
-                        queuedFollowupTimer = queuedFollowupInterval;
-                        queuedFollowupDamage = burstRoundDmg;
-                        queuedFollowupCrit = isCrit;
-                        fireCooldown = 0.175f / skillFireRateMult;
+                        QueuedFollowupShots = 1 + Mathf.Min(2, _skillBonusProjectiles);
+                        _queuedFollowupInterval = 0.036f / _skillFireRateMult;
+                        _queuedFollowupTimer = _queuedFollowupInterval;
+                        _queuedFollowupDamage = burstRoundDmg;
+                        _queuedFollowupCrit = isCrit;
+                        _fireCooldown = 0.175f / _skillFireRateMult;
 
                         VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.Accent);
                         FeelManager.Instance?.TriggerCameraShake(0.06f);
@@ -396,9 +447,9 @@ namespace TopDownShooter.Combat
                     }
                     else
                     {
-                        float autoDmg = 23f * dmgScale;
-                        fireCooldown = 0.135f / skillFireRateMult;
-                        SpawnBolt(spawnPos, Quaternion.LookRotation(dir, Vector3.up), 42f, autoDmg, 1.35f, 0, 0f, Palette.Accent, new Vector3(0.052f, 0.38f, 0.052f), isCrit);
+                        var autoDmg = 23f * dmgScale;
+                        _fireCooldown = 0.135f / _skillFireRateMult;
+                        SpawnBolt(spawnPos, Quaternion.LookRotation(dir, Vector3.up), 42f, autoDmg, 1.35f, 0, 0f, Palette.Accent, new Vector3(0.028f, 0.48f, 0.028f), isCrit);
                         VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.Accent);
                         FeelManager.Instance?.TriggerCameraShake(0.05f);
                         characterMotion?.TriggerSquash(new Vector3(1.02f, 0.99f, 0.98f), 0.06f);
@@ -407,18 +458,18 @@ namespace TopDownShooter.Combat
                     }
                     break;
                 }
-                case WeaponType.VectorSMG:
+                case WeaponType.VectorSmg:
                 {
-                    fireCooldown = 0.056f / skillFireRateMult;
-                    float smgDmg = 16f * dmgScale;
-                    int rounds = 1 + Mathf.Min(1, skillBonusProjectiles);
-                    for (int i = 0; i < rounds; i++)
+                    _fireCooldown = 0.056f / _skillFireRateMult;
+                    var smgDmg = 16f * dmgScale;
+                    var rounds = 1 + Mathf.Min(1, _skillBonusProjectiles);
+                    for (var i = 0; i < rounds; i++)
                     {
-                        float jitter = rounds == 1
-                            ? UnityEngine.Random.Range(-1.4f, 1.4f)
+                        var jitter = rounds == 1
+                            ? Random.Range(-1.4f, 1.4f)
                             : (i == 0 ? -1.1f : 1.1f);
-                        Quaternion rot = Quaternion.LookRotation(Quaternion.Euler(0f, jitter, 0f) * dir, Vector3.up);
-                        SpawnBolt(spawnPos, rot, 35f, smgDmg, 0.95f, 0, 0f, Palette.Accent, new Vector3(0.044f, 0.28f, 0.044f), isCrit);
+                        var rot = Quaternion.LookRotation(Quaternion.Euler(0f, jitter, 0f) * dir, Vector3.up);
+                        SpawnBolt(spawnPos, rot, 35f, smgDmg, 0.95f, 0, 0f, Palette.Accent, new Vector3(0.024f, 0.34f, 0.024f), isCrit);
                     }
                     VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.Accent);
                     FeelManager.Instance?.TriggerCameraShake(0.035f);
@@ -427,81 +478,105 @@ namespace TopDownShooter.Combat
                     AudioManager.Instance?.PlayShoot(1.28f, 0.44f);
                     break;
                 }
+                case WeaponType.PulseRifle:
                 default: // [1] M4A1 Carbine
                 {
-                    float tierInterval = Mathf.Max(0.085f, baseFireInterval - (weaponTier - 1) * 0.006f);
-                    fireCooldown = tierInterval / skillFireRateMult;
-                    float boltDmg = baseDamage * dmgScale;
-                    SpawnBolt(spawnPos, Quaternion.LookRotation(dir, Vector3.up), projectileSpeed, boltDmg, 1.45f, 0, 0f, Palette.Accent, new Vector3(0.055f, 0.40f, 0.055f), isCrit);
-                    if (skillBonusProjectiles > 0)
+                    var tierInterval = Mathf.Max(0.085f, baseFireInterval - (_weaponTier - 1) * 0.006f);
+                    _fireCooldown = tierInterval / _skillFireRateMult;
+                    var boltDmg = baseDamage * dmgScale;
+                    SpawnBolt(spawnPos, Quaternion.LookRotation(dir, Vector3.up), projectileSpeed, boltDmg, 1.45f, 0, 0f, Palette.Accent, new Vector3(0.028f, 0.48f, 0.028f), isCrit);
+                    if (_skillBonusProjectiles > 0)
                     {
-                        Vector3 rightAxis = Vector3.Cross(Vector3.up, dir).normalized;
-                        for (int i = 0; i < skillBonusProjectiles; i++)
+                        var rightAxis = Vector3.Cross(Vector3.up, dir).normalized;
+                        for (var i = 0; i < _skillBonusProjectiles; i++)
                         {
-                            float side = (i % 2 == 0) ? -0.055f : 0.055f;
-                            Vector3 offsetPos = spawnPos + rightAxis * side * (1 + i / 2);
-                            SpawnBolt(offsetPos, Quaternion.LookRotation(dir, Vector3.up), projectileSpeed, boltDmg * 0.72f, 1.35f, 0, 0f, Palette.RailgunCyan, new Vector3(0.048f, 0.34f, 0.048f), isCrit);
+                            var side = (i % 2 == 0) ? -0.055f : 0.055f;
+                            var offsetPos = spawnPos + rightAxis * (side * (1 + i / 2));
+                            SpawnBolt(offsetPos, Quaternion.LookRotation(dir, Vector3.up), projectileSpeed, boltDmg * 0.72f, 1.35f, 0, 0f, Palette.RailgunCyan, new Vector3(0.024f, 0.38f, 0.024f), isCrit);
                         }
                     }
                     VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.Accent);
                     FeelManager.Instance?.TriggerCameraShake(0.07f);
                     characterMotion?.TriggerSquash(new Vector3(1.025f, 0.985f, 0.98f), 0.07f);
                     characterMotion?.TriggerWeaponRecoil(new Vector3(0f, 0.005f, -0.042f));
-                    AudioManager.Instance?.PlayShoot(1.0f, 0.55f);
+                    AudioManager.Instance?.PlayShoot();
                     break;
                 }
             }
 
-            LastFiredOrigin = spawnPos;
-            LastFiredDirection = dir;
+            if (_ammoInMag[wIdx] <= 0 && QueuedFollowupShots == 0)
+            {
+                StartReload(quiet: false);
+            }
+
             return true;
         }
 
-        private void FireAN94FollowupRound()
+        private void FireAn94FollowupRound()
         {
+            var wIdx = Mathf.Clamp((int)CurrentWeapon, 0, MagazineCapacities.Length - 1);
+            if (_ammoInMag[wIdx] > 0)
+            {
+                _ammoInMag[wIdx]--;
+            }
+            UIManager.Instance?.UpdateAmmoHud(_ammoInMag[wIdx], MagazineCapacities[wIdx], _reloadTimer > 0f, ReloadProgress);
+
             SyncMuzzlePointToActiveTip();
-            Vector3 barrelDir = GetFlatBarrelForward();
-            Vector3 spawnPos = GetMuzzlePosition(barrelDir);
-            Vector3 dir = barrelDir;
-            SpawnBolt(spawnPos, Quaternion.LookRotation(dir, Vector3.up), 45f, queuedFollowupDamage, 1.35f, 0, 0f, Palette.RailgunCyan, new Vector3(0.056f, 0.44f, 0.056f), queuedFollowupCrit);
+            var barrelDir = GetFlatBarrelForward();
+            var spawnPos = GetMuzzlePosition(barrelDir);
+            SpawnBolt(spawnPos, Quaternion.LookRotation(barrelDir, Vector3.up), 45f, _queuedFollowupDamage, 1.35f, 0, 0f, Palette.RailgunCyan, new Vector3(0.028f, 0.52f, 0.028f), _queuedFollowupCrit);
             VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.RailgunCyan);
             FeelManager.Instance?.TriggerCameraShake(0.07f);
             characterMotion?.TriggerWeaponRecoil(new Vector3(0f, 0.005f, -0.045f));
             AudioManager.Instance?.PlayShoot(1.22f, 0.54f);
-            LastFiredOrigin = spawnPos;
-            LastFiredDirection = dir;
+
+            if (_ammoInMag[wIdx] <= 0 && QueuedFollowupShots == 0)
+            {
+                StartReload(quiet: false);
+            }
         }
 
         private void SpawnBolt(Vector3 pos, Quaternion rot, float spd, float dmg, float lifetime, int pierce, float aoe, Color tint, Vector3 scale, bool crit)
         {
             TotalShotsFired++;
-            Projectile p = projectilePool.Get();
-            p.Initialize(projectilePool, pos, rot, spd, dmg, lifetime, pierce, aoe, false, tint, scale, crit);
+            LastFiredOrigin = pos;
+            var fwd = rot * Vector3.forward;
+            fwd.y = 0f;
+            if (fwd.sqrMagnitude > 0.0001f) LastFiredDirection = fwd.normalized;
+            var p = _projectilePool.Get();
+            p.Initialize(_projectilePool, pos, rot, spd, dmg, lifetime, pierce, aoe, false, tint, scale, crit);
         }
 
         public void SpawnEnemyProjectile(Vector3 pos, Vector3 flatDir, float spd, float dmg, Color tintColor, Vector3? visualScale = null, float lifetime = 2.8f)
         {
-            if (projectilePool == null) return;
-            Vector3 d = new Vector3(flatDir.x, 0f, flatDir.z);
+            if (_projectilePool == null) return;
+            var d = new Vector3(flatDir.x, 0f, flatDir.z);
             if (d.sqrMagnitude < 0.001f) d = Vector3.forward;
-            Vector3 scale = visualScale ?? new Vector3(0.24f, 0.24f, 0.24f);
-            Projectile p = projectilePool.Get();
-            p.Initialize(projectilePool, pos, Quaternion.LookRotation(d.normalized, Vector3.up), spd, dmg, lifetime, 0, 0f, true, tintColor, scale, false);
+            var scale = visualScale ?? new Vector3(0.032f, 0.34f, 0.032f);
+            var p = _projectilePool.Get();
+            p.Initialize(_projectilePool, pos, Quaternion.LookRotation(d.normalized, Vector3.up), spd, dmg, lifetime, 0, 0f, true, tintColor, scale);
         }
 
         public void ReturnAllActive()
         {
-            fireCooldown = 0f;
-            queuedFollowupShots = 0;
-            an94HyperburstReady = true;
-            weaponTier = 1;
-            for (int i = 0; i < allCreatedProjectiles.Count; i++)
+            _fireCooldown = 0f;
+            QueuedFollowupShots = 0;
+            _reloadTimer = 0f;
+            _an94HyperburstReady = true;
+            _weaponTier = 1;
+            for (var i = 0; i < MagazineCapacities.Length; i++)
             {
-                if (allCreatedProjectiles[i] != null && allCreatedProjectiles[i].gameObject.activeSelf)
+                _ammoInMag[i] = MagazineCapacities[i];
+            }
+            for (var i = 0; i < _allCreatedProjectiles.Count; i++)
+            {
+                var t = _allCreatedProjectiles[i];
+                if (t != null && t.gameObject.activeSelf)
                 {
-                    allCreatedProjectiles[i].ForceReturnToPool();
+                    t.ForceReturnToPool();
                 }
             }
+            UIManager.Instance?.UpdateAmmoHud(CurrentMagAmmo, CurrentMagCapacity, false, 1f);
         }
     }
 }

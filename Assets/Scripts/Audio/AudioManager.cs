@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace TopDownShooter.Audio
+namespace Audio
 {
     /// <summary>
     /// Procedural PCM audio synthesizer and headless gain-layer mixer controller.
@@ -13,50 +13,54 @@ namespace TopDownShooter.Audio
 
         private const string PrefMusicVol = "Vanguard_MusicVol";
         private const string PrefSfxVol = "Vanguard_SFXVol";
-        private const int SampleRate = 44100;
+        private const int SampleRate = 22050;
 
         [Header("Headless Gain Layer")]
         [SerializeField, Range(0f, 1f)] private float musicVolume = 0.70f;
         [SerializeField, Range(0f, 1f)] private float sfxVolume = 0.85f;
 
-        private AudioSource musicSource;
-        private AudioSource sfxSource;
-        private AudioSource gunSfxSource;
+        private AudioSource _musicSource;
+        private AudioSource _sfxSource;
+        private AudioSource _gunSfxSource;
 
-        private AudioClip shootClip;
-        private AudioClip hitClip;
-        private AudioClip explodeClip;
-        private AudioClip pickupBlipClip;
-        private AudioClip milestoneStingClip;
-        private AudioClip uiClickClip;
-        private AudioClip dashClip;
-        private AudioClip radioChirpClip;
-        private AudioClip ambientBedClip;
+        private AudioClip _dashClip;
+        private AudioClip _hitmarkerClip;
+        private AudioClip _hitmarkerKillClip;
+        private AudioClip _reloadClip;
+        private AudioClip _nvgOnClip;
+        private AudioClip _nvgOffClip;
 
-        private bool isDucked;
-        private float currentDuckGain = 1f;
-        private float lastEnemyShootTime = -10f;
+        private float _currentDuckGain = 1f;
+        private float _lastEnemyShootTime = -10f;
+        private float _lastHitmarkerTime = -10f;
 
         /// <summary>Normalized Music volume [0..1] for UI sliders and verification checks.</summary>
         public float MusicVol => musicVolume;
 
         /// <summary>Normalized SFX volume [0..1] for UI sliders and verification checks.</summary>
-        public float SFXVol => sfxVolume;
+        public float SfxVol => sfxVolume;
 
         /// <summary>True when pause -6 dB ducking is currently active.</summary>
-        public bool IsDucked => isDucked;
+        public bool IsDucked { get; private set; }
 
         /// <summary>Effective linear gain currently applied to the ambient music AudioSource.</summary>
-        public float CurrentMusicOutputGain => musicSource != null ? musicSource.volume : 0f;
+        public float CurrentMusicOutputGain => _musicSource != null ? _musicSource.volume : 0f;
 
-        public AudioClip ShootClip => shootClip;
-        public AudioClip HitClip => hitClip;
-        public AudioClip ExplodeClip => explodeClip;
-        public AudioClip PickupBlipClip => pickupBlipClip;
-        public AudioClip MilestoneStingClip => milestoneStingClip;
-        public AudioClip UIClickClip => uiClickClip;
-        public AudioClip RadioChirpClip => radioChirpClip;
-        public AudioClip AmbientBedClip => ambientBedClip;
+        public AudioClip ShootClip { get; private set; }
+
+        public AudioClip HitClip { get; private set; }
+
+        public AudioClip ExplodeClip { get; private set; }
+
+        public AudioClip PickupBlipClip { get; private set; }
+
+        public AudioClip MilestoneStingClip { get; private set; }
+
+        public AudioClip UIClickClip { get; private set; }
+
+        public AudioClip RadioChirpClip { get; private set; }
+
+        public AudioClip AmbientBedClip { get; private set; }
 
         private void Awake()
         {
@@ -86,29 +90,29 @@ namespace TopDownShooter.Audio
 
         private void Update()
         {
-            float targetDuck = isDucked ? 0.5f : 1f; // -6.02 dB pause attenuation
-            currentDuckGain = Mathf.MoveTowards(currentDuckGain, targetDuck, Time.unscaledDeltaTime * 4f);
+            var targetDuck = IsDucked ? 0.5f : 1f; // -6.02 dB pause attenuation
+            _currentDuckGain = Mathf.MoveTowards(_currentDuckGain, targetDuck, Time.unscaledDeltaTime * 4f);
             ApplyVolumes();
         }
 
         private void EnsureAudioSources()
         {
             var sources = GetComponents<AudioSource>();
-            musicSource = sources.Length > 0 ? sources[0] : gameObject.AddComponent<AudioSource>();
-            sfxSource = sources.Length > 1 ? sources[1] : gameObject.AddComponent<AudioSource>();
-            gunSfxSource = sources.Length > 2 ? sources[2] : gameObject.AddComponent<AudioSource>();
+            _musicSource = sources.Length > 0 ? sources[0] : gameObject.AddComponent<AudioSource>();
+            _sfxSource = sources.Length > 1 ? sources[1] : gameObject.AddComponent<AudioSource>();
+            _gunSfxSource = sources.Length > 2 ? sources[2] : gameObject.AddComponent<AudioSource>();
 
-            musicSource.loop = true;
-            musicSource.playOnAwake = false;
-            musicSource.spatialBlend = 0f;
+            _musicSource.loop = true;
+            _musicSource.playOnAwake = false;
+            _musicSource.spatialBlend = 0f;
 
-            sfxSource.loop = false;
-            sfxSource.playOnAwake = false;
-            sfxSource.spatialBlend = 0f;
+            _sfxSource.loop = false;
+            _sfxSource.playOnAwake = false;
+            _sfxSource.spatialBlend = 0f;
 
-            gunSfxSource.loop = false;
-            gunSfxSource.playOnAwake = false;
-            gunSfxSource.spatialBlend = 0f;
+            _gunSfxSource.loop = false;
+            _gunSfxSource.playOnAwake = false;
+            _gunSfxSource.spatialBlend = 0f;
             ApplyVolumes();
         }
 
@@ -118,7 +122,7 @@ namespace TopDownShooter.Audio
             {
                 return;
             }
-            UnityEngine.Camera mainCam = UnityEngine.Camera.main;
+            var mainCam = UnityEngine.Camera.main;
             if (mainCam != null)
             {
                 mainCam.gameObject.AddComponent<AudioListener>();
@@ -127,23 +131,28 @@ namespace TopDownShooter.Audio
 
         private void GenerateClips()
         {
-            if (shootClip == null) shootClip = BuildGunshotClip("SFX_Shoot", 0.11f, 0.36f);
-            if (hitClip == null) hitClip = BuildSweepClip("SFX_Hit", 0.085f, 195f, 52f, 0.38f, false);
-            if (explodeClip == null) explodeClip = BuildExplodeClip("SFX_Explode", 0.28f, 0.48f);
-            if (pickupBlipClip == null) pickupBlipClip = BuildSweepClip("SFX_PickupBlip", 0.075f, 340f, 640f, 0.26f, true);
-            if (milestoneStingClip == null) milestoneStingClip = BuildTriadClip("SFX_Milestone", 220.00f, 277.18f, 329.63f, 0.42f, 0.34f);
-            if (uiClickClip == null) uiClickClip = BuildSweepClip("SFX_UIClick", 0.024f, 920f, 440f, 0.22f, false);
-            if (dashClip == null) dashClip = BuildFoleyWhooshClip("SFX_Dash", 0.16f, 0.28f);
-            if (radioChirpClip == null) radioChirpClip = BuildRadioChirpClip("SFX_RadioChirp", 0.11f, 0.24f);
-            if (ambientBedClip == null) ambientBedClip = BuildAmbientBed("BGM_AmbientBed", 6.0f, 0.12f);
+            if (ShootClip == null) ShootClip = BuildGunshotClip("SFX_Shoot", 0.11f, 0.36f);
+            if (HitClip == null) HitClip = BuildSweepClip("SFX_Hit", 0.085f, 195f, 52f, 0.38f, false);
+            if (ExplodeClip == null) ExplodeClip = BuildExplodeClip("SFX_Explode", 0.28f, 0.48f);
+            if (PickupBlipClip == null) PickupBlipClip = BuildSweepClip("SFX_PickupBlip", 0.075f, 340f, 640f, 0.26f, true);
+            if (MilestoneStingClip == null) MilestoneStingClip = BuildTriadClip("SFX_Milestone", 220.00f, 277.18f, 329.63f, 0.42f, 0.34f);
+            if (UIClickClip == null) UIClickClip = BuildSweepClip("SFX_UIClick", 0.024f, 920f, 440f, 0.22f, false);
+            if (_dashClip == null) _dashClip = BuildFoleyWhooshClip("SFX_Dash", 0.16f, 0.28f);
+            if (_hitmarkerClip == null) _hitmarkerClip = BuildSweepClip("SFX_Hitmarker", 0.028f, 2900f, 1150f, 0.26f, false);
+            if (_hitmarkerKillClip == null) _hitmarkerKillClip = BuildTriadClip("SFX_HitmarkerKill", 2200f, 1450f, 3100f, 0.055f, 0.32f);
+            if (_reloadClip == null) _reloadClip = BuildTriadClip("SFX_Reload", 420f, 260f, 540f, 0.18f, 0.24f);
+            if (_nvgOnClip == null) _nvgOnClip = BuildSweepClip("SFX_NvgOn", 0.22f, 1550f, 4150f, 0.24f, true);
+            if (_nvgOffClip == null) _nvgOffClip = BuildSweepClip("SFX_NvgOff", 0.16f, 2800f, 650f, 0.20f, false);
+            if (RadioChirpClip == null) RadioChirpClip = BuildRadioChirpClip("SFX_RadioChirp", 0.11f, 0.24f);
+            if (AmbientBedClip == null) AmbientBedClip = BuildAmbientBed("BGM_AmbientBed", 2.5f, 0.12f);
         }
 
         private void StartAmbientBed()
         {
-            if (musicSource != null && ambientBedClip != null && !musicSource.isPlaying)
+            if (_musicSource != null && AmbientBedClip != null && !_musicSource.isPlaying)
             {
-                musicSource.clip = ambientBedClip;
-                musicSource.Play();
+                _musicSource.clip = AmbientBedClip;
+                _musicSource.Play();
             }
             ApplyVolumes();
         }
@@ -155,7 +164,7 @@ namespace TopDownShooter.Audio
             ApplyVolumes();
         }
 
-        public void SetSFXVolume(float normalized)
+        public void SetSfxVolume(float normalized)
         {
             sfxVolume = Mathf.Clamp01(normalized);
             PlayerPrefs.SetFloat(PrefSfxVol, sfxVolume);
@@ -164,115 +173,139 @@ namespace TopDownShooter.Audio
 
         public void SetPausedDucking(bool paused)
         {
-            isDucked = paused;
-            currentDuckGain = isDucked ? 0.5f : 1f;
+            IsDucked = paused;
+            _currentDuckGain = IsDucked ? 0.5f : 1f;
             ApplyVolumes();
         }
 
         private void ApplyVolumes()
         {
-            if (musicSource != null)
+            if (_musicSource != null)
             {
-                musicSource.volume = musicVolume * currentDuckGain;
+                _musicSource.volume = musicVolume * _currentDuckGain;
             }
-            if (sfxSource != null)
+            if (_sfxSource != null)
             {
-                sfxSource.volume = sfxVolume;
+                _sfxSource.volume = sfxVolume;
             }
-            if (gunSfxSource != null)
+            if (_gunSfxSource != null)
             {
-                gunSfxSource.volume = sfxVolume;
+                _gunSfxSource.volume = sfxVolume;
             }
         }
 
         public void PlayShoot(float pitchMultiplier = 1f, float volumeScale = 0.55f)
         {
-            AudioSource src = gunSfxSource != null ? gunSfxSource : sfxSource;
-            if (src == null || shootClip == null || sfxVolume <= 0.001f)
+            var src = _gunSfxSource != null ? _gunSfxSource : _sfxSource;
+            if (src == null || ShootClip == null || sfxVolume <= 0.001f)
             {
                 return;
             }
             src.pitch = Mathf.Clamp(pitchMultiplier * UnityEngine.Random.Range(0.97f, 1.03f), 0.45f, 1.85f);
-            src.PlayOneShot(shootClip, volumeScale);
+            src.PlayOneShot(ShootClip, volumeScale);
         }
 
         public void PlayHit()
         {
-            PlayOneShotWithPitch(hitClip, UnityEngine.Random.Range(0.92f, 1.08f), 0.70f);
+            PlayOneShotWithPitch(HitClip, UnityEngine.Random.Range(0.92f, 1.08f), 0.70f);
         }
 
         public void PlayEnemyExplode()
         {
-            PlayOneShotWithPitch(explodeClip, UnityEngine.Random.Range(0.90f, 1.10f), 0.85f);
+            PlayOneShotWithPitch(ExplodeClip, UnityEngine.Random.Range(0.90f, 1.10f), 0.85f);
         }
 
         public void PlayPickupBlip()
         {
-            PlayOneShotWithPitch(pickupBlipClip, UnityEngine.Random.Range(0.92f, 1.08f), 0.75f);
+            PlayOneShotWithPitch(PickupBlipClip, UnityEngine.Random.Range(0.92f, 1.08f), 0.75f);
         }
 
         public void PlayMilestoneSting()
         {
-            PlayOneShotWithPitch(milestoneStingClip, 1f, 0.90f);
+            PlayOneShotWithPitch(MilestoneStingClip, 1f, 0.90f);
         }
 
         public void PlayUIClick()
         {
-            PlayOneShotWithPitch(uiClickClip, 1f, 0.65f);
+            PlayOneShotWithPitch(UIClickClip, 1f, 0.65f);
         }
 
         public void PlayDash()
         {
-            PlayOneShotWithPitch(dashClip, UnityEngine.Random.Range(0.96f, 1.04f), 0.65f);
+            PlayOneShotWithPitch(_dashClip, UnityEngine.Random.Range(0.96f, 1.04f), 0.65f);
         }
 
         public void PlayRadioChirp()
         {
-            PlayOneShotWithPitch(radioChirpClip, 1f, 0.72f);
+            PlayOneShotWithPitch(RadioChirpClip, 1f, 0.72f);
+        }
+
+        public void PlayHitmarker(bool isKill)
+        {
+            if (Time.unscaledTime - _lastHitmarkerTime < 0.032f) return;
+            _lastHitmarkerTime = Time.unscaledTime;
+            if (isKill && _hitmarkerKillClip != null)
+            {
+                PlayOneShotWithPitch(_hitmarkerKillClip, UnityEngine.Random.Range(0.97f, 1.03f), 0.75f);
+            }
+            else if (_hitmarkerClip != null)
+            {
+                PlayOneShotWithPitch(_hitmarkerClip, UnityEngine.Random.Range(0.95f, 1.05f), 0.58f);
+            }
+        }
+
+        public void PlayReload()
+        {
+            PlayOneShotWithPitch(_reloadClip, UnityEngine.Random.Range(0.96f, 1.04f), 0.72f);
+        }
+
+        public void PlayNvgToggle(bool active)
+        {
+            PlayOneShotWithPitch(active ? _nvgOnClip : _nvgOffClip, 1f, 0.70f);
         }
 
         public void PlayEnemyShoot(float pitchMultiplier = 0.88f, float volumeScale = 0.22f)
         {
-            if (Time.unscaledTime - lastEnemyShootTime < 0.045f)
+            if (Time.unscaledTime - _lastEnemyShootTime < 0.045f)
             {
                 return;
             }
-            lastEnemyShootTime = Time.unscaledTime;
+            _lastEnemyShootTime = Time.unscaledTime;
             PlayShoot(pitchMultiplier, volumeScale);
         }
 
         private void PlayOneShotWithPitch(AudioClip clip, float pitch, float scale)
         {
-            if (sfxSource == null || clip == null || sfxVolume <= 0.001f)
+            if (_sfxSource == null || clip == null || sfxVolume <= 0.001f)
             {
                 return;
             }
-            sfxSource.pitch = pitch;
-            sfxSource.PlayOneShot(clip, scale);
+            _sfxSource.pitch = pitch;
+            _sfxSource.PlayOneShot(clip, scale);
         }
 
         private static AudioClip BuildGunshotClip(string clipName, float duration, float amplitude)
         {
-            int sampleCount = Mathf.Max(512, Mathf.RoundToInt(duration * SampleRate));
-            float[] data = new float[sampleCount];
-            double phase = 0.0;
-            int fadeSamples = Mathf.Min(sampleCount / 6, Mathf.RoundToInt(0.002f * SampleRate));
-            System.Random rng = new System.Random(7091);
-            float lpNoise = 0f;
+            var sampleCount = Mathf.Max(512, Mathf.RoundToInt(duration * SampleRate));
+            var data = new float[sampleCount];
+            var phase = 0.0;
+            var fadeSamples = Mathf.Min(sampleCount / 6, Mathf.RoundToInt(0.002f * SampleRate));
+            var rng = new System.Random(7091);
+            var lpNoise = 0f;
 
-            for (int i = 0; i < sampleCount; i++)
+            for (var i = 0; i < sampleCount; i++)
             {
-                float t = (float)i / (sampleCount - 1);
-                float thumpFreq = Mathf.Lerp(320f, 68f, Mathf.Pow(t, 0.35f));
+                var t = (float)i / (sampleCount - 1);
+                var thumpFreq = Mathf.Lerp(320f, 68f, Mathf.Pow(t, 0.35f));
                 phase += (2.0 * Math.PI * thumpFreq) / SampleRate;
 
-                float rawNoise = (float)(rng.NextDouble() * 2.0 - 1.0);
+                var rawNoise = (float)(rng.NextDouble() * 2.0 - 1.0);
                 lpNoise = Mathf.Lerp(lpNoise, rawNoise, Mathf.Lerp(0.65f, 0.12f, t));
-                float transientCrack = rawNoise * Mathf.Exp(-t * 36f);
-                float bodyThump = (float)Math.Sin(phase) * Mathf.Exp(-t * 14f);
+                var transientCrack = rawNoise * Mathf.Exp(-t * 36f);
+                var bodyThump = (float)Math.Sin(phase) * Mathf.Exp(-t * 14f);
 
-                float mixed = 0.52f * lpNoise * Mathf.Exp(-t * 11f) + 0.34f * transientCrack + 0.38f * bodyThump;
-                float env = ComputeFadeEnvelope(i, sampleCount, fadeSamples);
+                var mixed = 0.52f * lpNoise * Mathf.Exp(-t * 11f) + 0.34f * transientCrack + 0.38f * bodyThump;
+                var env = ComputeFadeEnvelope(i, sampleCount, fadeSamples);
                 data[i] = Mathf.Clamp(mixed * amplitude * env, -1f, 1f);
             }
 
@@ -281,19 +314,19 @@ namespace TopDownShooter.Audio
 
         private static AudioClip BuildFoleyWhooshClip(string clipName, float duration, float amplitude)
         {
-            int sampleCount = Mathf.Max(512, Mathf.RoundToInt(duration * SampleRate));
-            float[] data = new float[sampleCount];
-            int fadeSamples = Mathf.Min(sampleCount / 4, Mathf.RoundToInt(0.008f * SampleRate));
-            System.Random rng = new System.Random(2048);
-            float lp = 0f;
+            var sampleCount = Mathf.Max(512, Mathf.RoundToInt(duration * SampleRate));
+            var data = new float[sampleCount];
+            var fadeSamples = Mathf.Min(sampleCount / 4, Mathf.RoundToInt(0.008f * SampleRate));
+            var rng = new System.Random(2048);
+            var lp = 0f;
 
-            for (int i = 0; i < sampleCount; i++)
+            for (var i = 0; i < sampleCount; i++)
             {
-                float t = (float)i / (sampleCount - 1);
-                float white = (float)(rng.NextDouble() * 2.0 - 1.0);
+                var t = (float)i / (sampleCount - 1);
+                var white = (float)(rng.NextDouble() * 2.0 - 1.0);
                 lp = Mathf.Lerp(lp, white, Mathf.Lerp(0.08f, 0.24f, t));
-                float arch = Mathf.Sin(t * Mathf.PI);
-                float env = ComputeFadeEnvelope(i, sampleCount, fadeSamples) * arch;
+                var arch = Mathf.Sin(t * Mathf.PI);
+                var env = ComputeFadeEnvelope(i, sampleCount, fadeSamples) * arch;
                 data[i] = Mathf.Clamp(lp * amplitude * env * 1.4f, -1f, 1f);
             }
 
@@ -302,25 +335,25 @@ namespace TopDownShooter.Audio
 
         private static AudioClip BuildSweepClip(string clipName, float duration, float startHz, float endHz, float amplitude, bool addHarmonic)
         {
-            int sampleCount = Mathf.Max(256, Mathf.RoundToInt(duration * SampleRate));
-            float[] data = new float[sampleCount];
-            double phase = 0.0;
-            int fadeSamples = Mathf.Min(sampleCount / 4, Mathf.RoundToInt(0.005f * SampleRate));
+            var sampleCount = Mathf.Max(256, Mathf.RoundToInt(duration * SampleRate));
+            var data = new float[sampleCount];
+            var phase = 0.0;
+            var fadeSamples = Mathf.Min(sampleCount / 4, Mathf.RoundToInt(0.005f * SampleRate));
 
-            for (int i = 0; i < sampleCount; i++)
+            for (var i = 0; i < sampleCount; i++)
             {
-                float t = (float)i / (sampleCount - 1);
-                float freq = Mathf.Lerp(startHz, endHz, t);
+                var t = (float)i / (sampleCount - 1);
+                var freq = Mathf.Lerp(startHz, endHz, t);
                 phase += (2.0 * Math.PI * freq) / SampleRate;
 
-                float wave = (float)Math.Sin(phase);
+                var wave = (float)Math.Sin(phase);
                 if (addHarmonic)
                 {
                     wave = 0.75f * wave + 0.25f * (float)Math.Sin(phase * 2.0);
                 }
 
-                float decay = 1f - t * 0.75f;
-                float env = ComputeFadeEnvelope(i, sampleCount, fadeSamples) * decay;
+                var decay = 1f - t * 0.75f;
+                var env = ComputeFadeEnvelope(i, sampleCount, fadeSamples) * decay;
                 data[i] = Mathf.Clamp(wave * amplitude * env, -1f, 1f);
             }
 
@@ -329,25 +362,25 @@ namespace TopDownShooter.Audio
 
         private static AudioClip BuildExplodeClip(string clipName, float duration, float amplitude)
         {
-            int sampleCount = Mathf.Max(512, Mathf.RoundToInt(duration * SampleRate));
-            float[] data = new float[sampleCount];
-            double phase = 0.0;
-            int fadeSamples = Mathf.Min(sampleCount / 4, Mathf.RoundToInt(0.005f * SampleRate));
-            System.Random rng = new System.Random(1337);
-            float lpNoise = 0f;
+            var sampleCount = Mathf.Max(512, Mathf.RoundToInt(duration * SampleRate));
+            var data = new float[sampleCount];
+            var phase = 0.0;
+            var fadeSamples = Mathf.Min(sampleCount / 4, Mathf.RoundToInt(0.005f * SampleRate));
+            var rng = new System.Random(1337);
+            var lpNoise = 0f;
 
-            for (int i = 0; i < sampleCount; i++)
+            for (var i = 0; i < sampleCount; i++)
             {
-                float t = (float)i / (sampleCount - 1);
-                float freq = Mathf.Lerp(260f, 45f, t);
+                var t = (float)i / (sampleCount - 1);
+                var freq = Mathf.Lerp(260f, 45f, t);
                 phase += (2.0 * Math.PI * freq) / SampleRate;
 
-                float rawNoise = (float)(rng.NextDouble() * 2.0 - 1.0);
+                var rawNoise = (float)(rng.NextDouble() * 2.0 - 1.0);
                 lpNoise = Mathf.Lerp(lpNoise, rawNoise, 0.14f);
 
-                float sub = (float)Math.Sin(phase);
-                float mixed = 0.55f * sub + 0.45f * lpNoise;
-                float env = ComputeFadeEnvelope(i, sampleCount, fadeSamples) * Mathf.Pow(1f - t, 1.3f);
+                var sub = (float)Math.Sin(phase);
+                var mixed = 0.55f * sub + 0.45f * lpNoise;
+                var env = ComputeFadeEnvelope(i, sampleCount, fadeSamples) * Mathf.Pow(1f - t, 1.3f);
                 data[i] = Mathf.Clamp(mixed * amplitude * env, -1f, 1f);
             }
 
@@ -356,27 +389,27 @@ namespace TopDownShooter.Audio
 
         private static AudioClip BuildTriadClip(string clipName, float f0, float f1, float f2, float duration, float amplitude)
         {
-            int sampleCount = Mathf.Max(512, Mathf.RoundToInt(duration * SampleRate));
-            float[] data = new float[sampleCount];
+            var sampleCount = Mathf.Max(512, Mathf.RoundToInt(duration * SampleRate));
+            var data = new float[sampleCount];
             float[] notes = { f0, f1, f2 };
-            int noteLen = sampleCount / 3;
-            int fadeSamples = Mathf.Min(noteLen / 4, Mathf.RoundToInt(0.005f * SampleRate));
+            var noteLen = sampleCount / 3;
+            var fadeSamples = Mathf.Min(noteLen / 4, Mathf.RoundToInt(0.005f * SampleRate));
 
-            for (int n = 0; n < 3; n++)
+            for (var n = 0; n < 3; n++)
             {
-                int start = n * noteLen;
-                int end = (n == 2) ? sampleCount : (n + 1) * noteLen;
-                double phase = 0.0;
-                float freq = notes[n];
+                var start = n * noteLen;
+                var end = (n == 2) ? sampleCount : (n + 1) * noteLen;
+                var phase = 0.0;
+                var freq = notes[n];
 
-                for (int i = start; i < end; i++)
+                for (var i = start; i < end; i++)
                 {
-                    int localIdx = i - start;
-                    int localLen = end - start;
-                    float localT = (float)localIdx / Mathf.Max(1, localLen - 1);
+                    var localIdx = i - start;
+                    var localLen = end - start;
+                    var localT = (float)localIdx / Mathf.Max(1, localLen - 1);
                     phase += (2.0 * Math.PI * freq) / SampleRate;
-                    float env = ComputeFadeEnvelope(localIdx, localLen, fadeSamples) * (1f - localT * 0.35f);
-                    float wave = 0.8f * (float)Math.Sin(phase) + 0.2f * (float)Math.Sin(phase * 2.0);
+                    var env = ComputeFadeEnvelope(localIdx, localLen, fadeSamples) * (1f - localT * 0.35f);
+                    var wave = 0.8f * (float)Math.Sin(phase) + 0.2f * (float)Math.Sin(phase * 2.0);
                     data[i] = Mathf.Clamp(wave * amplitude * env, -1f, 1f);
                 }
             }
@@ -386,36 +419,36 @@ namespace TopDownShooter.Audio
 
         private static AudioClip BuildAmbientBed(string clipName, float duration, float amplitude)
         {
-            int sampleCount = Mathf.Max(SampleRate, Mathf.RoundToInt(duration * SampleRate));
-            float[] data = new float[sampleCount];
-            System.Random rng = new System.Random(4242);
-            float brown = 0f;
-            double subPhase = 0.0;
-            double fifthPhase = 0.0;
+            var sampleCount = Mathf.Max(SampleRate, Mathf.RoundToInt(duration * SampleRate));
+            var data = new float[sampleCount];
+            var rng = new System.Random(4242);
+            var brown = 0f;
+            var subPhase = 0.0;
+            var fifthPhase = 0.0;
 
             // Integer cycles so loop wraps cleanly at zero crossing with zero click
-            float baseFreq = Mathf.Round(55f * duration) / duration;
-            float fifthFreq = Mathf.Round(82.5f * duration) / duration;
+            var baseFreq = Mathf.Round(55f * duration) / duration;
+            var fifthFreq = Mathf.Round(82.5f * duration) / duration;
 
-            for (int i = 0; i < sampleCount; i++)
+            for (var i = 0; i < sampleCount; i++)
             {
-                float white = (float)(rng.NextDouble() * 2.0 - 1.0);
+                var white = (float)(rng.NextDouble() * 2.0 - 1.0);
                 brown = (brown + 0.02f * white) / 1.02f;
 
                 subPhase += (2.0 * Math.PI * baseFreq) / SampleRate;
                 fifthPhase += (2.0 * Math.PI * fifthFreq) / SampleRate;
 
-                float pad = 0.45f * (float)Math.Sin(subPhase) + 0.25f * (float)Math.Sin(fifthPhase);
-                float sample = (brown * 2.6f + pad) * amplitude;
+                var pad = 0.45f * (float)Math.Sin(subPhase) + 0.25f * (float)Math.Sin(fifthPhase);
+                var sample = (brown * 2.6f + pad) * amplitude;
                 data[i] = Mathf.Clamp(sample, -1f, 1f);
             }
 
             // Crossfade seam so looping never clicks
-            int seamSamples = Mathf.RoundToInt(0.05f * SampleRate);
-            for (int i = 0; i < seamSamples; i++)
+            var seamSamples = Mathf.RoundToInt(0.05f * SampleRate);
+            for (var i = 0; i < seamSamples; i++)
             {
-                float blend = (float)i / seamSamples;
-                float edgeEnv = ComputeFadeEnvelope(i, sampleCount, seamSamples);
+                var blend = (float)i / seamSamples;
+                var edgeEnv = ComputeFadeEnvelope(i, sampleCount, seamSamples);
                 data[i] *= blend * edgeEnv + (1f - edgeEnv);
                 data[sampleCount - 1 - i] *= blend * edgeEnv + (1f - edgeEnv);
             }
@@ -426,12 +459,12 @@ namespace TopDownShooter.Audio
         private static float ComputeFadeEnvelope(int index, int totalSamples, int fadeSamples)
         {
             if (fadeSamples <= 0) return 1f;
-            float env = 1f;
+            var env = 1f;
             if (index < fadeSamples)
             {
                 env = Mathf.Min(env, (float)index / fadeSamples);
             }
-            int remaining = (totalSamples - 1) - index;
+            var remaining = (totalSamples - 1) - index;
             if (remaining < fadeSamples)
             {
                 env = Mathf.Min(env, (float)remaining / fadeSamples);
@@ -441,21 +474,21 @@ namespace TopDownShooter.Audio
 
         private static AudioClip BuildRadioChirpClip(string clipName, float duration, float amplitude)
         {
-            int sampleCount = Mathf.Max(512, Mathf.RoundToInt(duration * SampleRate));
-            float[] data = new float[sampleCount];
-            double phase = 0.0;
-            System.Random rng = new System.Random(8841);
-            int fadeSamples = Mathf.Min(sampleCount / 6, Mathf.RoundToInt(0.003f * SampleRate));
+            var sampleCount = Mathf.Max(512, Mathf.RoundToInt(duration * SampleRate));
+            var data = new float[sampleCount];
+            var phase = 0.0;
+            var rng = new System.Random(8841);
+            var fadeSamples = Mathf.Min(sampleCount / 6, Mathf.RoundToInt(0.003f * SampleRate));
 
-            for (int i = 0; i < sampleCount; i++)
+            for (var i = 0; i < sampleCount; i++)
             {
-                float t = (float)i / (sampleCount - 1);
-                float toneFreq = t < 0.45f ? 1760f : 2120f;
+                var t = (float)i / (sampleCount - 1);
+                var toneFreq = t < 0.45f ? 1760f : 2120f;
                 phase += (2.0 * Math.PI * toneFreq) / SampleRate;
-                float squelchGate = (t < 0.34f || t > 0.56f) ? 1f : 0.12f;
-                float staticNoise = (float)(rng.NextDouble() * 2.0 - 1.0) * 0.22f;
-                float beep = (float)Math.Sin(phase) * 0.78f;
-                float env = ComputeFadeEnvelope(i, sampleCount, fadeSamples) * squelchGate;
+                var squelchGate = (t < 0.34f || t > 0.56f) ? 1f : 0.12f;
+                var staticNoise = (float)(rng.NextDouble() * 2.0 - 1.0) * 0.22f;
+                var beep = (float)Math.Sin(phase) * 0.78f;
+                var env = ComputeFadeEnvelope(i, sampleCount, fadeSamples) * squelchGate;
                 data[i] = Mathf.Clamp((beep + staticNoise) * amplitude * env, -1f, 1f);
             }
 
@@ -464,7 +497,7 @@ namespace TopDownShooter.Audio
 
         private static AudioClip CreateClipFromSamples(string clipName, float[] samples)
         {
-            AudioClip clip = AudioClip.Create(clipName, samples.Length, 1, SampleRate, false);
+            var clip = AudioClip.Create(clipName, samples.Length, 1, SampleRate, false);
             clip.SetData(samples, 0);
             return clip;
         }

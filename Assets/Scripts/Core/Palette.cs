@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TopDownShooter.Core
+namespace Core
 {
     /// <summary>
     /// Single source of truth for all colors and palette-derived materials in TASK FORCE // ZERO.
@@ -8,15 +8,15 @@ namespace TopDownShooter.Core
     /// </summary>
     public static class Palette
     {
-        // Core Modern Military Art Palette
-        public static readonly Color Floor = FromHex("#52554D");              // Weathered Combat Asphalt
-        public static readonly Color Walls = FromHex("#6E6B61");              // Reinforced Concrete Perimeter Wall
+        // Core Modern Military Art Palette (Operation Nightfall // Hajin DMZ Dusk/Night-Ops)
+        public static readonly Color Floor = FromHex("#3A3F3C");              // Damp Combat Asphalt
+        public static readonly Color Walls = FromHex("#555852");              // Reinforced Concrete Perimeter Wall
         public static readonly Color CharacterPrimary = FromHex("#4E603D");   // Ranger Olive Drab Combat Suit
         public static readonly Color CharacterSecondary = FromHex("#EBEAE2"); // Bone-White HUD Text & Chalk Stencil
-        public static readonly Color EnemyPrimary = FromHex("#6E332D");       // Hostile Mercenary Russet-Brown
+        public static readonly Color EnemyPrimary = FromHex("#6E332D");       // Hostile Konni Russet-Brown
         public static readonly Color EnemySecondary = FromHex("#E05A47");     // Hostile Tracer / Breacher Red
-        public static readonly Color Props = FromHex("#7A7569");              // Concrete Jersey Barrier / Crate
-        public static readonly Color Shadow = FromHex("#161A1D");             // Matte Gunmetal Charcoal
+        public static readonly Color Props = FromHex("#6B685F");              // Weathered Concrete Barrier / Crate
+        public static readonly Color Shadow = FromHex("#12161A");             // Matte Night-Ops Charcoal
         public static readonly Color Accent = FromHex("#E5A024");             // Tactical Field Amber
         public static readonly Color HealthGreen = FromHex("#49C96E");        // Medkit Trauma Green
 
@@ -26,14 +26,21 @@ namespace TopDownShooter.Core
         public static readonly Color GuardTowerDark = FromHex("#3A3D38");     // Painted Structural Steel
         public static readonly Color HazardYellow = FromHex("#CFA236");       // Matte Warning Stencil Yellow
         public static readonly Color NvgGreen = FromHex("#2B5C38");           // Grounded Optical NVG Lens Green
+        public static readonly Color SkullMaskBone = FromHex("#DEDAD0");      // Ghost Jawbone Balaclava Skull Mask
+        public static readonly Color NvgPhosphor = FromHex("#68FF9B");        // GPNVG-18 Phosphor Night Vision Tint
+        public static readonly Color SodiumAmber = FromHex("#FFB048");        // Warm Sodium Floodlight Lamp
+        public static readonly Color BarrelHazardRed = FromHex("#B83126");    // Explosive Fuel Barrel Drum Red
+        public static readonly Color HitmarkerWhite = FromHex("#F6F5F0");     // MW4 Ballistic Hitmarker White
+        public static readonly Color HitmarkerCrimson = FromHex("#FF3B30");   // MW4 Fatal Kill Hitmarker Red
+        public static readonly Color DmzRidgeEarth = FromHex("#2B3126");      // Hajin DMZ Perimeter Hillside Earth
 
-        // Daylight Tactical Compound Lighting & Atmosphere
-        public static readonly Color KeyLightWarm = FromHex("#FFE8C6");       // Warm Afternoon Sun
-        public static readonly Color AmbientSky = FromHex("#6F8396");         // Dusty Overcast Daylight Sky
-        public static readonly Color AmbientEquator = FromHex("#555852");     // Concrete Courtyard Bounce
-        public static readonly Color AmbientGround = FromHex("#3A3B35");      // Tarmac Bounce
-        public static readonly Color SkyboxTop = FromHex("#516880");          // Clear Tactical Blue-Slate
-        public static readonly Color SkyboxHorizon = FromHex("#B4A792");      // Warm Dusty Horizon Haze
+        // Hajin DMZ Dusk / Night-Ops Lighting & Atmosphere
+        public static readonly Color KeyLightWarm = FromHex("#B6CCF0");       // Crisp Moonlight Blue-Silver Key
+        public static readonly Color AmbientSky = FromHex("#3A4D63");         // Night-Ops Mountain Sky Fill
+        public static readonly Color AmbientEquator = FromHex("#2D353C");     // Wet Concrete Courtyard Bounce
+        public static readonly Color AmbientGround = FromHex("#1D2120");      // Dark Tarmac Bounce
+        public static readonly Color SkyboxTop = FromHex("#142131");          // Deep Korean Peninsula Night Sky
+        public static readonly Color SkyboxHorizon = FromHex("#394B5A");      // Low DMZ Valley Mist Horizon
 
         // Derived UI & Ballistic VFX tones
         public static readonly Color CyanGlow = FromHex("#C49438");           // Brass-Amber Trim (replaces legacy cyan)
@@ -51,15 +58,26 @@ namespace TopDownShooter.Core
         public static readonly Color SkinGoldPrimary = FromHex("#B59867");    // Desert Sandstorm Camo
         public static readonly Color SkinCrimsonPrimary = FromHex("#2B3034"); // Night Ops Spec-Ops Black
         public static readonly Color CardRareBorder = FromHex("#E5A024");
-        public static readonly Color Transparent = new Color(0f, 0f, 0f, 0f);
+        public static readonly Color SquadBlue = FromHex("#42A5F5");         // Bravo-6 Friendly Squad Chevron Blue
+        public static readonly Color DamageBloodRed = FromHex("#A31419");    // CoD Bloody Edge Damage Vignette
+        public static readonly Color C4Amber = FromHex("#F2A72E");           // C4 Sabotage Objective Amber
+        public static readonly Color RadarGreen = FromHex("#45CC73");        // Extraction LZ & UAV Sweep Green
+        public static readonly Color HudDarkGlass = WithAlpha(FromHex("#101417"), 0.90f);
+        public static readonly Color Transparent = new(0f, 0f, 0f, 0f);
+        private static readonly int BaseColor = Shader.PropertyToID("_BaseColor");
+        private static readonly int Smoothness = Shader.PropertyToID("_Smoothness");
+        private static readonly int Metallic = Shader.PropertyToID("_Metallic");
+        private static readonly int BaseMap = Shader.PropertyToID("_BaseMap");
+        private static readonly int EmissionColor = Shader.PropertyToID("_EmissionColor");
+        private static readonly int SunSize = Shader.PropertyToID("_SunSize");
+        private static readonly int AtmosphereThickness = Shader.PropertyToID("_AtmosphereThickness");
+        private static readonly int SkyTint = Shader.PropertyToID("_SkyTint");
+        private static readonly int GroundColor = Shader.PropertyToID("_GroundColor");
+        private static readonly int Exposure = Shader.PropertyToID("_Exposure");
 
         public static Color FromHex(string hex)
         {
-            if (ColorUtility.TryParseHtmlString(hex, out Color parsed))
-            {
-                return parsed;
-            }
-            return new Color(0.14f, 0.16f, 0.20f, 1f);
+            return ColorUtility.TryParseHtmlString(hex, out var parsed) ? parsed : new Color(0.14f, 0.16f, 0.20f, 1f);
         }
 
         public static Color WithAlpha(Color c, float alpha)
@@ -84,7 +102,7 @@ namespace TopDownShooter.Core
             return CreateLitMaterial(matName, baseColor, metallic, smoothness, emissive, baseColor, emissionIntensity, mainTex);
         }
 
-        public static Material CreateLitMaterial(
+        private static Material CreateLitMaterial(
             string matName,
             Color baseColor,
             float metallic,
@@ -94,38 +112,40 @@ namespace TopDownShooter.Core
             float emissionIntensity,
             Texture2D mainTex = null)
         {
-            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            var shader = Shader.Find("Universal Render Pipeline/Lit");
             if (shader == null)
             {
                 Debug.LogError($"[Palette] Could not find 'Universal Render Pipeline/Lit' shader for {matName}");
                 return null;
             }
 
-            Material mat = new Material(shader) { name = matName };
-            mat.SetColor("_BaseColor", baseColor);
-            mat.SetFloat("_Smoothness", smoothness);
-            mat.SetFloat("_Metallic", metallic);
+            var mat = new Material(shader)
+            {
+                name = matName,
+                enableInstancing = true
+            };
+            mat.SetColor(BaseColor, baseColor);
+            mat.SetFloat(Smoothness, smoothness);
+            mat.SetFloat(Metallic, metallic);
 
             if (mainTex != null)
             {
                 mat.mainTexture = mainTex;
-                if (mat.HasProperty("_BaseMap"))
+                if (mat.HasProperty(BaseMap))
                 {
-                    mat.SetTexture("_BaseMap", mainTex);
+                    mat.SetTexture(BaseMap, mainTex);
                 }
             }
 
-            if (emissive)
-            {
-                mat.EnableKeyword("_EMISSION");
-                Color hdrColor = new Color(
-                    emissionColor.r * emissionIntensity,
-                    emissionColor.g * emissionIntensity,
-                    emissionColor.b * emissionIntensity,
-                    1f);
-                mat.SetColor("_EmissionColor", hdrColor);
-                mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
-            }
+            if (!emissive) return mat;
+            mat.EnableKeyword("_EMISSION");
+            var hdrColor = new Color(
+                emissionColor.r * emissionIntensity,
+                emissionColor.g * emissionIntensity,
+                emissionColor.b * emissionIntensity,
+                1f);
+            mat.SetColor(EmissionColor, hdrColor);
+            mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
 
             return mat;
         }
@@ -137,15 +157,18 @@ namespace TopDownShooter.Core
 
         public static Material CreateParticleMaterial(string matName, Texture2D mainTex = null)
         {
-            Shader shader = Shader.Find("Sprites/Default");
+            var shader = Shader.Find("Sprites/Default");
             if (shader == null)
             {
                 Debug.LogError($"[Palette] Could not find 'Sprites/Default' shader for {matName}");
                 return null;
             }
 
-            Material mat = new Material(shader) { name = matName };
-            mat.color = CharacterSecondary;
+            var mat = new Material(shader)
+            {
+                name = matName,
+                color = CharacterSecondary
+            };
             if (mainTex != null)
             {
                 mat.mainTexture = mainTex;
@@ -155,19 +178,19 @@ namespace TopDownShooter.Core
 
         public static Material CreateSkyboxMaterial(string matName = "Mat_ArenaSkybox")
         {
-            Shader shader = Shader.Find("Skybox/Procedural");
+            var shader = Shader.Find("Skybox/Procedural");
             if (shader == null)
             {
                 Debug.LogError($"[Palette] Could not find 'Skybox/Procedural' shader for {matName}");
                 return null;
             }
 
-            Material mat = new Material(shader) { name = matName };
-            if (mat.HasProperty("_SunSize")) mat.SetFloat("_SunSize", 0.035f);
-            if (mat.HasProperty("_AtmosphereThickness")) mat.SetFloat("_AtmosphereThickness", 0.72f);
-            if (mat.HasProperty("_SkyTint")) mat.SetColor("_SkyTint", SkyboxTop);
-            if (mat.HasProperty("_GroundColor")) mat.SetColor("_GroundColor", AmbientGround);
-            if (mat.HasProperty("_Exposure")) mat.SetFloat("_Exposure", 0.92f);
+            var mat = new Material(shader) { name = matName };
+            if (mat.HasProperty(SunSize)) mat.SetFloat(SunSize, 0.035f);
+            if (mat.HasProperty(AtmosphereThickness)) mat.SetFloat(AtmosphereThickness, 0.72f);
+            if (mat.HasProperty(SkyTint)) mat.SetColor(SkyTint, SkyboxTop);
+            if (mat.HasProperty(GroundColor)) mat.SetColor(GroundColor, AmbientGround);
+            if (mat.HasProperty(Exposure)) mat.SetFloat(Exposure, 0.56f);
             return mat;
         }
     }

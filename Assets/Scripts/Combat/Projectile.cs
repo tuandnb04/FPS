@@ -1,13 +1,13 @@
 using System.Collections.Generic;
+using Audio;
+using Character;
+using Core;
+using Enemies;
+using Feel;
 using UnityEngine;
 using UnityEngine.Pool;
-using TopDownShooter.Audio;
-using TopDownShooter.Character;
-using TopDownShooter.Core;
-using TopDownShooter.Enemies;
-using TopDownShooter.Feel;
 
-namespace TopDownShooter.Combat
+namespace Combat
 {
     /// <summary>
     /// Pooled projectile supporting friendly ballistic/piercing/explosive rounds
@@ -15,22 +15,26 @@ namespace TopDownShooter.Combat
     /// </summary>
     public sealed class Projectile : MonoBehaviour
     {
-        private ObjectPool<Projectile> ownerPool;
-        private float speed;
-        private float damage;
-        private float remainingLifetime;
-        private int remainingPierces;
-        private float explosionRadius;
-        private bool isEnemyProjectile;
-        private bool isCrit;
-        private Color projectileTint;
-        private bool released;
+        private ObjectPool<Projectile> _ownerPool;
+        private float _speed;
+        private float _damage;
+        private float _remainingLifetime;
+        private int _remainingPierces;
+        private float _explosionRadius;
+        private bool _isEnemyProjectile;
+        private bool _isCrit;
+        private Color _projectileTint;
+        private bool _released;
 
-        private MeshRenderer visualRenderer;
-        private Transform visualTransform;
-        private MaterialPropertyBlock mpb;
-        private readonly HashSet<EnemyController> hitEnemies = new HashSet<EnemyController>();
-        private static readonly HashSet<EnemyController> ExplosionBuffer = new HashSet<EnemyController>();
+        private MeshRenderer _visualRenderer;
+        private Transform _visualTransform;
+        private MaterialPropertyBlock _mpb;
+        private readonly HashSet<EnemyController> _hitEnemies = new();
+        private static readonly HashSet<EnemyController> ExplosionBuffer = new();
+        private static readonly RaycastHit[] RayHitBuffer = new RaycastHit[16];
+        private static readonly Collider[] OverlapBuffer = new Collider[32];
+        private static readonly int BaseColor = Shader.PropertyToID("_BaseColor");
+        private static readonly int EmissionColor = Shader.PropertyToID("_EmissionColor");
 
         public void Initialize(
             ObjectPool<Projectile> pool,
@@ -46,113 +50,154 @@ namespace TopDownShooter.Combat
             Vector3? visualScale = null,
             bool criticalHit = false)
         {
-            ownerPool = pool;
+            _ownerPool = pool;
             transform.SetPositionAndRotation(position, rotation);
-            speed = projectileSpeed;
-            damage = projectileDamage;
-            remainingLifetime = lifetime;
-            remainingPierces = Mathf.Max(0, pierceCount);
-            explosionRadius = Mathf.Max(0f, aoeRadius);
-            isEnemyProjectile = enemyProjectile;
-            isCrit = criticalHit;
-            projectileTint = tintColor ?? (enemyProjectile ? Palette.BossPurple : Palette.Accent);
-            released = false;
-            hitEnemies.Clear();
+            _speed = projectileSpeed;
+            _damage = projectileDamage;
+            _remainingLifetime = lifetime;
+            _remainingPierces = Mathf.Max(0, pierceCount);
+            _explosionRadius = Mathf.Max(0f, aoeRadius);
+            _isEnemyProjectile = enemyProjectile;
+            _isCrit = criticalHit;
+            _projectileTint = tintColor ?? (enemyProjectile ? Palette.BossPurple : Palette.Accent);
+            _released = false;
+            _hitEnemies.Clear();
 
             CacheVisuals();
-            if (visualTransform != null)
+            if (_visualTransform != null)
             {
-                visualTransform.localScale = visualScale ?? new Vector3(0.13f, 0.28f, 0.13f);
+                _visualTransform.localScale = visualScale ?? new Vector3(0.13f, 0.28f, 0.13f);
             }
-            ApplyTint(projectileTint);
+            ApplyTint(_projectileTint);
         }
 
         private void CacheVisuals()
         {
-            if (visualRenderer == null && transform.childCount > 0)
-            {
-                visualTransform = transform.GetChild(0);
-                visualRenderer = visualTransform.GetComponent<MeshRenderer>();
-            }
+            if (_visualRenderer != null || transform.childCount <= 0) return;
+            _visualTransform = transform.GetChild(0);
+            _visualRenderer = _visualTransform.GetComponent<MeshRenderer>();
         }
 
         private void ApplyTint(Color tint)
         {
-            if (visualRenderer == null) return;
-            if (mpb == null) mpb = new MaterialPropertyBlock();
-            visualRenderer.GetPropertyBlock(mpb);
-            mpb.SetColor("_BaseColor", tint);
-            mpb.SetColor("_EmissionColor", tint * 1.45f);
-            visualRenderer.SetPropertyBlock(mpb);
+            if (_visualRenderer == null) return;
+            _mpb ??= new MaterialPropertyBlock();
+            _visualRenderer.GetPropertyBlock(_mpb);
+            _mpb.SetColor(BaseColor, tint);
+            _mpb.SetColor(EmissionColor, tint * 1.45f);
+            _visualRenderer.SetPropertyBlock(_mpb);
         }
 
         private void Update()
         {
-            if (released) return;
+            if (_released) return;
 
-            float dt = Time.deltaTime;
+            var dt = Time.deltaTime;
             if (dt <= 0f) return;
 
-            remainingLifetime -= dt;
-            if (remainingLifetime <= 0f)
+            _remainingLifetime -= dt;
+            if (_remainingLifetime <= 0f)
             {
                 Release();
                 return;
             }
 
-            Vector3 step = transform.forward * (speed * dt);
-            float dist = step.magnitude;
+            var step = transform.forward * (_speed * dt);
+            var dist = step.magnitude;
             if (dist > 0.0001f)
             {
-                RaycastHit[] hits = Physics.RaycastAll(transform.position, transform.forward, dist + 0.28f, ~0, QueryTriggerInteraction.Ignore);
-                if (hits != null && hits.Length > 0)
+                var hitCount = Physics.RaycastNonAlloc(transform.position, transform.forward, RayHitBuffer, dist + 0.28f, ~0, QueryTriggerInteraction.Ignore);
+                if (hitCount > 0)
                 {
-                    System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-                    for (int i = 0; i < hits.Length; i++)
+                    // Insertion sort in-place: zero allocations, optimal for small hit counts
+                    for (var i = 1; i < hitCount; i++)
                     {
-                        RaycastHit hit = hits[i];
+                        var key = RayHitBuffer[i];
+                        var j = i - 1;
+                        while (j >= 0 && RayHitBuffer[j].distance > key.distance)
+                        {
+                            RayHitBuffer[j + 1] = RayHitBuffer[j];
+                            j--;
+                        }
+                        RayHitBuffer[j + 1] = key;
+                    }
+
+                    for (var i = 0; i < hitCount; i++)
+                    {
+                        var hit = RayHitBuffer[i];
                         if (hit.collider == null) continue;
 
-                        if (isEnemyProjectile)
+                        if (_isEnemyProjectile)
                         {
                             if (hit.collider.GetComponentInParent<EnemyController>() != null) continue;
 
-                            PlayerController player = hit.collider.GetComponentInParent<PlayerController>();
+                            var player = hit.collider.GetComponentInParent<PlayerController>();
                             if (player != null)
                             {
-                                player.TakeDamage(damage);
-                                VFXManager.Instance?.Play(VfxKind.HitSpark, hit.point, projectileTint);
+                                player.TakeDamage(_damage);
+                                VFXManager.Instance?.Play(VfxKind.HitSpark, hit.point, _projectileTint);
                                 Release();
                                 return;
                             }
 
-                            VFXManager.Instance?.Play(VfxKind.HitSpark, hit.point, projectileTint);
-                            Release();
-                            return;
+                            var ally = hit.collider.GetComponentInParent<SquadMemberController>();
+                            if (ally != null)
+                            {
+                                if (ally.IsDowned) continue;
+                                ally.TakeDamage(_damage);
+                                VFXManager.Instance?.Play(VfxKind.HitSpark, hit.point, _projectileTint);
+                                Release();
+                                return;
+                            }
+
+                            VFXManager.Instance?.Play(VfxKind.HitSpark, hit.point, _projectileTint);
                         }
                         else
                         {
-                            if (hit.collider.CompareTag("Player")) continue;
+                            if (hit.collider.CompareTag("Player") || hit.collider.GetComponentInParent<SquadMemberController>() != null) continue;
 
-                            EnemyController enemy = hit.collider.GetComponentInParent<EnemyController>();
+                            var barrel = hit.collider.GetComponentInParent<ExplosiveBarrel>();
+                            if (barrel != null && !barrel.IsDetonated)
+                            {
+                                if (_explosionRadius > 0.1f)
+                                {
+                                    DetonateAoE(hit.point);
+                                }
+                                else
+                                {
+                                    var exploded = barrel.ApplyDamage(_damage);
+                                    FeelManager.Instance?.TriggerHitmarker(exploded);
+                                }
+                                Release();
+                                return;
+                            }
+
+                            var enemy = hit.collider.GetComponentInParent<EnemyController>();
                             if (enemy != null)
                             {
-                                if (!hitEnemies.Add(enemy)) continue;
+                                if (!_hitEnemies.Add(enemy)) continue;
 
-                                if (explosionRadius > 0.1f)
+                                if (_explosionRadius > 0.1f)
                                 {
                                     DetonateAoE(hit.point);
                                     Release();
                                     return;
                                 }
 
-                                enemy.ApplyDamage(damage, hit.point, transform.forward, isCrit);
-                                VFXManager.Instance?.Play(VfxKind.HitSpark, hit.point, projectileTint);
+                                var wasDead = enemy.IsDead;
+                                enemy.ApplyDamage(_damage, hit.point, transform.forward, _isCrit);
+                                var killed = !wasDead && enemy.IsDead;
+                                FeelManager.Instance?.TriggerHitmarker(killed);
+                                if (killed)
+                                {
+                                    FeelManager.Instance?.TriggerKillFeed("PRICE", enemy.DisplayCallsign, "5.56");
+                                }
+                                VFXManager.Instance?.Play(VfxKind.HitSpark, hit.point, _projectileTint);
                                 AudioManager.Instance?.PlayHit();
 
-                                if (remainingPierces > 0)
+                                if (_remainingPierces > 0)
                                 {
-                                    remainingPierces--;
+                                    _remainingPierces--;
                                     continue;
                                 }
 
@@ -161,7 +206,7 @@ namespace TopDownShooter.Combat
                             }
 
                             // Hit solid wall or tactical cover
-                            if (explosionRadius > 0.1f)
+                            if (_explosionRadius > 0.1f)
                             {
                                 DetonateAoE(hit.point);
                             }
@@ -169,9 +214,10 @@ namespace TopDownShooter.Combat
                             {
                                 VFXManager.Instance?.Play(VfxKind.HitSpark, hit.point, Palette.Accent);
                             }
-                            Release();
-                            return;
                         }
+
+                        Release();
+                        return;
                     }
                 }
             }
@@ -182,22 +228,46 @@ namespace TopDownShooter.Combat
         private void DetonateAoE(Vector3 center)
         {
             ExplosionBuffer.Clear();
-            Collider[] overlap = Physics.OverlapSphere(center, explosionRadius, ~0, QueryTriggerInteraction.Ignore);
-            for (int i = 0; i < overlap.Length; i++)
+            var overlapCount = Physics.OverlapSphereNonAlloc(center, _explosionRadius, OverlapBuffer, ~0, QueryTriggerInteraction.Ignore);
+            var anyHit = false;
+            var anyKill = false;
+            for (var i = 0; i < overlapCount; i++)
             {
-                if (overlap[i] == null) continue;
-                EnemyController enemy = overlap[i].GetComponentInParent<EnemyController>();
+                var t = OverlapBuffer[i];
+                if (t == null) continue;
+
+                var barrel = t.GetComponentInParent<ExplosiveBarrel>();
+                if (barrel != null && !barrel.IsDetonated)
+                {
+                    if (barrel.ApplyDamage(_damage)) anyKill = true;
+                    anyHit = true;
+                    continue;
+                }
+
+                var enemy = t.GetComponentInParent<EnemyController>();
                 if (enemy != null && !enemy.IsDead)
                 {
                     ExplosionBuffer.Add(enemy);
                 }
             }
 
-            foreach (EnemyController enemy in ExplosionBuffer)
+            foreach (var enemy in ExplosionBuffer)
             {
-                Vector3 dir = enemy.transform.position - center;
+                anyHit = true;
+                var wasDead = enemy.IsDead;
+                var dir = enemy.transform.position - center;
                 dir.y = 0f;
-                enemy.ApplyDamage(damage, enemy.transform.position + Vector3.up * 0.8f, dir.sqrMagnitude > 0.001f ? dir.normalized : transform.forward, isCrit);
+                enemy.ApplyDamage(_damage, enemy.transform.position + Vector3.up * 0.8f, dir.sqrMagnitude > 0.001f ? dir.normalized : transform.forward, _isCrit);
+                if (!wasDead && enemy.IsDead)
+                {
+                    anyKill = true;
+                    FeelManager.Instance?.TriggerKillFeed("PRICE", enemy.DisplayCallsign, "HE");
+                }
+            }
+
+            if (anyHit)
+            {
+                FeelManager.Instance?.TriggerHitmarker(anyKill);
             }
 
             VFXManager.Instance?.Play(VfxKind.EnemyDeath, center, Palette.RocketOrange);
@@ -213,11 +283,11 @@ namespace TopDownShooter.Combat
 
         private void Release()
         {
-            if (released) return;
-            released = true;
-            if (ownerPool != null)
+            if (_released) return;
+            _released = true;
+            if (_ownerPool != null)
             {
-                ownerPool.Release(this);
+                _ownerPool.Release(this);
             }
             else
             {

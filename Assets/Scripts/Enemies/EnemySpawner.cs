@@ -1,23 +1,26 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
+using Audio;
+using Camera;
+using Character;
+using Core;
+using Feel;
+using Pickups;
+using UI;
 using UnityEngine;
 using UnityEngine.Pool;
-using TopDownShooter.Audio;
-using TopDownShooter.CameraRig;
-using TopDownShooter.Character;
-using TopDownShooter.Core;
-using TopDownShooter.Feel;
-using TopDownShooter.Pickups;
-using TopDownShooter.UI;
+using UnityEngine.Serialization;
 
-namespace TopDownShooter.Enemies
+namespace Enemies
 {
     /// <summary>
-    /// Pooled wave director spawning 3D compound enemies & Dreadnought Bosses,
-    /// managing telegraphed hazard rings, and dropping XP/Medkit/Cyber-Credit collectibles.
+    /// Pooled Echo-7 3-Sector Campaign Director managing sector garrisons, armored IFV encounters,
+    /// interactive C4 breach & sabotage objectives, Extraction LZ, and tactical supply drops.
     /// </summary>
     public sealed class EnemySpawner : MonoBehaviour
     {
+        private static readonly int Color1 = Shader.PropertyToID("_Color");
         public static EnemySpawner Instance { get; private set; }
 
         [Header("Campaign Sector Bounds (Echo-7)")]
@@ -40,40 +43,60 @@ namespace TopDownShooter.Enemies
         [SerializeField] private Mesh enemyArmMesh;
         [SerializeField] private Mesh enemyUpperArmMesh;
         [SerializeField] private Mesh enemyForearmMesh;
-        [SerializeField] private Mesh enemyAK74Mesh;
-        [SerializeField] private Mesh enemyPKMMesh;
+        [FormerlySerializedAs("enemyAK74Mesh")] [SerializeField] private Mesh enemyAk74Mesh;
+        [FormerlySerializedAs("enemyPKMMesh")] [SerializeField] private Mesh enemyPkmMesh;
         [SerializeField] private Mesh xpCrystalMesh;
         [SerializeField] private Mesh medkitMesh;
         [SerializeField] private Mesh creditCoinMesh;
+        [SerializeField] private Mesh sabotageTerminalMesh;
+        [SerializeField] private Mesh c4ChargeMesh;
 
-        private ObjectPool<EnemyController> enemyPool;
-        private ObjectPool<PickupItem> pickupPool;
+        private ObjectPool<EnemyController> _enemyPool;
+        private ObjectPool<PickupItem> _pickupPool;
 
-        private readonly List<EnemyController> activeEnemies = new List<EnemyController>();
-        private readonly List<PickupItem> activePickups = new List<PickupItem>();
-        private readonly List<GameObject> activeHazards = new List<GameObject>();
+        private readonly List<EnemyController> _activeEnemies = new();
+        private readonly List<PickupItem> _activePickups = new();
+        private readonly List<GameObject> _activeHazards = new();
+        private readonly List<CampaignObjectiveNode> _objectiveNodes = new(4);
 
-        private Transform enemyPoolRoot;
-        private Transform pickupPoolRoot;
-        private Transform hazardRoot;
+        private Transform _enemyPoolRoot;
+        private Transform _pickupPoolRoot;
+        private Transform _hazardRoot;
+        private Transform _objectiveRoot;
 
-        private Material enemyPrimaryMat;
-        private Material enemySecondaryMat;
-        private Material enemyWeaponMat;
-        private Material bossArmorMat;
-        private Material bossTrimMat;
-        private Material pickupMat;
-        private Material hazardRingMat;
+        private Material _enemyPrimaryMat;
+        private Material _enemySecondaryMat;
+        private Material _enemyWeaponMat;
+        private Material _bossArmorMat;
+        private Material _bossTrimMat;
+        private Material _pickupMat;
+        private Material _hazardRingMat;
+        private Material _objectiveTerminalMat;
+        private Material _objectiveC4Mat;
 
-        private int currentWave = 1;
-        private int remainingToSpawnInWave;
-        private float spawnTimer;
-        private float waveIntermissionTimer;
-        private bool waveTransitionPending;
+        private int _stage1KillTarget = 8;
+        private int _stage1KillsProgress;
+        private int _remainingReinforcements;
+        private float _reinforcementTimer;
+        private float _stageBeatTimer;
+        private bool _transitionPending;
+        private bool _stage2BossCleared;
 
-        public int CurrentWave => currentWave;
-        public int ActiveEnemyCount => activeEnemies.Count;
-        public int ActivePickupCount => activePickups.Count;
+        public int CurrentStage { get; private set; } = 1;
+
+        public int CurrentWave => CurrentStage; // Compatibility alias for SaveManager / legacy hooks
+        public int ActiveEnemyCount => _activeEnemies.Count;
+        public IReadOnlyList<EnemyController> ActiveEnemies => _activeEnemies;
+        public IReadOnlyList<CampaignObjectiveNode> ObjectiveNodes => _objectiveNodes;
+        public CampaignObjectiveNode Gate1BreachNode { get; private set; }
+
+        public CampaignObjectiveNode FuelValveNode { get; private set; }
+
+        public CampaignObjectiveNode RadarTerminalNode { get; private set; }
+
+        public CampaignObjectiveNode HelipadLzNode { get; private set; }
+
+        public int SabotageCompletedCount { get; private set; }
 
         public void BindMeshes(
             Mesh chaserTorso, Mesh chaserHead,
@@ -84,8 +107,10 @@ namespace TopDownShooter.Enemies
             Mesh enemyArm = null,
             Mesh enemyUpperArm = null,
             Mesh enemyForearm = null,
-            Mesh enemyAK74 = null,
-            Mesh enemyPKM = null)
+            Mesh enemyAk74 = null,
+            Mesh enemyPkm = null,
+            Mesh sabotageTerminal = null,
+            Mesh c4Charge = null)
         {
             chaserTorsoMesh = chaserTorso;
             chaserHeadMesh = chaserHead;
@@ -97,11 +122,14 @@ namespace TopDownShooter.Enemies
             enemyArmMesh = enemyArm;
             enemyUpperArmMesh = enemyUpperArm;
             enemyForearmMesh = enemyForearm;
-            enemyAK74Mesh = enemyAK74;
-            enemyPKMMesh = enemyPKM;
+            enemyAk74Mesh = enemyAk74;
+            enemyPkmMesh = enemyPkm;
             xpCrystalMesh = xpShard;
             medkitMesh = medkit;
             creditCoinMesh = creditCoin;
+            sabotageTerminalMesh = sabotageTerminal;
+            c4ChargeMesh = c4Charge;
+            EnsureObjectiveNodesBuilt();
         }
 
         private void Awake()
@@ -113,42 +141,49 @@ namespace TopDownShooter.Enemies
             }
             Instance = this;
 
-            enemyPoolRoot = new GameObject("EnemyPoolRoot").transform;
-            enemyPoolRoot.SetParent(transform, false);
+            _enemyPoolRoot = new GameObject("EnemyPoolRoot").transform;
+            _enemyPoolRoot.SetParent(transform, false);
 
-            pickupPoolRoot = new GameObject("PickupPoolRoot").transform;
-            pickupPoolRoot.SetParent(transform, false);
+            _pickupPoolRoot = new GameObject("PickupPoolRoot").transform;
+            _pickupPoolRoot.SetParent(transform, false);
 
-            hazardRoot = new GameObject("HazardTelegraphRoot").transform;
-            hazardRoot.SetParent(transform, false);
+            _hazardRoot = new GameObject("HazardTelegraphRoot").transform;
+            _hazardRoot.SetParent(transform, false);
 
-            enemyPrimaryMat = Palette.CreateLitMaterial("Mat_EnemyChassisRuntime", Palette.EnemyPrimary, 0.20f, 0.36f);
-            enemySecondaryMat = Palette.CreateLitMaterial("Mat_EnemyVisorRuntime", Palette.Props, 0.35f, 0.40f);
-            enemyWeaponMat = Palette.CreateLitMaterial("Mat_EnemyWeaponRuntime", Palette.Gunmetal, 0.78f, 0.56f);
-            bossArmorMat = Palette.CreateLitMaterial("Mat_BossChassisRuntime", Palette.GuardTowerDark, 0.36f, 0.42f);
-            bossTrimMat = Palette.CreateLitMaterial("Mat_BossTrimRuntime", Palette.Gunmetal, 0.55f, 0.48f);
-            pickupMat = Palette.CreateLitMaterial("Mat_PickupCoreRuntime", Palette.Accent, 0.25f, 0.45f);
-            hazardRingMat = Palette.CreateParticleMaterial("Mat_HazardRingRuntime", UISpriteFactory.GetTelegraphRingTexture());
+            _objectiveRoot = new GameObject("CampaignObjectivesRoot").transform;
+            _objectiveRoot.SetParent(transform, false);
 
-            enemyPool = new ObjectPool<EnemyController>(
+            _enemyPrimaryMat = Palette.CreateLitMaterial("Mat_EnemyChassisRuntime", Palette.EnemyPrimary, 0.20f, 0.36f);
+            _enemySecondaryMat = Palette.CreateLitMaterial("Mat_EnemyVisorRuntime", Palette.Props, 0.35f, 0.40f);
+            _enemyWeaponMat = Palette.CreateLitMaterial("Mat_EnemyWeaponRuntime", Palette.Gunmetal, 0.78f, 0.56f);
+            _bossArmorMat = Palette.CreateLitMaterial("Mat_BossChassisRuntime", Palette.GuardTowerDark, 0.36f, 0.42f);
+            _bossTrimMat = Palette.CreateLitMaterial("Mat_BossTrimRuntime", Palette.Gunmetal, 0.55f, 0.48f);
+            _pickupMat = Palette.CreateLitMaterial("Mat_PickupCoreRuntime", Palette.Accent, 0.25f, 0.45f);
+            _hazardRingMat = Palette.CreateParticleMaterial("Mat_HazardRingRuntime", UISpriteFactory.GetTelegraphRingTexture());
+            _objectiveTerminalMat = Palette.CreateLitMaterial("Mat_ObjectiveTermRuntime", Palette.GuardTowerDark, 0.45f, 0.45f);
+            _objectiveC4Mat = Palette.CreateLitMaterial("Mat_ObjectiveC4Runtime", Palette.C4Amber, 0.20f, 0.35f, true, 1.35f);
+
+            _enemyPool = new ObjectPool<EnemyController>(
                 createFunc: CreateEnemyRig,
                 actionOnGet: e => e.gameObject.SetActive(true),
                 actionOnRelease: e => e.gameObject.SetActive(false),
                 actionOnDestroy: e => { if (e != null) Destroy(e.gameObject); },
                 collectionCheck: false,
-                defaultCapacity: 12,
+                defaultCapacity: 14,
                 maxSize: 36
             );
 
-            pickupPool = new ObjectPool<PickupItem>(
+            _pickupPool = new ObjectPool<PickupItem>(
                 createFunc: CreatePickupRig,
                 actionOnGet: p => p.gameObject.SetActive(true),
                 actionOnRelease: p => p.gameObject.SetActive(false),
-                actionOnDestroy: p => { if (p != null) Destroy(p.gameObject); },
+                actionOnDestroy: e => { if (e != null) Destroy(e.gameObject); },
                 collectionCheck: false,
-                defaultCapacity: 24,
-                maxSize: 64
+                defaultCapacity: 18,
+                maxSize: 48
             );
+
+            EnsureObjectiveNodesBuilt();
         }
 
         private void OnDestroy()
@@ -159,106 +194,148 @@ namespace TopDownShooter.Enemies
             }
         }
 
+        private void EnsureObjectiveNodesBuilt()
+        {
+            if (_objectiveRoot == null) return;
+            if (_objectiveNodes.Count == 4 && sabotageTerminalMesh == null) return;
+
+            for (var i = _objectiveNodes.Count - 1; i >= 0; i--)
+            {
+                if (_objectiveNodes[i] != null) Destroy(_objectiveNodes[i].gameObject);
+            }
+            _objectiveNodes.Clear();
+
+            Gate1BreachNode = CreateObjectiveNode(
+                "Obj_Gate1_Breach", ObjectiveNodeKind.GateC4Breach, "BLAST GATE ALPHA",
+                new Vector3(0f, 0f, -17.5f), 3.3f, 1.55f, true);
+
+            FuelValveNode = CreateObjectiveNode(
+                "Obj_S2_FuelValve", ObjectiveNodeKind.FuelValveSabotage, "FUEL MANIFOLD",
+                new Vector3(-16.5f, 0f, -1.2f), 3.4f, 1.65f, true);
+
+            RadarTerminalNode = CreateObjectiveNode(
+                "Obj_S2_RadarTerminal", ObjectiveNodeKind.RadarSabotage, "EW RADAR UPLINK",
+                new Vector3(21.5f, 0f, 1.5f), 3.4f, 1.65f, true);
+
+            HelipadLzNode = CreateObjectiveNode(
+                "Obj_S3_HelipadLZ", ObjectiveNodeKind.HelipadEvacLZ, "EXTRACTION LZ EVAC-6",
+                new Vector3(0f, 0f, 42.0f), 4.2f, 1.10f, false);
+        }
+
+        private CampaignObjectiveNode CreateObjectiveNode(
+            string goName,
+            ObjectiveNodeKind kind,
+            string title,
+            Vector3 pos,
+            float radius,
+            float armSeconds,
+            bool explode)
+        {
+            var go = new GameObject(goName);
+            go.transform.SetParent(_objectiveRoot, false);
+            var node = go.AddComponent<CampaignObjectiveNode>();
+            node.Configure(kind, title, pos, radius, armSeconds, explode, sabotageTerminalMesh, c4ChargeMesh, _objectiveTerminalMat, _objectiveC4Mat, HandleObjectiveCompleted);
+            _objectiveNodes.Add(node);
+            return node;
+        }
+
         private EnemyController CreateEnemyRig()
         {
-            GameObject root = new GameObject("Enemy_Sentinel");
-            root.transform.SetParent(enemyPoolRoot, false);
+            var root = new GameObject("Enemy_Sentinel");
+            root.transform.SetParent(_enemyPoolRoot, false);
+            var enemyLayer = LayerMask.NameToLayer("Enemy");
+            if (enemyLayer >= 0) root.layer = enemyLayer;
 
-            CharacterController cc = root.AddComponent<CharacterController>();
+            var cc = root.AddComponent<CharacterController>();
             cc.radius = 0.48f;
             cc.height = 1.75f;
             cc.center = new Vector3(0f, 0.875f, 0f);
             cc.stepOffset = 0.25f;
 
-            ProceduralCharacterMotion motion = root.AddComponent<ProceduralCharacterMotion>();
-            EnemyController ctrl = root.AddComponent<EnemyController>();
+            var motion = root.AddComponent<ProceduralCharacterMotion>();
+            var ctrl = root.AddComponent<EnemyController>();
 
-            GameObject visualRoot = new GameObject("VisualRoot");
+            var visualRoot = new GameObject("VisualRoot");
             visualRoot.transform.SetParent(root.transform, false);
 
-            // Standard bipedal Chaser & Heavy pivots
-            GameObject torsoGroup = new GameObject("TorsoRoot");
+            var torsoGroup = new GameObject("TorsoRoot");
             torsoGroup.transform.SetParent(visualRoot.transform, false);
 
-            GameObject chaserBody = CreatePartWithMesh("ChaserBody", chaserTorsoMesh, PrimitiveType.Cube, torsoGroup.transform, new Vector3(0f, 1.0f, 0f), chaserTorsoMesh != null ? Vector3.one : new Vector3(0.68f, 0.62f, 0.46f), enemyPrimaryMat);
-            GameObject heavyBody = CreatePartWithMesh("HeavyBody", heavyTorsoMesh, PrimitiveType.Cube, torsoGroup.transform, new Vector3(0f, 1.05f, 0f), heavyTorsoMesh != null ? Vector3.one : new Vector3(0.86f, 0.72f, 0.62f), enemyPrimaryMat);
+            var chaserBody = CreatePartWithMesh("ChaserBody", chaserTorsoMesh, PrimitiveType.Cube, torsoGroup.transform, new Vector3(0f, 1.0f, 0f), chaserTorsoMesh != null ? Vector3.one : new Vector3(0.68f, 0.62f, 0.46f), _enemyPrimaryMat);
+            var heavyBody = CreatePartWithMesh("HeavyBody", heavyTorsoMesh, PrimitiveType.Cube, torsoGroup.transform, new Vector3(0f, 1.05f, 0f), heavyTorsoMesh != null ? Vector3.one : new Vector3(0.86f, 0.72f, 0.62f), _enemyPrimaryMat);
             heavyBody.SetActive(false);
 
-            GameObject headPivot = new GameObject("HeadPivot");
+            var headPivot = new GameObject("HeadPivot");
             headPivot.transform.SetParent(visualRoot.transform, false);
             headPivot.transform.localPosition = new Vector3(0f, 1.46f, 0.04f);
 
-            GameObject chaserHeadObj = CreatePartWithMesh("ChaserHead", chaserHeadMesh, PrimitiveType.Cube, headPivot.transform, Vector3.zero, chaserHeadMesh != null ? Vector3.one : new Vector3(0.46f, 0.34f, 0.44f), enemyPrimaryMat);
-            CreatePartWithMesh("ChaserVisor", null, PrimitiveType.Cube, chaserHeadObj.transform, new Vector3(0f, 0.02f, 0.21f), new Vector3(0.36f, 0.10f, 0.08f), enemySecondaryMat);
+            var chaserHeadObj = CreatePartWithMesh("ChaserHead", chaserHeadMesh, PrimitiveType.Cube, headPivot.transform, Vector3.zero, chaserHeadMesh != null ? Vector3.one : new Vector3(0.46f, 0.34f, 0.44f), _enemyPrimaryMat);
+            CreatePartWithMesh("ChaserVisor", null, PrimitiveType.Cube, chaserHeadObj.transform, new Vector3(0f, 0.02f, 0.21f), new Vector3(0.36f, 0.10f, 0.08f), _enemySecondaryMat);
 
-            GameObject heavyHeadObj = CreatePartWithMesh("HeavyCrown", heavyCrownMesh, PrimitiveType.Cube, headPivot.transform, new Vector3(0f, 0.06f, 0f), heavyCrownMesh != null ? Vector3.one : new Vector3(0.56f, 0.24f, 0.50f), enemySecondaryMat);
+            var heavyHeadObj = CreatePartWithMesh("HeavyCrown", heavyCrownMesh, PrimitiveType.Cube, headPivot.transform, new Vector3(0f, 0.06f, 0f), heavyCrownMesh != null ? Vector3.one : new Vector3(0.56f, 0.24f, 0.50f), _enemySecondaryMat);
             heavyHeadObj.SetActive(false);
 
-            Transform leftArmPivot = BuildEnemyOperatorArm("Left", visualRoot.transform, new Vector3(-0.30f, 1.20f, 0.07f), out Transform leftElbowPivot);
-            Transform rightArmPivot = BuildEnemyOperatorArm("Right", visualRoot.transform, new Vector3(0.32f, 1.20f, -0.02f), out Transform rightElbowPivot);
+            var leftArmPivot = BuildEnemyOperatorArm("Left", visualRoot.transform, new Vector3(-0.30f, 1.20f, 0.07f), out var leftElbowPivot);
+            var rightArmPivot = BuildEnemyOperatorArm("Right", visualRoot.transform, new Vector3(0.32f, 1.20f, -0.02f), out var rightElbowPivot);
 
-            GameObject weaponAnchor = new GameObject("WeaponAnchor");
+            var weaponAnchor = new GameObject("WeaponAnchor");
             weaponAnchor.transform.SetParent(visualRoot.transform, false);
             weaponAnchor.transform.localPosition = new Vector3(0.12f, 1.12f, 0.35f);
 
-            GameObject ak74Obj = BuildEnemyWeapon(
-                "EnemyWeapon_AK74", weaponAnchor.transform, enemyAK74Mesh, 0.65f,
+            var ak74Obj = BuildEnemyWeapon(
+                "EnemyWeapon_AK74", weaponAnchor.transform, enemyAk74Mesh, 0.65f,
                 new Vector3(0f, -0.024f, 0.175f), new Vector3(0f, -0.060f, -0.036f), new Vector3(0f, 0.015f, 0.569f),
-                out Transform ak74LeftGrip, out Transform ak74RightGrip, out Transform ak74Muzzle);
+                out var ak74LeftGrip, out var ak74RightGrip, out var ak74Muzzle);
 
-            GameObject pkmObj = BuildEnemyWeapon(
-                "EnemyWeapon_PKM", weaponAnchor.transform, enemyPKMMesh, 0.68f,
+            var pkmObj = BuildEnemyWeapon(
+                "EnemyWeapon_PKM", weaponAnchor.transform, enemyPkmMesh, 0.68f,
                 new Vector3(0f, -0.026f, 0.210f), new Vector3(0f, -0.064f, -0.044f), new Vector3(0f, 0.019f, 0.656f),
-                out Transform pkmLeftGrip, out Transform pkmRightGrip, out Transform pkmMuzzle);
+                out var pkmLeftGrip, out var pkmRightGrip, out var pkmMuzzle);
             pkmObj.SetActive(false);
 
-            GameObject leftLegPivot = new GameObject("LeftLegPivot");
+            var leftLegPivot = new GameObject("LeftLegPivot");
             leftLegPivot.transform.SetParent(visualRoot.transform, false);
             leftLegPivot.transform.localPosition = new Vector3(-0.18f, 0.74f, 0f);
-            CreatePartWithMesh("LeftLeg", limbMesh, PrimitiveType.Cube, leftLegPivot.transform, new Vector3(0f, -0.35f, 0f), limbMesh != null ? Vector3.one : new Vector3(0.22f, 0.62f, 0.24f), enemyPrimaryMat);
+            CreatePartWithMesh("LeftLeg", limbMesh, PrimitiveType.Cube, leftLegPivot.transform, new Vector3(0f, -0.35f, 0f), limbMesh != null ? Vector3.one : new Vector3(0.22f, 0.62f, 0.24f), _enemyPrimaryMat);
 
-            GameObject rightLegPivot = new GameObject("RightLegPivot");
+            var rightLegPivot = new GameObject("RightLegPivot");
             rightLegPivot.transform.SetParent(visualRoot.transform, false);
             rightLegPivot.transform.localPosition = new Vector3(0.18f, 0.74f, 0f);
-            CreatePartWithMesh("RightLeg", limbMesh, PrimitiveType.Cube, rightLegPivot.transform, new Vector3(0f, -0.35f, 0f), limbMesh != null ? Vector3.one : new Vector3(0.22f, 0.62f, 0.24f), enemyPrimaryMat);
+            CreatePartWithMesh("RightLeg", limbMesh, PrimitiveType.Cube, rightLegPivot.transform, new Vector3(0f, -0.35f, 0f), limbMesh != null ? Vector3.one : new Vector3(0.22f, 0.62f, 0.24f), _enemyPrimaryMat);
 
-            GameObject reactorPivot = new GameObject("SecondaryPivot");
+            var reactorPivot = new GameObject("SecondaryPivot");
             reactorPivot.transform.SetParent(visualRoot.transform, false);
             reactorPivot.transform.localPosition = new Vector3(0f, 1.05f, -0.30f);
-            CreatePartWithMesh("FieldPack", null, PrimitiveType.Cube, reactorPivot.transform, Vector3.zero, new Vector3(0.32f, 0.36f, 0.18f), enemySecondaryMat);
+            CreatePartWithMesh("FieldPack", null, PrimitiveType.Cube, reactorPivot.transform, Vector3.zero, new Vector3(0.32f, 0.36f, 0.18f), _enemySecondaryMat);
 
-            // Chaser/Heavy group holders (only toggle non-shared heavy crown/boss hull)
-            GameObject chaserToggle = new GameObject("ChaserMarker");
+            var chaserToggle = new GameObject("ChaserMarker");
             chaserToggle.transform.SetParent(visualRoot.transform, false);
 
-            GameObject heavyToggle = new GameObject("HeavyMarker");
+            var heavyToggle = new GameObject("HeavyMarker");
             heavyToggle.transform.SetParent(visualRoot.transform, false);
             heavyBody.transform.SetParent(heavyToggle.transform, true);
             heavyHeadObj.transform.SetParent(heavyToggle.transform, true);
             heavyBody.SetActive(true);
             heavyHeadObj.SetActive(true);
 
-            // Notice: Chaser uses chaserBody & chaserHeadObj directly when active
             chaserBody.transform.SetParent(chaserToggle.transform, true);
             chaserHeadObj.transform.SetParent(chaserToggle.transform, true);
 
-            // Dedicated Armored IFV Boss rig
-            GameObject bossGroup = new GameObject("BossRigRoot");
+            var bossGroup = new GameObject("BossRigRoot");
             bossGroup.transform.SetParent(root.transform, false);
-            CreatePartWithMesh("BossHull", bossTorsoMesh, PrimitiveType.Cube, bossGroup.transform, new Vector3(0f, 0.72f, 0f), bossTorsoMesh != null ? Vector3.one : new Vector3(1.5f, 0.75f, 1.4f), bossArmorMat);
-            CreatePartWithMesh("DriverPeriscope", null, PrimitiveType.Cube, bossGroup.transform, new Vector3(0.26f, 1.05f, 0.64f), new Vector3(0.24f, 0.14f, 0.22f), bossTrimMat);
-            GameObject turretPivot = new GameObject("BossTurretPivot");
+            CreatePartWithMesh("BossHull", bossTorsoMesh, PrimitiveType.Cube, bossGroup.transform, new Vector3(0f, 0.72f, 0f), bossTorsoMesh != null ? Vector3.one : new Vector3(1.5f, 0.75f, 1.4f), _bossArmorMat);
+            CreatePartWithMesh("DriverPeriscope", null, PrimitiveType.Cube, bossGroup.transform, new Vector3(0.26f, 1.05f, 0.64f), new Vector3(0.24f, 0.14f, 0.22f), _bossTrimMat);
+            var turretPivot = new GameObject("BossTurretPivot");
             turretPivot.transform.SetParent(bossGroup.transform, false);
             turretPivot.transform.localPosition = new Vector3(0f, 1.25f, 0f);
-            CreatePartWithMesh("BossTurretMesh", bossTurretMesh, PrimitiveType.Cube, turretPivot.transform, Vector3.zero, bossTurretMesh != null ? Vector3.one : new Vector3(0.85f, 0.38f, 0.9f), bossTrimMat);
-            GameObject bossMuzzleTip = new GameObject("BossMuzzleTip");
+            CreatePartWithMesh("BossTurretMesh", bossTurretMesh, PrimitiveType.Cube, turretPivot.transform, Vector3.zero, bossTurretMesh != null ? Vector3.one : new Vector3(0.85f, 0.38f, 0.9f), _bossTrimMat);
+            var bossMuzzleTip = new GameObject("BossMuzzleTip");
             bossMuzzleTip.transform.SetParent(turretPivot.transform, false);
             bossMuzzleTip.transform.localPosition = new Vector3(0f, 0.02f, 1.52f);
             bossGroup.SetActive(false);
 
-            // Bind bipedal pivots & two-bone weapon IK
             motion.BindPivots(visualRoot.transform, headPivot.transform, leftArmPivot, rightArmPivot, leftLegPivot.transform, rightLegPivot.transform, reactorPivot.transform);
-            motion.BindWeaponArmIk(leftElbowPivot, rightElbowPivot, weaponAnchor.transform, ak74LeftGrip, ak74RightGrip, 0.34f, 0.35f);
+            motion.BindWeaponArmIk(leftElbowPivot, rightElbowPivot, weaponAnchor.transform, ak74LeftGrip, ak74RightGrip);
             ctrl.BindComponents(
                 cc, motion, root.GetComponentsInChildren<MeshRenderer>(true),
                 visualRoot, chaserToggle, heavyToggle, bossGroup, turretPivot.transform,
@@ -273,38 +350,38 @@ namespace TopDownShooter.Enemies
 
         private Transform BuildEnemyOperatorArm(string side, Transform visualRoot, Vector3 shoulderPos, out Transform elbowPivotOut)
         {
-            GameObject armPivot = new GameObject(side + "ArmPivot");
+            var armPivot = new GameObject(side + "ArmPivot");
             armPivot.transform.SetParent(visualRoot, false);
             armPivot.transform.localPosition = shoulderPos;
 
             if (enemyUpperArmMesh != null)
             {
-                CreatePartWithMesh(side + "UpperArm", enemyUpperArmMesh, PrimitiveType.Capsule, armPivot.transform, Vector3.zero, new Vector3(1.06f, 0.34f / 0.295f, 1.06f), enemyPrimaryMat);
+                CreatePartWithMesh(side + "UpperArm", enemyUpperArmMesh, PrimitiveType.Capsule, armPivot.transform, Vector3.zero, new Vector3(1.06f, 0.34f / 0.295f, 1.06f), _enemyPrimaryMat);
             }
             else if (enemyArmMesh != null)
             {
-                CreatePartWithMesh(side + "UpperArm", enemyArmMesh, PrimitiveType.Capsule, armPivot.transform, Vector3.zero, new Vector3(0.95f, 0.60f, 0.95f), enemyPrimaryMat);
+                CreatePartWithMesh(side + "UpperArm", enemyArmMesh, PrimitiveType.Capsule, armPivot.transform, Vector3.zero, new Vector3(0.95f, 0.60f, 0.95f), _enemyPrimaryMat);
             }
             else
             {
-                CreatePartWithMesh(side + "UpperArm", null, PrimitiveType.Capsule, armPivot.transform, new Vector3(0f, -0.17f, 0f), new Vector3(0.14f, 0.18f, 0.14f), enemyPrimaryMat);
+                CreatePartWithMesh(side + "UpperArm", null, PrimitiveType.Capsule, armPivot.transform, new Vector3(0f, -0.17f, 0f), new Vector3(0.14f, 0.18f, 0.14f), _enemyPrimaryMat);
             }
 
-            GameObject elbowPivot = new GameObject(side + "ElbowPivot");
+            var elbowPivot = new GameObject(side + "ElbowPivot");
             elbowPivot.transform.SetParent(armPivot.transform, false);
             elbowPivot.transform.localPosition = new Vector3(0f, -0.34f, 0f);
             elbowPivotOut = elbowPivot.transform;
 
             if (enemyForearmMesh != null)
             {
-                CreatePartWithMesh(side + "Forearm", enemyForearmMesh, PrimitiveType.Capsule, elbowPivot.transform, Vector3.zero, new Vector3(1.04f, 0.30f / 0.25f, 1.04f), enemyPrimaryMat);
+                CreatePartWithMesh(side + "Forearm", enemyForearmMesh, PrimitiveType.Capsule, elbowPivot.transform, Vector3.zero, new Vector3(1.04f, 0.30f / 0.25f, 1.04f), _enemyPrimaryMat);
             }
             else
             {
-                CreatePartWithMesh(side + "Forearm", null, PrimitiveType.Capsule, elbowPivot.transform, new Vector3(0f, -0.15f, 0f), new Vector3(0.12f, 0.16f, 0.12f), enemyPrimaryMat);
+                CreatePartWithMesh(side + "Forearm", null, PrimitiveType.Capsule, elbowPivot.transform, new Vector3(0f, -0.15f, 0f), new Vector3(0.12f, 0.16f, 0.12f), _enemyPrimaryMat);
             }
 
-            CreatePartWithMesh(side + "Glove", null, PrimitiveType.Cube, elbowPivot.transform, new Vector3(0f, -0.335f, 0f), new Vector3(0.085f, 0.09f, 0.095f), enemyWeaponMat);
+            CreatePartWithMesh(side + "Glove", null, PrimitiveType.Cube, elbowPivot.transform, new Vector3(0f, -0.335f, 0f), new Vector3(0.085f, 0.09f, 0.095f), _enemyWeaponMat);
             return armPivot.transform;
         }
 
@@ -320,25 +397,25 @@ namespace TopDownShooter.Enemies
             out Transform rightGripOut,
             out Transform muzzleOut)
         {
-            GameObject container = new GameObject(name);
+            var container = new GameObject(name);
             container.transform.SetParent(anchor, false);
 
             CreatePartWithMesh("MeshBody", weaponMesh, PrimitiveType.Cube, container.transform,
                 weaponMesh != null ? Vector3.zero : new Vector3(0f, 0f, 0.16f),
                 weaponMesh != null ? Vector3.one * uniformScale : new Vector3(0.09f, 0.14f, 0.56f),
-                enemyWeaponMat);
+                _enemyWeaponMat);
 
-            GameObject leftGrip = new GameObject("LeftHandGrip");
+            var leftGrip = new GameObject("LeftHandGrip");
             leftGrip.transform.SetParent(container.transform, false);
             leftGrip.transform.localPosition = leftGripLocal;
             leftGripOut = leftGrip.transform;
 
-            GameObject rightGrip = new GameObject("RightHandGrip");
+            var rightGrip = new GameObject("RightHandGrip");
             rightGrip.transform.SetParent(container.transform, false);
             rightGrip.transform.localPosition = rightGripLocal;
             rightGripOut = rightGrip.transform;
 
-            GameObject muzzleTip = new GameObject("MuzzleTip");
+            var muzzleTip = new GameObject("MuzzleTip");
             muzzleTip.transform.SetParent(container.transform, false);
             muzzleTip.transform.localPosition = muzzleLocal;
             muzzleOut = muzzleTip.transform;
@@ -348,24 +425,26 @@ namespace TopDownShooter.Enemies
 
         private PickupItem CreatePickupRig()
         {
-            GameObject root = new GameObject("Pickup_Collectible");
-            root.transform.SetParent(pickupPoolRoot, false);
+            var root = new GameObject("Pickup_Collectible");
+            root.transform.SetParent(_pickupPoolRoot, false);
+            var pickupLayer = LayerMask.NameToLayer("Pickup");
+            if (pickupLayer >= 0) root.layer = pickupLayer;
 
-            SphereCollider trigger = root.AddComponent<SphereCollider>();
+            var trigger = root.AddComponent<SphereCollider>();
             trigger.isTrigger = true;
-            trigger.radius = 0.82f;
+            trigger.radius = 0.85f;
 
-            GameObject visualHolder = new GameObject("VisualSpinRoot");
+            var visualHolder = new GameObject("VisualSpinRoot");
             visualHolder.transform.SetParent(root.transform, false);
 
-            GameObject xpObj = CreatePartWithMesh("XpCrystalVisual", xpCrystalMesh, PrimitiveType.Cube, visualHolder.transform, Vector3.zero, xpCrystalMesh != null ? Vector3.one : new Vector3(0.36f, 0.36f, 0.36f), pickupMat);
-            GameObject medObj = CreatePartWithMesh("MedkitVisual", medkitMesh, PrimitiveType.Cube, visualHolder.transform, Vector3.zero, medkitMesh != null ? Vector3.one : new Vector3(0.44f, 0.24f, 0.36f), pickupMat);
-            GameObject credObj = CreatePartWithMesh("CreditCoinVisual", creditCoinMesh, PrimitiveType.Cylinder, visualHolder.transform, Vector3.zero, creditCoinMesh != null ? Vector3.one : new Vector3(0.42f, 0.08f, 0.42f), pickupMat);
+            var xpObj = CreatePartWithMesh("XpCrystalVisual", xpCrystalMesh, PrimitiveType.Cube, visualHolder.transform, Vector3.zero, xpCrystalMesh != null ? Vector3.one : new Vector3(0.36f, 0.36f, 0.36f), _pickupMat);
+            var medObj = CreatePartWithMesh("MedkitVisual", medkitMesh, PrimitiveType.Cube, visualHolder.transform, Vector3.zero, medkitMesh != null ? Vector3.one : new Vector3(0.44f, 0.24f, 0.36f), _pickupMat);
+            var credObj = CreatePartWithMesh("CreditCoinVisual", creditCoinMesh, PrimitiveType.Cube, visualHolder.transform, Vector3.zero, creditCoinMesh != null ? Vector3.one : new Vector3(0.55f, 0.35f, 0.42f), _pickupMat);
 
             medObj.SetActive(false);
             credObj.SetActive(false);
 
-            PickupItem item = root.AddComponent<PickupItem>();
+            var item = root.AddComponent<PickupItem>();
             item.ConfigureMultiVisuals(
                 visualHolder.transform,
                 xpObj, xpObj.GetComponent<MeshRenderer>(),
@@ -383,9 +462,9 @@ namespace TopDownShooter.Enemies
             {
                 go = new GameObject(partName);
                 go.transform.SetParent(parent, false);
-                MeshFilter mf = go.AddComponent<MeshFilter>();
+                var mf = go.AddComponent<MeshFilter>();
                 mf.sharedMesh = customMesh;
-                MeshRenderer mr = go.AddComponent<MeshRenderer>();
+                var mr = go.AddComponent<MeshRenderer>();
                 mr.sharedMaterial = mat;
             }
             else
@@ -393,9 +472,9 @@ namespace TopDownShooter.Enemies
                 go = GameObject.CreatePrimitive(fallbackType);
                 go.name = partName;
                 go.transform.SetParent(parent, false);
-                Collider c = go.GetComponent<Collider>();
+                var c = go.GetComponent<Collider>();
                 if (c != null) Destroy(c);
-                MeshRenderer mr = go.GetComponent<MeshRenderer>();
+                var mr = go.GetComponent<MeshRenderer>();
                 if (mr != null) mr.sharedMaterial = mat;
             }
 
@@ -404,137 +483,362 @@ namespace TopDownShooter.Enemies
             return go;
         }
 
-        public void BeginWave(int waveNum)
+        public void BeginWave(int stageNum)
         {
-            waveTransitionPending = false;
-            currentWave = Mathf.Max(1, waveNum);
-            remainingToSpawnInWave = 5 + currentWave * 3;
-            spawnTimer = 0.2f;
+            BeginCampaignStage(stageNum);
+        }
 
-            if (currentWave >= 4)
+        private void BeginCampaignStage(int stageNum)
+        {
+            EnsureObjectiveNodesBuilt();
+            _transitionPending = false;
+            _stageBeatTimer = 0f;
+            CurrentStage = Mathf.Clamp(stageNum, 1, StoryDirector.FinalCampaignStage);
+
+            if (CurrentStage >= 3)
             {
                 CutsceneDirector.Instance?.OpenGateImmediate(1);
             }
-            if (currentWave >= 7)
+            if (CurrentStage >= 5)
             {
                 CutsceneDirector.Instance?.OpenGateImmediate(2);
             }
 
-            if (currentWave > 1)
+            switch (CurrentStage)
             {
-                StoryDirector.NotifyWaveStarted(currentWave);
+                case 1:
+                    SetupStage1CheckpointGarrison();
+                    break;
+                case 2:
+                    SetupStage2WatchdogAndGateC4();
+                    break;
+                case 3:
+                    SetupStage3FuelAndRadarSabotage();
+                    break;
+                case 4:
+                    SetupStage4WardenAndGate2();
+                    break;
+                case 5:
+                    SetupStage5VolkovNorthHq();
+                    break;
+                case 6:
+                    SetupStage6ExtractionLz();
+                    break;
             }
 
-            if (currentWave % 3 == 0)
+            if (CurrentStage > 1)
             {
-                Vector3 bossPos = GetCampaignBossSpawnPoint(currentWave);
-                SpawnBossAt(bossPos);
-                StoryDirector.NotifyBossSpawned(currentWave);
-                UIManager.Instance?.ShowMilestoneBanner("INCOMING // " + StoryDirector.GetBossCallsign(currentWave));
+                StoryDirector.NotifyStageStarted(CurrentStage);
+            }
+            SyncMissionHud();
+        }
 
-                if (currentWave >= StoryDirector.FinalCampaignWave && GameManager.Instance != null && GameManager.Instance.CurrentState == GameState.Playing)
-                {
-                    GameManager.Instance.TriggerCutscene(CutsceneType.Act3BossVolkov);
-                }
+        private void SetupStage1CheckpointGarrison()
+        {
+            Gate1BreachNode?.SetState(false, false);
+            FuelValveNode?.SetState(false, false);
+            RadarTerminalNode?.SetState(false, false);
+            HelipadLzNode?.SetState(false, false);
+
+            Vector3[] sentries =
+            {
+                new(-5.8f, 0f, -34.0f),
+                new(5.8f, 0f, -34.0f),
+                new(-8.0f, 0f, -26.5f),
+                new(8.0f, 0f, -26.5f),
+                new(-13.5f, 0f, -29.0f),
+                new(13.0f, 0f, -27.5f),
+                new(-2.4f, 0f, -20.5f),
+                new(2.4f, 0f, -20.5f)
+            };
+
+            _stage1KillsProgress = 0;
+            _stage1KillTarget = sentries.Length;
+            _remainingReinforcements = 0;
+
+            for (var i = 0; i < sentries.Length; i++)
+            {
+                var e = SpawnEnemyAt(i == 5 ? EnemyArchetype.Heavy : EnemyArchetype.Chaser, sentries[i]);
+                e.transform.rotation = Quaternion.LookRotation(Vector3.back, Vector3.up);
+                e.SetGarrisonAlert(i < 4);
+            }
+        }
+
+        private void SetupStage2WatchdogAndGateC4()
+        {
+            _stage2BossCleared = false;
+            Gate1BreachNode?.SetState(false, false);
+            _remainingReinforcements = 0;
+
+            SpawnEnemyAt(EnemyArchetype.Chaser, new Vector3(-6.5f, 0f, -22.5f)).SetGarrisonAlert(true, 45f);
+            SpawnEnemyAt(EnemyArchetype.Chaser, new Vector3(6.5f, 0f, -22.5f)).SetGarrisonAlert(true, 45f);
+            SpawnEnemyAt(EnemyArchetype.Heavy, new Vector3(0f, 0f, -25.0f)).SetGarrisonAlert(true, 45f);
+
+            SpawnBossAt(new Vector3(0f, 0f, -20.5f));
+            StoryDirector.NotifyBossSpawned(CurrentStage);
+            UIManager.Instance?.ShowMilestoneBanner("THREAT // " + StoryDirector.GetBossCallsign(CurrentStage));
+        }
+
+        private void SetupStage3FuelAndRadarSabotage()
+        {
+            SabotageCompletedCount = 0;
+            Gate1BreachNode?.SetState(false, true);
+            FuelValveNode?.SetState(true, false);
+            RadarTerminalNode?.SetState(true, false);
+            HelipadLzNode?.SetState(false, false);
+            _remainingReinforcements = 3;
+            _reinforcementTimer = 6.5f;
+
+            // Garrison defending West Fuel Depot, Container Maze, and East Radar Array
+            Vector3[] rifles =
+            {
+                new(-16.0f, 0f, -7.5f),
+                new(-18.5f, 0f, 3.5f),
+                new(-6.0f, 0f, 2.5f),
+                new(7.0f, 0f, -3.5f),
+                new(17.5f, 0f, -4.5f),
+                new(23.5f, 0f, 6.0f)
+            };
+            Vector3[] heavies =
+            {
+                new(-21.0f, 0f, 0.5f),
+                new(18.5f, 0f, 4.5f),
+                new(0.0f, 0f, 11.0f)
+            };
+
+            foreach (var t in rifles)
+            {
+                var e = SpawnEnemyAt(EnemyArchetype.Chaser, t);
+                e.transform.rotation = Quaternion.LookRotation(Vector3.back, Vector3.up);
+                e.SetGarrisonAlert(false, 22f);
+            }
+            foreach (var t in heavies)
+            {
+                var h = SpawnEnemyAt(EnemyArchetype.Heavy, t);
+                h.transform.rotation = Quaternion.LookRotation(Vector3.back, Vector3.up);
+                h.SetGarrisonAlert(false, 23f);
+            }
+        }
+
+        private void SetupStage4WardenAndGate2()
+        {
+            _remainingReinforcements = 0;
+            foreach (var t in _activeEnemies.Where(t => t != null))
+            {
+                t.SetGarrisonAlert(true, 64f);
             }
 
-            UIManager.Instance?.UpdateWave(currentWave, remainingToSpawnInWave + activeEnemies.Count);
+            SpawnEnemyAt(EnemyArchetype.Heavy, new Vector3(-7.5f, 0f, 14.5f)).SetGarrisonAlert(true, 55f);
+            SpawnEnemyAt(EnemyArchetype.Chaser, new Vector3(7.5f, 0f, 14.5f)).SetGarrisonAlert(true, 55f);
+            SpawnBossAt(new Vector3(0f, 0f, 15.5f));
+            StoryDirector.NotifyBossSpawned(CurrentStage);
+            UIManager.Instance?.ShowMilestoneBanner("THREAT // " + StoryDirector.GetBossCallsign(CurrentStage));
+        }
+
+        private void SetupStage5VolkovNorthHq()
+        {
+            _remainingReinforcements = 0;
+            CutsceneDirector.Instance?.OpenGateImmediate(2);
+
+            SpawnEnemyAt(EnemyArchetype.Chaser, new Vector3(-9.5f, 0f, 29.0f)).SetGarrisonAlert(true, 55f);
+            SpawnEnemyAt(EnemyArchetype.Chaser, new Vector3(9.5f, 0f, 29.0f)).SetGarrisonAlert(true, 55f);
+            SpawnEnemyAt(EnemyArchetype.Heavy, new Vector3(-11.5f, 0f, 36.5f)).SetGarrisonAlert(true, 55f);
+            SpawnEnemyAt(EnemyArchetype.Heavy, new Vector3(11.5f, 0f, 36.5f)).SetGarrisonAlert(true, 55f);
+
+            SpawnBossAt(new Vector3(0f, 0f, 42.0f));
+            StoryDirector.NotifyBossSpawned(CurrentStage);
+            UIManager.Instance?.ShowMilestoneBanner("FINAL TARGET // COL. VOLKOV");
+
+            if (GameManager.Instance != null && GameManager.Instance.CurrentState == GameState.Playing)
+            {
+                GameManager.Instance.TriggerCutscene(CutsceneType.Act3BossVolkov);
+            }
+        }
+
+        private void SetupStage6ExtractionLz()
+        {
+            _remainingReinforcements = 0;
+            HelipadLzNode?.SetState(true, false);
+            UIManager.Instance?.ShowMilestoneBanner("REACH EXTRACTION LZ EVAC-6!");
         }
 
         private void Update()
         {
-            if (waveTransitionPending || GameManager.Instance == null || GameManager.Instance.CurrentState != GameState.Playing)
+            if (_transitionPending || GameManager.Instance == null || GameManager.Instance.CurrentState != GameState.Playing)
             {
                 return;
             }
 
-            float dt = Time.deltaTime;
+            var dt = Time.deltaTime;
             if (dt <= 0f) return;
 
-            if (remainingToSpawnInWave > 0)
+            if (CurrentStage == 3 && _remainingReinforcements > 0)
             {
-                spawnTimer -= dt;
-                int maxConcurrent = Mathf.Min(16, 6 + currentWave * 2);
-                if (spawnTimer <= 0f && activeEnemies.Count < maxConcurrent)
+                _reinforcementTimer -= dt;
+                if (_reinforcementTimer <= 0f && _activeEnemies.Count < 10)
                 {
-                    SpawnOneWaveEnemy();
-                    remainingToSpawnInWave--;
-                    spawnTimer = Mathf.Max(0.32f, 1.05f - currentWave * 0.08f);
-                    UIManager.Instance?.UpdateWave(currentWave, remainingToSpawnInWave + activeEnemies.Count);
+                    _remainingReinforcements--;
+                    _reinforcementTimer = 6.0f;
+                    var esc = SpawnEnemyAt(_remainingReinforcements == 0 ? EnemyArchetype.Heavy : EnemyArchetype.Chaser, new Vector3(Random.Range(-6f, 6f), 0f, 16.5f));
+                    esc.SetGarrisonAlert(true, 55f);
                 }
             }
-            else if (activeEnemies.Count == 0)
+
+            switch (CurrentStage)
             {
-                waveIntermissionTimer += dt;
-                if (currentWave >= StoryDirector.FinalCampaignWave)
+                // Stage advancement checks based on Campaign Objectives rather than arcade wave counters
+                case 1 when _activeEnemies.Count == 0:
                 {
-                    if (waveIntermissionTimer >= 0.9f)
+                    _stageBeatTimer += dt;
+                    if (_stageBeatTimer >= 0.85f)
                     {
-                        waveIntermissionTimer = 0f;
-                        waveTransitionPending = true;
-                        GameManager.Instance?.CompleteCampaignVictory();
+                        _stageBeatTimer = 0f;
+                        BeginCampaignStage(2);
                     }
+
+                    break;
                 }
-                else if (waveIntermissionTimer >= 1.4f)
+                case 2 when !_stage2BossCleared && _activeEnemies.Count == 0:
+                    _stage2BossCleared = true;
+                    Gate1BreachNode?.SetState(true, false);
+                    StoryDirector.NotifyGate1C4Ready();
+                    UIManager.Instance?.ShowMilestoneBanner("GATE CLEAR // PLANT C4 AT GATE ALPHA");
+                    SyncMissionHud();
+                    break;
+                case 4 when _activeEnemies.Count == 0:
                 {
-                    waveIntermissionTimer = 0f;
-                    int nextWave = currentWave + 1;
-
-                    if (nextWave == 4 && GameManager.Instance != null)
+                    _stageBeatTimer += dt;
+                    if (_stageBeatTimer >= 0.9f)
                     {
-                        waveTransitionPending = true;
-                        GameManager.Instance.TriggerCutscene(CutsceneType.Act2GateBreach, () =>
-                        {
-                            BeginWave(4);
-                            UIManager.Instance?.ShowMilestoneBanner(StoryDirector.GetActLabel(4) + " // WAVE 4");
-                        });
-                        return;
-                    }
-
-                    if (nextWave == 7)
-                    {
+                        _stageBeatTimer = 0f;
+                        _transitionPending = true;
                         CutsceneDirector.Instance?.OpenGateImmediate(2);
-                        VFXManager.Instance?.Play(VfxKind.EnemyDeath, new Vector3(0f, 1.6f, 22f), Palette.RocketOrange);
-                        FeelManager.Instance?.TriggerCameraShake(0.32f);
+                        var g2Center = new Vector3(0f, 1.6f, 22f);
+                        VFXManager.Instance?.Play(VfxKind.EnemyDeath, g2Center, Palette.RocketOrange);
+                        FeelManager.Instance?.TriggerCameraShake(0.38f);
                         AudioManager.Instance?.PlayEnemyExplode();
+                        PlayerController.Instance?.AddFragGrenades(1);
+                        BeginCampaignStage(5);
                     }
 
-                    BeginWave(nextWave);
-                    if (currentWave % 3 != 0)
+                    break;
+                }
+                case 5 when _activeEnemies.Count == 0:
+                {
+                    _stageBeatTimer += dt;
+                    if (_stageBeatTimer >= 0.8f)
                     {
-                        UIManager.Instance?.ShowMilestoneBanner(StoryDirector.GetActLabel(currentWave) + " // WAVE " + currentWave);
+                        _stageBeatTimer = 0f;
+                        BeginCampaignStage(6);
                     }
+
+                    break;
                 }
             }
         }
 
-        private void SpawnOneWaveEnemy()
+        private void HandleObjectiveCompleted(CampaignObjectiveNode node)
         {
-            EnemyArchetype kind = (currentWave >= 2 && UnityEngine.Random.value < Mathf.Min(0.35f, 0.12f + currentWave * 0.04f))
-                ? EnemyArchetype.Heavy
-                : EnemyArchetype.Chaser;
-            SpawnEnemyAt(kind, PickSafeSpawnPosition());
+            if (node == Gate1BreachNode && CurrentStage == 2)
+            {
+                _transitionPending = true;
+                PlayerController.Instance?.AddFragGrenades(1);
+                if (GameManager.Instance != null)
+                {
+                    GameManager.Instance.TriggerCutscene(CutsceneType.Act2GateBreach, () =>
+                    {
+                        BeginCampaignStage(3);
+                        UIManager.Instance?.ShowMilestoneBanner(StoryDirector.GetActLabel(3));
+                    });
+                }
+                else
+                {
+                    BeginCampaignStage(3);
+                }
+                return;
+            }
+
+            if ((node == FuelValveNode || node == RadarTerminalNode) && CurrentStage == 3)
+            {
+                SabotageCompletedCount++;
+                StoryDirector.NotifySabotageProgress(SabotageCompletedCount, 2, node.DisplayTitle);
+                SyncMissionHud();
+
+                if (SabotageCompletedCount < 2) return;
+                UIManager.Instance?.ShowMilestoneBanner("EW JAMMING SEVERED // DESTROY WARDEN-02");
+                BeginCampaignStage(4);
+                return;
+            }
+
+            if (node != HelipadLzNode || CurrentStage != 6) return;
+            _transitionPending = true;
+            GameManager.Instance?.CompleteCampaignVictory();
         }
 
-        public EnemyController SpawnBossAt(Vector3 worldPos)
+        public Vector3 GetActiveObjectiveWorldPoint()
         {
-            return SpawnEnemyAt(EnemyArchetype.Boss, worldPos);
+            switch (CurrentStage)
+            {
+                case 2 when Gate1BreachNode != null && Gate1BreachNode.IsUnlocked:
+                    return Gate1BreachNode.transform.position;
+                case 3:
+                {
+                    var fuelAvail = FuelValveNode != null && FuelValveNode.IsUnlocked;
+                    var radarAvail = RadarTerminalNode != null && RadarTerminalNode.IsUnlocked;
+                    switch (fuelAvail)
+                    {
+                        case true when radarAvail && PlayerController.Instance != null:
+                        {
+                            var dFuel = (FuelValveNode.transform.position - PlayerController.Instance.transform.position).sqrMagnitude;
+                            var dRad = (RadarTerminalNode.transform.position - PlayerController.Instance.transform.position).sqrMagnitude;
+                            return dFuel <= dRad ? FuelValveNode.transform.position : RadarTerminalNode.transform.position;
+                        }
+                        case true:
+                            return FuelValveNode.transform.position;
+                    }
+
+                    if (radarAvail) return RadarTerminalNode.transform.position;
+                    break;
+                }
+                case 6 when HelipadLzNode != null:
+                    return HelipadLzNode.transform.position;
+            }
+
+            if (_activeEnemies.Count > 0 && _activeEnemies[0] != null)
+            {
+                return _activeEnemies[0].transform.position;
+            }
+            return new Vector3(0f, 0f, CurrentStage <= 2 ? -17.5f : (CurrentStage <= 4 ? 16f : 42f));
         }
 
-        public EnemyController SpawnEnemyAt(EnemyArchetype kind, Vector3 worldPos)
+        public Vector3 ClampPositionToUnlockedSectors(Vector3 pos)
         {
-            EnemyController enemy = enemyPool.Get();
-            activeEnemies.Add(enemy);
-            enemy.Initialize(enemyPool, kind, worldPos, currentWave, HandleEnemyFinished);
+            var maxZ = CurrentStage <= 2 ? sector1MaxZ : (CurrentStage <= 4 ? sector2MaxZ : sector3MaxZ);
+            var z = Mathf.Clamp(pos.z, compoundMinZ, maxZ);
+            var halfW = z < -14f ? sector1HalfWidth : (z <= 22f ? sector2HalfWidth : sector3HalfWidth);
+            var x = Mathf.Clamp(pos.x, -halfW, halfW);
+            return new Vector3(x, pos.y, z);
+        }
+
+        private void SpawnBossAt(Vector3 worldPos)
+        {
+            SpawnEnemyAt(EnemyArchetype.Boss, worldPos);
+        }
+
+        private EnemyController SpawnEnemyAt(EnemyArchetype kind, Vector3 worldPos)
+        {
+            var enemy = _enemyPool.Get();
+            _activeEnemies.Add(enemy);
+            enemy.Initialize(_enemyPool, kind, worldPos, CurrentStage, HandleEnemyFinished);
+            SyncMissionHud();
             return enemy;
         }
 
-        public PickupItem SpawnPickupAt(PickupKind kind, Vector3 worldPos, int creditAmount = 15)
+        private void SpawnPickupAt(PickupKind kind, Vector3 worldPos, int creditAmount = 20)
         {
-            PickupItem item = pickupPool.Get();
-            activePickups.Add(item);
-            item.Initialize(pickupPool, worldPos, kind, kind == PickupKind.XpShard ? 25 : 0, kind == PickupKind.Medkit ? 25f : 0f, HandlePickupReleased, creditAmount);
-            return item;
+            var item = _pickupPool.Get();
+            _activePickups.Add(item);
+            item.Initialize(_pickupPool, worldPos, kind, 0, kind == PickupKind.Medkit ? 30f : 0f, HandlePickupReleased, creditAmount);
         }
 
         public void SpawnHazardTelegraph(Vector3 worldPos, float radius, float dmg)
@@ -544,25 +848,25 @@ namespace TopDownShooter.Enemies
 
         private IEnumerator HazardTelegraphRoutine(Vector3 center, float radius, float dmg)
         {
-            GameObject ringGo = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            var ringGo = GameObject.CreatePrimitive(PrimitiveType.Quad);
             ringGo.name = "BossHazardTelegraph";
-            ringGo.transform.SetParent(hazardRoot, false);
+            ringGo.transform.SetParent(_hazardRoot, false);
             ringGo.transform.position = new Vector3(center.x, 0.03f, center.z);
             ringGo.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
             ringGo.transform.localScale = new Vector3(radius * 2f, radius * 2f, 1f);
-            Collider c = ringGo.GetComponent<Collider>();
+            var c = ringGo.GetComponent<Collider>();
             if (c != null) Destroy(c);
 
-            MeshRenderer mr = ringGo.GetComponent<MeshRenderer>();
+            var mr = ringGo.GetComponent<MeshRenderer>();
             if (mr != null)
             {
-                mr.sharedMaterial = hazardRingMat;
+                mr.sharedMaterial = _hazardRingMat;
                 mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             }
-            activeHazards.Add(ringGo);
+            _activeHazards.Add(ringGo);
 
-            MaterialPropertyBlock block = new MaterialPropertyBlock();
-            float elapsed = 0f;
+            var block = new MaterialPropertyBlock();
+            var elapsed = 0f;
             const float windup = 1.15f;
             while (elapsed < windup)
             {
@@ -570,14 +874,14 @@ namespace TopDownShooter.Enemies
                 if (GameManager.Instance != null && GameManager.Instance.CurrentState == GameState.Playing)
                 {
                     elapsed += Time.deltaTime;
-                    float t = Mathf.Clamp01(elapsed / windup);
-                    float pulse = 0.92f + 0.08f * Mathf.Sin(t * 18f);
+                    var t = Mathf.Clamp01(elapsed / windup);
+                    var pulse = 0.92f + 0.08f * Mathf.Sin(t * 18f);
                     ringGo.transform.localScale = new Vector3(radius * 2f * pulse, radius * 2f * pulse, 1f);
                     if (mr != null)
                     {
-                        Color col = Palette.Lerp(Palette.BossPurple, Palette.EnemySecondary, t);
+                        var col = Palette.Lerp(Palette.BossPurple, Palette.EnemySecondary, t);
                         col.a = 0.78f + t * 0.22f;
-                        block.SetColor("_Color", col);
+                        block.SetColor(Color1, col);
                         mr.SetPropertyBlock(block);
                     }
                 }
@@ -590,10 +894,10 @@ namespace TopDownShooter.Enemies
             FeelManager.Instance?.TriggerCameraShake(0.26f);
             AudioManager.Instance?.PlayEnemyExplode();
 
-            PlayerController player = PlayerController.Instance;
+            var player = PlayerController.Instance;
             if (player != null && !player.IsDead)
             {
-                Vector3 diff = player.transform.position - center;
+                var diff = player.transform.position - center;
                 diff.y = 0f;
                 if (diff.magnitude <= radius)
                 {
@@ -601,111 +905,117 @@ namespace TopDownShooter.Enemies
                 }
             }
 
-            activeHazards.Remove(ringGo);
+            if (SquadDirector.Instance != null)
+            {
+                var squad = SquadDirector.Instance.Members;
+                foreach (var t in squad)
+                {
+                    if (t == null || t.IsDowned) continue;
+                    var d = t.transform.position - center;
+                    d.y = 0f;
+                    if (d.magnitude <= radius)
+                    {
+                        t.TakeDamage(dmg * 0.75f);
+                    }
+                }
+            }
+
+            _activeHazards.Remove(ringGo);
             Destroy(ringGo);
         }
 
-        private void HandleEnemyFinished(EnemyController enemy, bool killedByPlayer)
+        private void HandleEnemyFinished(EnemyController enemy, bool killedByFireteam)
         {
-            activeEnemies.Remove(enemy);
-            if (killedByPlayer)
+            _activeEnemies.Remove(enemy);
+            if (killedByFireteam)
             {
+                if (CurrentStage == 1) _stage1KillsProgress++;
+
                 if (enemy.Archetype == EnemyArchetype.Boss)
                 {
-                    StoryDirector.NotifyBossDefeated(currentWave);
-                    Vector3 center = enemy.transform.position;
+                    StoryDirector.NotifyBossDefeated(CurrentStage);
+                    var center = enemy.transform.position;
                     SpawnPickupAt(PickupKind.Medkit, center);
-                    for (int i = 0; i < 3; i++)
+                    for (var i = 0; i < 4; i++)
                     {
-                        Vector3 offset = Quaternion.Euler(0f, i * 120f, 0f) * Vector3.forward * 1.1f;
-                        SpawnPickupAt(PickupKind.XpShard, center + offset);
-                    }
-                    for (int i = 0; i < 6; i++)
-                    {
-                        Vector3 offset = Quaternion.Euler(0f, i * 60f, 0f) * Vector3.forward * 1.6f;
+                        var offset = Quaternion.Euler(0f, i * 90f, 0f) * Vector3.forward * 1.4f;
                         SpawnPickupAt(PickupKind.CreditCoin, center + offset, 25);
                     }
                 }
                 else
                 {
-                    bool dropMedkit = UnityEngine.Random.value < 0.18f;
-                    SpawnPickupAt(dropMedkit ? PickupKind.Medkit : PickupKind.XpShard, enemy.transform.position);
-                    if (UnityEngine.Random.value < 0.65f)
+                    // Realistic occasional Trauma IFAK & Munition Crate drops (NO glowing arcade XP gems)
+                    var roll = UnityEngine.Random.value;
+                    switch (roll)
                     {
-                        SpawnPickupAt(PickupKind.CreditCoin, enemy.transform.position + new Vector3(0.45f, 0f, -0.35f), enemy.Archetype == EnemyArchetype.Heavy ? 25 : 15);
+                        case < 0.22f:
+                            SpawnPickupAt(PickupKind.Medkit, enemy.transform.position);
+                            break;
+                        case < 0.56f:
+                            SpawnPickupAt(PickupKind.CreditCoin, enemy.transform.position, enemy.Archetype == EnemyArchetype.Heavy ? 25 : 15);
+                            break;
                     }
                 }
             }
-            UIManager.Instance?.UpdateWave(currentWave, remainingToSpawnInWave + activeEnemies.Count);
+            SyncMissionHud();
+        }
+
+        private void SyncMissionHud()
+        {
+            var actTitle = StoryDirector.GetActLabel(CurrentStage);
+            var objText = StoryDirector.GetSectorObjective(
+                CurrentStage,
+                _stage1KillsProgress,
+                _stage1KillTarget,
+                SabotageCompletedCount,
+                2,
+                Gate1BreachNode != null && Gate1BreachNode.IsUnlocked);
+
+            UIManager.Instance?.UpdateMissionStatus(actTitle, _activeEnemies.Count, objText);
         }
 
         private void HandlePickupReleased(PickupItem item)
         {
-            activePickups.Remove(item);
-        }
-
-        private Vector3 GetCampaignBossSpawnPoint(int waveNum)
-        {
-            if (waveNum <= 3) return new Vector3(0f, 0f, -20.5f);
-            if (waveNum <= 6) return new Vector3(0f, 0f, 15.5f);
-            return new Vector3(0f, 0f, 42.0f);
-        }
-
-        private Vector3 PickSafeSpawnPosition()
-        {
-            Vector3 playerPos = PlayerController.Instance != null ? PlayerController.Instance.transform.position : new Vector3(0f, 0f, -43f);
-
-            float maxZ = currentWave <= 3 ? sector1MaxZ : (currentWave <= 6 ? sector2MaxZ : sector3MaxZ);
-            float minZ = currentWave <= 3 ? compoundMinZ : (playerPos.z > -10f ? -12f : compoundMinZ);
-
-            for (int attempt = 0; attempt < 36; attempt++)
-            {
-                float angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
-                float dist = UnityEngine.Random.Range(10.5f, 20.5f);
-                float rawX = playerPos.x + Mathf.Cos(angle) * dist;
-                float rawZ = Mathf.Clamp(playerPos.z + Mathf.Sin(angle) * dist, minZ, maxZ);
-
-                float allowedHalfW = rawZ < -14f ? sector1HalfWidth : (rawZ <= 22f ? sector2HalfWidth : sector3HalfWidth);
-                Vector3 candidate = new Vector3(Mathf.Clamp(rawX, -allowedHalfW, allowedHalfW), 0f, rawZ);
-
-                if (Mathf.Abs(candidate.z - (-14f)) < 2.2f || Mathf.Abs(candidate.z - 22f) < 2.2f) continue;
-                if (Vector3.Distance(candidate, playerPos) < 8.0f) continue;
-                if (Physics.CheckSphere(candidate + Vector3.up * 0.9f, 0.85f, ~0, QueryTriggerInteraction.Ignore)) continue;
-                return candidate;
-            }
-
-            float fallbackZ = Mathf.Clamp(playerPos.z + 11f, compoundMinZ + 4f, maxZ - 2f);
-            return new Vector3(0f, 0f, fallbackZ);
+            _activePickups.Remove(item);
         }
 
         public void ResetAndClearAll()
         {
             StopAllCoroutines();
-            waveTransitionPending = false;
-            currentWave = 1;
-            remainingToSpawnInWave = 0;
-            spawnTimer = 0f;
-            waveIntermissionTimer = 0f;
+            _transitionPending = false;
+            CurrentStage = 1;
+            _stage1KillsProgress = 0;
+            _remainingReinforcements = 0;
+            _reinforcementTimer = 0f;
+            _stageBeatTimer = 0f;
+            SabotageCompletedCount = 0;
+            _stage2BossCleared = false;
 
-            for (int i = activeHazards.Count - 1; i >= 0; i--)
+            for (var i = _objectiveNodes.Count - 1; i >= 0; i--)
             {
-                if (activeHazards[i] != null) Destroy(activeHazards[i]);
+                if (_objectiveNodes[i] != null) _objectiveNodes[i].SetState(false, false);
             }
-            activeHazards.Clear();
 
-            for (int i = activeEnemies.Count - 1; i >= 0; i--)
+            for (var i = _activeHazards.Count - 1; i >= 0; i--)
             {
-                if (activeEnemies[i] != null) activeEnemies[i].ForceReturnToPool();
+                if (_activeHazards[i] != null) Destroy(_activeHazards[i]);
             }
-            activeEnemies.Clear();
+            _activeHazards.Clear();
 
-            for (int i = activePickups.Count - 1; i >= 0; i--)
+            for (var i = _activeEnemies.Count - 1; i >= 0; i--)
             {
-                if (activePickups[i] != null) activePickups[i].ForceReturnToPool();
+                if (_activeEnemies[i] != null) _activeEnemies[i].ForceReturnToPool();
             }
-            activePickups.Clear();
+            _activeEnemies.Clear();
+
+            for (var i = _activePickups.Count - 1; i >= 0; i--)
+            {
+                if (_activePickups[i] != null) _activePickups[i].ForceReturnToPool();
+            }
+            _activePickups.Clear();
 
             UIManager.Instance?.HideBossHp();
+            UIManager.Instance?.UpdateContextPrompt(string.Empty);
         }
     }
 }

@@ -1,10 +1,10 @@
-using System.Collections;
 using System.Collections.Generic;
+using Core;
 using UnityEngine;
 using UnityEngine.Pool;
-using TopDownShooter.Core;
+using UnityEngine.Serialization;
 
-namespace TopDownShooter.Feel
+namespace Feel
 {
     public enum VfxKind
     {
@@ -17,17 +17,37 @@ namespace TopDownShooter.Feel
 
     /// <summary>
     /// Manages pooled ParticleSystems across all combat and pickup feedback events.
-    /// Zero allocation spikes: once pools warm up, Transform child counts under PoolRoot stay constant.
+    /// Zero GC allocations after pre-warm: ParticleSystem StopAction.Callback returns instances directly to pool.
     /// </summary>
     public sealed class VFXManager : MonoBehaviour
     {
         public static VFXManager Instance { get; private set; }
 
+        private sealed class PooledParticleReturner : MonoBehaviour
+        {
+            private ObjectPool<ParticleSystem> _pool;
+            private ParticleSystem _ps;
+            [FormerlySerializedAs("IsLeased")] public bool isLeased;
+
+            public void Bind(ObjectPool<ParticleSystem> pool, ParticleSystem ps)
+            {
+                _pool = pool;
+                _ps = ps;
+            }
+
+            private void OnParticleSystemStopped()
+            {
+                if (!isLeased || _pool == null || _ps == null) return;
+                isLeased = false;
+                _pool.Release(_ps);
+            }
+        }
+
         [SerializeField] private Transform poolRoot;
-        private Material particleMaterial;
-        private readonly Dictionary<VfxKind, ObjectPool<ParticleSystem>> pools = new Dictionary<VfxKind, ObjectPool<ParticleSystem>>();
-        private readonly Dictionary<VfxKind, float> burstDurations = new Dictionary<VfxKind, float>();
-        private ParticleSystem ambientMotes;
+        private Material _particleMaterial;
+        private readonly Dictionary<VfxKind, ObjectPool<ParticleSystem>> _pools = new();
+        private readonly Dictionary<ParticleSystem, PooledParticleReturner> _returners = new();
+        private ParticleSystem _ambientMotes;
 
         public Transform PoolRoot => poolRoot;
 
@@ -47,12 +67,12 @@ namespace TopDownShooter.Feel
 
             if (poolRoot == null)
             {
-                GameObject rootGo = new GameObject("VFXPoolRoot");
+                var rootGo = new GameObject("VFXPoolRoot");
                 rootGo.transform.SetParent(transform, false);
                 poolRoot = rootGo.transform;
             }
 
-            particleMaterial = Palette.CreateParticleMaterial(UISpriteFactory.GetSoftParticleTexture());
+            _particleMaterial = Palette.CreateParticleMaterial(UISpriteFactory.GetSoftParticleTexture());
             InitializePools();
             EnsureAmbientMotes();
         }
@@ -84,36 +104,43 @@ namespace TopDownShooter.Feel
             int burstCount,
             float speed)
         {
-            burstDurations[kind] = lifetime + 0.1f;
-
-            ObjectPool<ParticleSystem> pool = null;
-            pool = new ObjectPool<ParticleSystem>(
-                createFunc: () => BuildParticleSystem(kind, lifetime, baseColor, startSize, burstCount, speed),
+            var pool = new ObjectPool<ParticleSystem>(
+                createFunc: () =>
+                {
+                    var ps = BuildParticleSystem(kind, lifetime, baseColor, startSize, burstCount, speed);
+                    var ret = ps.gameObject.AddComponent<PooledParticleReturner>();
+                    ret.Bind(null, ps);
+                    _returners[ps] = ret;
+                    return ps;
+                },
                 actionOnGet: ps => ps.gameObject.SetActive(true),
                 actionOnRelease: ps =>
                 {
+                    if (_returners.TryGetValue(ps, out var ret)) ret.isLeased = false;
                     ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
                     ps.gameObject.SetActive(false);
                 },
                 actionOnDestroy: ps =>
                 {
-                    if (ps != null) Destroy(ps.gameObject);
+                    if (ps == null) return;
+                    _returners.Remove(ps);
+                    Destroy(ps.gameObject);
                 },
                 collectionCheck: false,
                 defaultCapacity: defaultCapacity,
                 maxSize: maxSize
             );
-            pools[kind] = pool;
+            _pools[kind] = pool;
 
             // Pre-warm initial instances so first burst doesn't allocate mid-frame
-            List<ParticleSystem> prewarm = new List<ParticleSystem>(defaultCapacity);
-            for (int i = 0; i < Mathf.Min(defaultCapacity, 6); i++)
+            var prewarm = new List<ParticleSystem>(defaultCapacity);
+            for (var i = 0; i < Mathf.Min(defaultCapacity, 6); i++)
             {
                 prewarm.Add(pool.Get());
             }
-            for (int i = 0; i < prewarm.Count; i++)
+            foreach (var t in prewarm)
             {
-                pool.Release(prewarm[i]);
+                pool.Release(t);
             }
         }
 
@@ -125,14 +152,15 @@ namespace TopDownShooter.Feel
             int burstCount,
             float speed)
         {
-            GameObject go = new GameObject("VFX_" + kind);
+            var go = new GameObject("VFX_" + kind);
             go.transform.SetParent(poolRoot, false);
-            ParticleSystem ps = go.AddComponent<ParticleSystem>();
+            var ps = go.AddComponent<ParticleSystem>();
             ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
 
             var main = ps.main;
             main.playOnAwake = false;
             main.loop = false;
+            main.stopAction = ParticleSystemStopAction.Callback;
             main.duration = lifetime;
             main.startLifetime = new ParticleSystem.MinMaxCurve(lifetime * 0.65f, lifetime);
             main.startSpeed = new ParticleSystem.MinMaxCurve(speed * 0.45f, speed);
@@ -158,14 +186,14 @@ namespace TopDownShooter.Feel
 
             var sizeOverLifetime = ps.sizeOverLifetime;
             sizeOverLifetime.enabled = true;
-            AnimationCurve shrink = new AnimationCurve(
+            var shrink = new AnimationCurve(
                 new Keyframe(0f, 1f),
                 new Keyframe(0.7f, 0.55f),
                 new Keyframe(1f, 0f));
             sizeOverLifetime.size = new ParticleSystem.MinMaxCurve(1f, shrink);
 
             var renderer = ps.GetComponent<ParticleSystemRenderer>();
-            renderer.sharedMaterial = particleMaterial;
+            renderer.sharedMaterial = _particleMaterial;
             renderer.renderMode = ParticleSystemRenderMode.Billboard;
 
             go.SetActive(false);
@@ -174,14 +202,14 @@ namespace TopDownShooter.Feel
 
         private void EnsureAmbientMotes()
         {
-            if (ambientMotes != null) return;
+            if (_ambientMotes != null) return;
 
-            GameObject go = new GameObject("VFX_AmbientMotes");
+            var go = new GameObject("VFX_AmbientMotes");
             go.transform.SetParent(transform, false);
             go.transform.position = new Vector3(0f, 2.2f, 0f);
-            ambientMotes = go.AddComponent<ParticleSystem>();
+            _ambientMotes = go.AddComponent<ParticleSystem>();
 
-            var main = ambientMotes.main;
+            var main = _ambientMotes.main;
             main.loop = true;
             main.playOnAwake = true;
             main.startLifetime = new ParticleSystem.MinMaxCurve(4.5f, 7.5f);
@@ -193,51 +221,44 @@ namespace TopDownShooter.Feel
             main.maxParticles = 60;
             main.simulationSpace = ParticleSystemSimulationSpace.World;
 
-            var emission = ambientMotes.emission;
+            var emission = _ambientMotes.emission;
             emission.rateOverTime = 8f;
 
-            var shape = ambientMotes.shape;
+            var shape = _ambientMotes.shape;
             shape.shapeType = ParticleSystemShapeType.Box;
             shape.scale = new Vector3(24f, 3.5f, 24f);
 
-            var sizeOverLifetime = ambientMotes.sizeOverLifetime;
+            var sizeOverLifetime = _ambientMotes.sizeOverLifetime;
             sizeOverLifetime.enabled = true;
-            AnimationCurve pulse = new AnimationCurve(
+            var pulse = new AnimationCurve(
                 new Keyframe(0f, 0f),
                 new Keyframe(0.25f, 1f),
                 new Keyframe(0.8f, 0.9f),
                 new Keyframe(1f, 0f));
             sizeOverLifetime.size = new ParticleSystem.MinMaxCurve(1f, pulse);
 
-            var renderer = ambientMotes.GetComponent<ParticleSystemRenderer>();
-            renderer.sharedMaterial = particleMaterial;
-            ambientMotes.Play();
+            var renderer = _ambientMotes.GetComponent<ParticleSystemRenderer>();
+            renderer.sharedMaterial = _particleMaterial;
+            _ambientMotes.Play();
         }
 
         public void Play(VfxKind kind, Vector3 worldPos, Color? overrideColor = null)
         {
-            if (!pools.TryGetValue(kind, out var pool)) return;
+            if (!_pools.TryGetValue(kind, out var pool)) return;
 
-            ParticleSystem ps = pool.Get();
+            var ps = pool.Get();
             ps.transform.position = worldPos;
             if (overrideColor.HasValue)
             {
                 var main = ps.main;
                 main.startColor = new ParticleSystem.MinMaxGradient(overrideColor.Value, Palette.Lerp(overrideColor.Value, Palette.CharacterSecondary, 0.3f));
             }
+            if (_returners.TryGetValue(ps, out var ret))
+            {
+                ret.isLeased = true;
+            }
             ps.Clear(true);
             ps.Play(true);
-
-            StartCoroutine(ReleaseAfterRoutine(pool, ps, burstDurations[kind]));
-        }
-
-        private static IEnumerator ReleaseAfterRoutine(ObjectPool<ParticleSystem> pool, ParticleSystem ps, float waitSeconds)
-        {
-            yield return new WaitForSecondsRealtime(waitSeconds);
-            if (ps != null && ps.gameObject.activeSelf)
-            {
-                pool.Release(ps);
-            }
         }
     }
 }

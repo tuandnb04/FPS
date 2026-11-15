@@ -1,6 +1,14 @@
 using System.Collections.Generic;
 using System.IO;
+using Audio;
+using Camera;
+using Character;
+using Combat;
+using Core;
+using Enemies;
+using Feel;
 using TMPro;
+using UI;
 using Unity.Cinemachine;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -11,14 +19,6 @@ using UnityEngine.InputSystem.UI;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.UI;
-using TopDownShooter.Audio;
-using TopDownShooter.CameraRig;
-using TopDownShooter.Character;
-using TopDownShooter.Combat;
-using TopDownShooter.Core;
-using TopDownShooter.Enemies;
-using TopDownShooter.Feel;
-using TopDownShooter.UI;
 
 namespace TopDownShooter.Editor
 {
@@ -28,6 +28,7 @@ namespace TopDownShooter.Editor
     /// </summary>
     public static class SceneSetupBuilder
     {
+        private static readonly int BaseMap = Shader.PropertyToID("_BaseMap");
         private const string ScenePath = "Assets/Scenes/SampleScene.unity";
         private const string MaterialsDir = "Assets/Materials";
         private const string TexturesDir = "Assets/Textures";
@@ -74,6 +75,34 @@ namespace TopDownShooter.Editor
             public Mesh PickupXpCrystal;
             public Mesh PickupMedkit;
             public Mesh PickupCreditCoin;
+
+            public Mesh HeadBoonieHat;
+            public Mesh HeadSkullMask;
+            public Mesh PropSabotageTerminal;
+            public Mesh PropC4Charge;
+            public Mesh PropMunitionCrate;
+
+            public Mesh EnvFloodlightTower;
+            public Mesh EnvHescoBarrier;
+            public Mesh EnvSandbagWall;
+            public Mesh EnvHMMWV;
+            public Mesh PropExplosiveBarrel;
+        }
+
+        private struct ArenaMaterialPack
+        {
+            public Material Floor;
+            public Material Walls;
+            public Material Props;
+            public Material Trim;
+            public Material Accent;
+            public Material SodiumGlow;
+            public Material Olive;
+            public Material Rust;
+            public Material FuelSteel;
+            public Material DmzEarth;
+            public Material Sandbag;
+            public Material BarrelHazard;
         }
 
         private struct CampaignCutsceneProps
@@ -90,33 +119,47 @@ namespace TopDownShooter.Editor
         public static void BuildCompleteScene()
         {
             EnsureFolders();
+            EnsurePhysicsLayersAndMatrix();
+            ConfigureUrpAssetOptimization();
 
-            // 1. Persisted Texture Assets & Custom Blender FBX Meshes
-            Texture2D floorTex = SaveTextureAsset(UISpriteFactory.GetArenaFloorGridTexture(), TexturesDir + "/Tex_ArenaFloorGrid.png", true);
-            Sprite solidSprite = SaveSpriteAsset(UISpriteFactory.GetSolidRectSprite().texture, TexturesDir + "/Tex_SolidRect.png");
-            Sprite roundedSprite = SaveSpriteAsset(UISpriteFactory.GetRoundedRectSprite().texture, TexturesDir + "/Tex_RoundedRect.png");
-            Sprite shieldSprite = SaveSpriteAsset(UISpriteFactory.GetShieldIcon().texture, TexturesDir + "/Tex_ShieldIcon.png");
-            Sprite crosshairSprite = SaveSpriteAsset(UISpriteFactory.GetCrosshairIcon().texture, TexturesDir + "/Tex_CrosshairIcon.png");
-            Sprite circleSprite = SaveSpriteAsset(UISpriteFactory.GetCircleSprite().texture, TexturesDir + "/Tex_Circle.png");
+            // 1. Persisted 256x256 Compressed PBR Textures & Custom Blender FBX Meshes
+            var floorTex = SaveTextureAsset(CreateAsphaltTexture256(), TexturesDir + "/Tex_ArenaFloorGrid.png", true);
+            var concreteTex = SaveTextureAsset(CreateConcreteTexture256(), TexturesDir + "/Tex_CompoundConcrete.png", true);
+            var dmzEarthTex = SaveTextureAsset(CreateDmzEarthTexture256(), TexturesDir + "/Tex_TerrainDMZ.png", true);
+            var corrugatedTex = SaveTextureAsset(CreateCorrugatedMetalTexture256(), TexturesDir + "/Tex_CorrugatedMetal.png", true);
+            var sandbagTex = SaveTextureAsset(CreateSandbagTexture256(), TexturesDir + "/Tex_SandbagFabric.png", true);
+            var solidSprite = SaveSpriteAsset(UISpriteFactory.GetSolidRectSprite().texture, TexturesDir + "/Tex_SolidRect.png");
+            var roundedSprite = SaveSpriteAsset(UISpriteFactory.GetRoundedRectSprite().texture, TexturesDir + "/Tex_RoundedRect.png");
+            var shieldSprite = SaveSpriteAsset(UISpriteFactory.GetShieldIcon().texture, TexturesDir + "/Tex_ShieldIcon.png");
+            var crosshairSprite = SaveSpriteAsset(UISpriteFactory.GetCrosshairIcon().texture, TexturesDir + "/Tex_CrosshairIcon.png");
+            var circleSprite = SaveSpriteAsset(UISpriteFactory.GetCircleSprite().texture, TexturesDir + "/Tex_Circle.png");
+            var chevronSprite = SaveSpriteAsset(UISpriteFactory.GetChevronIcon().texture, TexturesDir + "/Tex_ChevronIcon.png");
+            var damageVignetteSprite = SaveSpriteAsset(UISpriteFactory.GetDamageVignetteSprite().texture, TexturesDir + "/Tex_DamageVignette.png");
 
-            VanguardMeshPack meshes = LoadVanguardMeshes();
+            var meshes = LoadVanguardMeshes();
 
-            // 2. Persisted Grounded Military Palette Materials & Skybox
-            Material matFloor = SaveOrUpdateLitMaterial("Mat_Floor", Palette.Floor, 0.06f, 0.25f, false, 0f, floorTex, new Vector2(38f, 54f));
-            Material matWalls = SaveOrUpdateLitMaterial("Mat_Walls", Palette.Walls, 0.08f, 0.24f, false, 0f);
-            Material matProps = SaveOrUpdateLitMaterial("Mat_Props", Palette.Props, 0.08f, 0.26f, false, 0f);
-            Material matTrim = SaveOrUpdateLitMaterial("Mat_TrimDark", Palette.Gunmetal, 0.62f, 0.46f, false, 0f);
-            Material matPlayerPrimary = SaveOrUpdateLitMaterial("Mat_PlayerPrimary", Palette.CharacterPrimary, 0.12f, 0.34f, false, 0f);
-            Material matPlayerSecondary = SaveOrUpdateLitMaterial("Mat_PlayerSecondary", Palette.CoyoteTan, 0.10f, 0.30f, false, 0f);
-            Material matAccentEmissive = SaveOrUpdateLitMaterial("Mat_AccentEmissive", Palette.HazardYellow, 0.08f, 0.30f, false, 0f);
-            Material matCyanGlow = SaveOrUpdateLitMaterial("Mat_CyanGlow", Palette.NvgGreen, 0.25f, 0.68f, false, 0f);
-            Material matHealthGlow = SaveOrUpdateLitMaterial("Mat_HealthEmissive", Palette.KeyLightWarm, 0.15f, 0.45f, true, 1.55f);
-            Material matContainerRust = SaveOrUpdateLitMaterial("Mat_ContainerRust", Palette.EnemyPrimary, 0.16f, 0.32f, false, 0f);
-            Material matFuelSteel = SaveOrUpdateLitMaterial("Mat_FuelSteel", Palette.GuardTowerDark, 0.42f, 0.48f, false, 0f);
-            Material matSkybox = SaveOrUpdateSkyboxMaterial("Mat_ArenaSkybox");
+            // 2. Persisted Grounded Military Palette Materials & Skybox (All GPU Instanced)
+            var matFloor = SaveOrUpdateLitMaterial("Mat_Floor", Palette.Floor, 0.05f, 0.28f, false, 0f, floorTex, new Vector2(22f, 32f));
+            var matWalls = SaveOrUpdateLitMaterial("Mat_Walls", Palette.Walls, 0.06f, 0.24f, false, 0f, concreteTex, new Vector2(4f, 1.5f));
+            var matProps = SaveOrUpdateLitMaterial("Mat_Props", Palette.Props, 0.06f, 0.26f, false, 0f, concreteTex, new Vector2(2f, 1.5f));
+            var matTrim = SaveOrUpdateLitMaterial("Mat_TrimDark", Palette.Gunmetal, 0.62f, 0.46f, false, 0f);
+            var matPlayerPrimary = SaveOrUpdateLitMaterial("Mat_PlayerPrimary", Palette.CharacterPrimary, 0.12f, 0.34f, false, 0f);
+            var matPlayerSecondary = SaveOrUpdateLitMaterial("Mat_PlayerSecondary", Palette.CoyoteTan, 0.10f, 0.30f, false, 0f);
+            var matAccentEmissive = SaveOrUpdateLitMaterial("Mat_AccentEmissive", Palette.HazardYellow, 0.08f, 0.30f, false, 0f);
+            var matCyanGlow = SaveOrUpdateLitMaterial("Mat_CyanGlow", Palette.NvgGreen, 0.25f, 0.68f, false, 0f);
+            var matHealthGlow = SaveOrUpdateLitMaterial("Mat_HealthEmissive", Palette.SodiumAmber, 0.15f, 0.45f, true, 1.85f);
+            var matContainerRust = SaveOrUpdateLitMaterial("Mat_ContainerRust", Palette.EnemyPrimary, 0.18f, 0.32f, false, 0f, corrugatedTex, new Vector2(2f, 1.2f));
+            var matContainerOlive = SaveOrUpdateLitMaterial("Mat_ContainerOlive", Palette.CharacterPrimary, 0.18f, 0.32f, false, 0f, corrugatedTex, new Vector2(2f, 1.2f));
+            var matFuelSteel = SaveOrUpdateLitMaterial("Mat_FuelSteel", Palette.GuardTowerDark, 0.42f, 0.48f, false, 0f);
+            var matDmzEarth = SaveOrUpdateLitMaterial("Mat_DmzEarth", Palette.DmzRidgeEarth, 0.02f, 0.16f, false, 0f, dmzEarthTex, new Vector2(10f, 4f));
+            var matSandbag = SaveOrUpdateLitMaterial("Mat_Sandbag", Palette.CoyoteTan, 0.04f, 0.20f, false, 0f, sandbagTex, new Vector2(2f, 1.5f));
+            var matBarrelHazard = SaveOrUpdateLitMaterial("Mat_BarrelHazard", Palette.BarrelHazardRed, 0.26f, 0.42f, false, 0f);
+            var matSkybox = SaveOrUpdateSkyboxMaterial("Mat_ArenaSkybox");
+
+            EnsureAllMaterialsInstanced();
 
             // 3. Configure URP Global Volume Profile
-            VolumeProfile profile = ConfigureVolumeProfile();
+            var profile = ConfigureVolumeProfile();
 
             // 4. Open/Reset Scene Hierarchy Cleanly
             var scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
@@ -124,41 +167,70 @@ namespace TopDownShooter.Editor
 
             // 5. Scene Lighting, Fog, Skybox, Camera, Volume
             ConfigureEnvironmentLighting(matSkybox, profile);
-            UnityEngine.Camera mainCam = ConfigureMainCamera();
+            var mainCam = ConfigureMainCamera();
 
-            // 6. Echo-7 3-Sector Military Base Environment + Extraction Blackhawk
-            CampaignCutsceneProps campaignProps = BuildArenaEnvironment(
-                matFloor, matWalls, matProps, matTrim, matAccentEmissive, matHealthGlow,
-                matPlayerPrimary, matContainerRust, matFuelSteel, meshes);
+            // 6. Hajin DMZ 3-Sector Compound Environment + Extraction Blackhawk
+            var envMats = new ArenaMaterialPack
+            {
+                Floor = matFloor,
+                Walls = matWalls,
+                Props = matProps,
+                Trim = matTrim,
+                Accent = matAccentEmissive,
+                SodiumGlow = matHealthGlow,
+                Olive = matContainerOlive,
+                Rust = matContainerRust,
+                FuelSteel = matFuelSteel,
+                DmzEarth = matDmzEarth,
+                Sandbag = matSandbag,
+                BarrelHazard = matBarrelHazard
+            };
+            var campaignProps = BuildArenaEnvironment(envMats, meshes);
 
             // 7. Player Rig (Modern Tactical Operator + 4 Real-World Weapons)
-            InputActionAsset inputAsset = AssetDatabase.LoadAssetAtPath<InputActionAsset>(InputActionsPath);
-            PlayerController player = BuildPlayerRig(inputAsset, matPlayerPrimary, matPlayerSecondary, matAccentEmissive, matCyanGlow, matHealthGlow, meshes);
+            var inputAsset = AssetDatabase.LoadAssetAtPath<InputActionAsset>(InputActionsPath);
+            var player = BuildPlayerRig(inputAsset, matPlayerPrimary, matPlayerSecondary, matCyanGlow, meshes);
 
             // 8. Cinemachine Top-Down Rig
-            TopDownCameraRig cameraRig = BuildCameraRig(player.transform, mainCam);
+            var cameraRig = BuildCameraRig(player.transform, mainCam);
 
             // 9. GameSystems & UI Canvas (SaveManager first before GameManager)
-            GameObject systemsRoot = new GameObject("GameSystems");
-            Transform projPoolRoot = new GameObject("ProjectilePoolRoot").transform;
+            var systemsRoot = new GameObject("GameSystems");
+            var projPoolRoot = new GameObject("ProjectilePoolRoot").transform;
             projPoolRoot.SetParent(systemsRoot.transform, false);
             player.Weapon.BindReferences(player.transform.Find("VisualRoot/WeaponAnchor/MuzzlePoint"), player.Motion, projPoolRoot);
 
-            Transform vfxPoolRoot = new GameObject("VFXPoolRoot").transform;
+            var vfxPoolRoot = new GameObject("VFXPoolRoot").transform;
             vfxPoolRoot.SetParent(systemsRoot.transform, false);
-            Transform textRoot = new GameObject("FloatingTextRoot").transform;
+            var textRoot = new GameObject("FloatingTextRoot").transform;
             textRoot.SetParent(systemsRoot.transform, false);
 
             systemsRoot.AddComponent<SaveManager>();
             systemsRoot.AddComponent<AudioManager>();
-            VFXManager vfx = systemsRoot.AddComponent<VFXManager>();
+            var vfx = systemsRoot.AddComponent<VFXManager>();
             vfx.BindPoolRoot(vfxPoolRoot);
 
-            CinemachineImpulseSource impulse = systemsRoot.AddComponent<CinemachineImpulseSource>();
-            FeelManager feel = systemsRoot.AddComponent<FeelManager>();
+            var impulse = systemsRoot.AddComponent<CinemachineImpulseSource>();
+            var feel = systemsRoot.AddComponent<FeelManager>();
             feel.BindComponents(impulse, textRoot);
 
-            EnemySpawner spawner = systemsRoot.AddComponent<EnemySpawner>();
+            var squadDirector = systemsRoot.AddComponent<SquadDirector>();
+            squadDirector.BindMeshes(
+                meshes.PlayerTorso,
+                meshes.PlayerChestRig,
+                meshes.PlayerHelmet,
+                meshes.HeadBoonieHat,
+                meshes.PlayerVisor,
+                meshes.PlayerUpperArm,
+                meshes.PlayerForearm,
+                meshes.PlayerLimb,
+                meshes.PlayerJetpack,
+                meshes.WeaponPulseRifle,
+                meshes.WeaponRailgun,
+                meshes.WeaponAN94,
+                meshes.HeadSkullMask);
+
+            var spawner = systemsRoot.AddComponent<EnemySpawner>();
             spawner.BindMeshes(
                 meshes.ChaserTorso,
                 meshes.ChaserHead,
@@ -169,15 +241,17 @@ namespace TopDownShooter.Editor
                 meshes.PlayerLimb,
                 meshes.PickupXpCrystal,
                 meshes.PickupMedkit,
-                meshes.PickupCreditCoin,
+                meshes.PropMunitionCrate != null ? meshes.PropMunitionCrate : meshes.PickupCreditCoin,
                 meshes.EnemyArm,
                 meshes.PlayerUpperArm,
                 meshes.PlayerForearm,
                 meshes.WeaponAK74,
-                meshes.WeaponPKM);
+                meshes.WeaponPKM,
+                meshes.PropSabotageTerminal,
+                meshes.PropC4Charge);
 
-            UIManager ui = BuildGameCanvasAndUI(systemsRoot, solidSprite, roundedSprite, shieldSprite, crosshairSprite, circleSprite);
-            CutsceneDirector cutscene = systemsRoot.AddComponent<CutsceneDirector>();
+            var ui = BuildGameCanvasAndUI(systemsRoot, solidSprite, roundedSprite, shieldSprite, crosshairSprite, circleSprite, chevronSprite, damageVignetteSprite);
+            var cutscene = systemsRoot.AddComponent<CutsceneDirector>();
             cutscene.BindSceneProps(
                 campaignProps.Gate1Left,
                 campaignProps.Gate1Right,
@@ -201,7 +275,7 @@ namespace TopDownShooter.Editor
 
         private static VanguardMeshPack LoadVanguardMeshes()
         {
-            VanguardMeshPack pack = new VanguardMeshPack();
+            var pack = new VanguardMeshPack();
             if (!File.Exists(FbxAssetPath))
             {
                 Debug.LogWarning("[SceneSetupBuilder] Custom FBX not found at " + FbxAssetPath + ". Falling back to primitives.");
@@ -209,7 +283,7 @@ namespace TopDownShooter.Editor
             }
 
             AssetDatabase.ImportAsset(FbxAssetPath, ImportAssetOptions.ForceSynchronousImport);
-            ModelImporter importer = AssetImporter.GetAtPath(FbxAssetPath) as ModelImporter;
+            var importer = AssetImporter.GetAtPath(FbxAssetPath) as ModelImporter;
             if (importer != null && (importer.materialImportMode != ModelImporterMaterialImportMode.None || !importer.isReadable || Mathf.Abs(importer.globalScale - 1f) > 0.001f))
             {
                 importer.materialImportMode = ModelImporterMaterialImportMode.None;
@@ -218,17 +292,15 @@ namespace TopDownShooter.Editor
                 importer.SaveAndReimport();
             }
 
-            Object[] assets = AssetDatabase.LoadAllAssetsAtPath(FbxAssetPath);
-            Dictionary<string, Mesh> byName = new Dictionary<string, Mesh>();
-            foreach (Object obj in assets)
+            var assets = AssetDatabase.LoadAllAssetsAtPath(FbxAssetPath);
+            var byName = new Dictionary<string, Mesh>();
+            foreach (var obj in assets)
             {
                 if (obj is Mesh m)
                 {
                     byName[m.name] = m;
                 }
             }
-
-            Mesh Get(string key) => byName.TryGetValue(key, out Mesh m) ? m : null;
 
             pack.PlayerTorso = Get("Mesh_PlayerTorso");
             pack.PlayerChestRig = Get("Mesh_PlayerChestRig");
@@ -267,9 +339,21 @@ namespace TopDownShooter.Editor
             pack.PickupXpCrystal = Get("Mesh_Pickup_XpCrystal");
             pack.PickupMedkit = Get("Mesh_Pickup_Medkit");
             pack.PickupCreditCoin = Get("Mesh_Pickup_CreditCoin");
+            pack.HeadBoonieHat = Get("Mesh_Head_BoonieHat");
+            pack.PropSabotageTerminal = Get("Mesh_Prop_SabotageTerminal");
+            pack.PropC4Charge = Get("Mesh_Prop_C4Charge");
+            pack.PropMunitionCrate = Get("Mesh_Prop_MunitionCrate");
+            pack.HeadSkullMask = Get("Mesh_Head_SkullMask");
+            pack.EnvFloodlightTower = Get("Mesh_Env_FloodlightTower");
+            pack.EnvHescoBarrier = Get("Mesh_Env_HescoBarrier");
+            pack.EnvSandbagWall = Get("Mesh_Env_SandbagWall");
+            pack.EnvHMMWV = Get("Mesh_Env_HMMWV");
+            pack.PropExplosiveBarrel = Get("Mesh_Prop_ExplosiveBarrel");
 
             Debug.Log("[SceneSetupBuilder] Loaded " + byName.Count + " Blender FBX meshes from " + FbxAssetPath);
             return pack;
+
+            Mesh Get(string key) => byName.GetValueOrDefault(key);
         }
 
         private static void EnsureFolders()
@@ -278,20 +362,203 @@ namespace TopDownShooter.Editor
             if (!AssetDatabase.IsValidFolder(TexturesDir)) AssetDatabase.CreateFolder("Assets", "Textures");
         }
 
+        private static void EnsurePhysicsLayersAndMatrix()
+        {
+            var tagAssets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/TagManager.asset");
+            if (tagAssets is { Length: > 0 })
+            {
+                var tagMgr = new SerializedObject(tagAssets[0]);
+                var layersProp = tagMgr.FindProperty("layers");
+                if (layersProp is { isArray: true })
+                {
+                    string[] customNames = { "Player", "SquadAlly", "Enemy", "Environment", "Pickup", "Destructible" };
+                    for (var i = 0; i < customNames.Length; i++)
+                    {
+                        var slot = 6 + i;
+                        if (slot < layersProp.arraySize)
+                        {
+                            layersProp.GetArrayElementAtIndex(slot).stringValue = customNames[i];
+                        }
+                    }
+                    tagMgr.ApplyModifiedPropertiesWithoutUndo();
+                }
+            }
+
+            Physics.IgnoreLayerCollision(6, 7, true);
+            Physics.IgnoreLayerCollision(7, 7, true);
+            Physics.IgnoreLayerCollision(10, 7, true);
+            Physics.IgnoreLayerCollision(10, 8, true);
+            Physics.IgnoreLayerCollision(10, 9, true);
+            Physics.IgnoreLayerCollision(10, 10, true);
+            Physics.IgnoreLayerCollision(10, 11, true);
+        }
+
+        private static void ConfigureUrpAssetOptimization()
+        {
+            string[] urpPaths =
+            {
+                "Assets/Settings/PC_RPAsset.asset",
+                "Assets/Settings/Mobile_RPAsset.asset"
+            };
+            foreach (var t in urpPaths)
+            {
+                var rp = AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(t);
+                if (rp == null) continue;
+                rp.msaaSampleCount = 2;
+                rp.shadowDistance = 40f;
+                rp.shadowCascadeCount = 2;
+                EditorUtility.SetDirty(rp);
+            }
+            AssetDatabase.SaveAssets();
+        }
+
+        private static void EnsureAllMaterialsInstanced()
+        {
+            if (!AssetDatabase.IsValidFolder(MaterialsDir)) return;
+            var guids = AssetDatabase.FindAssets("t:Material", new[] { MaterialsDir });
+            foreach (var t in guids)
+            {
+                var path = AssetDatabase.GUIDToAssetPath(t);
+                var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+                if (mat == null || mat.enableInstancing) continue;
+                mat.enableInstancing = true;
+                EditorUtility.SetDirty(mat);
+            }
+        }
+
+        private static float Hash2D(int x, int y, int seed)
+        {
+            var n = x * 374761393 + y * 668265263 + seed * 1274126177;
+            n = (n ^ (n >> 13)) * 1274126177;
+            return ((n ^ (n >> 16)) & 0x7fffffff) / (float)0x7fffffff;
+        }
+
+        private static Texture2D CreateAsphaltTexture256()
+        {
+            const int size = 256;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true);
+            var pixels = new Color32[size * size];
+            for (var y = 0; y < size; y++)
+            {
+                for (var x = 0; x < size; x++)
+                {
+                    var grain = Hash2D(x, y, 11) * 0.14f + Hash2D(x >> 2, y >> 2, 23) * 0.10f;
+                    var seam = (x % 64 < 2 || y % 64 < 2) ? -0.10f : 0f;
+                    var crack = (Hash2D(x >> 3, y >> 3, 41) > 0.88f && ((x + y * 2) % 13 == 0)) ? -0.14f : 0f;
+                    var v = Mathf.Clamp01(0.72f + grain + seam + crack);
+                    pixels[y * size + x] = new Color(v * 0.96f, v * 0.98f, v, 1f);
+                }
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply(true);
+            return tex;
+        }
+
+        private static Texture2D CreateConcreteTexture256()
+        {
+            const int size = 256;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true);
+            var pixels = new Color32[size * size];
+            for (var y = 0; y < size; y++)
+            {
+                for (var x = 0; x < size; x++)
+                {
+                    var speckle = Hash2D(x, y, 53) * 0.12f + Hash2D(x >> 3, y >> 3, 67) * 0.12f;
+                    var slabJoint = (y % 64 == 0 || x % 128 == 0) ? -0.15f : 0f;
+                    var tieHole = ((x % 64 == 16 || x % 64 == 48) && (y % 64 == 16 || y % 64 == 48) && (x % 64 - 16) * (x % 64 - 16) < 2) ? -0.18f : 0f;
+                    var v = Mathf.Clamp01(0.76f + speckle + slabJoint + tieHole);
+                    pixels[y * size + x] = new Color(v, v * 0.99f, v * 0.95f, 1f);
+                }
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply(true);
+            return tex;
+        }
+
+        private static Texture2D CreateDmzEarthTexture256()
+        {
+            const int size = 256;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true);
+            var pixels = new Color32[size * size];
+            for (var y = 0; y < size; y++)
+            {
+                for (var x = 0; x < size; x++)
+                {
+                    var macro = Hash2D(x >> 4, y >> 4, 91) * 0.20f + Hash2D(x >> 2, y >> 2, 103) * 0.14f;
+                    var fine = Hash2D(x, y, 115) * 0.12f;
+                    var v = Mathf.Clamp01(0.66f + macro + fine);
+                    pixels[y * size + x] = new Color(v * 0.92f, v, v * 0.84f, 1f);
+                }
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply(true);
+            return tex;
+        }
+
+        private static Texture2D CreateCorrugatedMetalTexture256()
+        {
+            const int size = 256;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true);
+            var pixels = new Color32[size * size];
+            for (var y = 0; y < size; y++)
+            {
+                for (var x = 0; x < size; x++)
+                {
+                    var rib = Mathf.Sin((x / 256f) * Mathf.PI * 32f) * 0.14f;
+                    var wear = Hash2D(x >> 1, y >> 2, 137) * 0.10f;
+                    var frame = (y < 10 || y > 246) ? -0.12f : 0f;
+                    var v = Mathf.Clamp01(0.78f + rib + wear + frame);
+                    pixels[y * size + x] = new Color(v, v * 0.98f, v * 0.96f, 1f);
+                }
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply(true);
+            return tex;
+        }
+
+        private static Texture2D CreateSandbagTexture256()
+        {
+            const int size = 256;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true);
+            var pixels = new Color32[size * size];
+            for (var y = 0; y < size; y++)
+            {
+                var row = y / 32;
+                var xShift = (row % 2) * 32;
+                var localY = y % 32;
+                for (var x = 0; x < size; x++)
+                {
+                    var localX = (x + xShift) % 64;
+                    var border = (localY < 3 || localY > 28 || localX < 3 || localX > 60) ? -0.22f : 0f;
+                    var weave = (((x + y) & 1) == 0 ? 0.04f : -0.04f) + Hash2D(x, y, 179) * 0.08f;
+                    var v = Mathf.Clamp01(0.84f + border + weave);
+                    pixels[y * size + x] = new Color(v, v * 0.97f, v * 0.90f, 1f);
+                }
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply(true);
+            return tex;
+        }
+
         private static Texture2D SaveTextureAsset(Texture2D source, string assetPath, bool repeat)
         {
-            byte[] png = source.EncodeToPNG();
+            var png = source.EncodeToPNG();
             File.WriteAllBytes(assetPath, png);
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
 
-            TextureImporter importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+            var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
             if (importer != null)
             {
                 importer.textureType = TextureImporterType.Default;
                 importer.wrapMode = repeat ? TextureWrapMode.Repeat : TextureWrapMode.Clamp;
                 importer.filterMode = FilterMode.Bilinear;
                 importer.anisoLevel = 4;
+                importer.mipmapEnabled = true;
                 importer.sRGBTexture = true;
+                importer.maxTextureSize = 512;
+                importer.textureCompression = TextureImporterCompression.Compressed;
+                importer.crunchedCompression = true;
+                importer.compressionQuality = 75;
                 importer.SaveAndReimport();
             }
             return AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
@@ -299,11 +566,11 @@ namespace TopDownShooter.Editor
 
         private static Sprite SaveSpriteAsset(Texture2D source, string assetPath)
         {
-            byte[] png = source.EncodeToPNG();
+            var png = source.EncodeToPNG();
             File.WriteAllBytes(assetPath, png);
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
 
-            TextureImporter importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+            var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
             if (importer != null)
             {
                 importer.textureType = TextureImporterType.Sprite;
@@ -326,15 +593,15 @@ namespace TopDownShooter.Editor
             Texture2D mainTex = null,
             Vector2? tiling = null)
         {
-            string path = MaterialsDir + "/" + matName + ".mat";
-            Material existing = AssetDatabase.LoadAssetAtPath<Material>(path);
-            Material generated = Palette.CreateLitMaterial(matName, baseColor, metallic, smoothness, emissive, emissionIntensity, mainTex);
+            var path = MaterialsDir + "/" + matName + ".mat";
+            var existing = AssetDatabase.LoadAssetAtPath<Material>(path);
+            var generated = Palette.CreateLitMaterial(matName, baseColor, metallic, smoothness, emissive, emissionIntensity, mainTex);
             if (tiling.HasValue)
             {
                 generated.mainTextureScale = tiling.Value;
-                if (generated.HasProperty("_BaseMap"))
+                if (generated.HasProperty(BaseMap))
                 {
-                    generated.SetTextureScale("_BaseMap", tiling.Value);
+                    generated.SetTextureScale(BaseMap, tiling.Value);
                 }
             }
 
@@ -342,20 +609,22 @@ namespace TopDownShooter.Editor
             {
                 existing.shader = generated.shader;
                 existing.CopyPropertiesFromMaterial(generated);
+                existing.enableInstancing = true;
                 Object.DestroyImmediate(generated);
                 EditorUtility.SetDirty(existing);
                 return existing;
             }
 
+            generated.enableInstancing = true;
             AssetDatabase.CreateAsset(generated, path);
             return generated;
         }
 
         private static Material SaveOrUpdateSkyboxMaterial(string matName)
         {
-            string path = MaterialsDir + "/" + matName + ".mat";
-            Material existing = AssetDatabase.LoadAssetAtPath<Material>(path);
-            Material generated = Palette.CreateSkyboxMaterial();
+            var path = MaterialsDir + "/" + matName + ".mat";
+            var existing = AssetDatabase.LoadAssetAtPath<Material>(path);
+            var generated = Palette.CreateSkyboxMaterial();
             generated.name = matName;
 
             if (existing != null)
@@ -388,7 +657,7 @@ namespace TopDownShooter.Editor
 
         private static VolumeProfile ConfigureVolumeProfile()
         {
-            VolumeProfile profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(VolumeProfilePath);
+            var profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(VolumeProfilePath);
             if (profile == null)
             {
                 profile = ScriptableObject.CreateInstance<VolumeProfile>();
@@ -397,12 +666,12 @@ namespace TopDownShooter.Editor
 
             profile.components.RemoveAll(c => c == null);
 
-            Tonemapping tonemapping = EnsureVolumeComponent<Tonemapping>(profile);
+            var tonemapping = EnsureVolumeComponent<Tonemapping>(profile);
             tonemapping.active = true;
             tonemapping.mode.overrideState = true;
             tonemapping.mode.value = TonemappingMode.ACES;
 
-            Bloom bloom = EnsureVolumeComponent<Bloom>(profile);
+            var bloom = EnsureVolumeComponent<Bloom>(profile);
             bloom.active = true;
             bloom.threshold.overrideState = true;
             bloom.threshold.value = 1.25f;
@@ -413,7 +682,7 @@ namespace TopDownShooter.Editor
             bloom.tint.overrideState = true;
             bloom.tint.value = Palette.KeyLightWarm;
 
-            Vignette vignette = EnsureVolumeComponent<Vignette>(profile);
+            var vignette = EnsureVolumeComponent<Vignette>(profile);
             vignette.active = true;
             vignette.intensity.overrideState = true;
             vignette.intensity.value = 0.20f;
@@ -422,7 +691,7 @@ namespace TopDownShooter.Editor
             vignette.color.overrideState = true;
             vignette.color.value = Palette.Shadow;
 
-            ColorAdjustments colorAdj = EnsureVolumeComponent<ColorAdjustments>(profile);
+            var colorAdj = EnsureVolumeComponent<ColorAdjustments>(profile);
             colorAdj.active = true;
             colorAdj.saturation.overrideState = true;
             colorAdj.saturation.value = 4f;
@@ -456,13 +725,13 @@ namespace TopDownShooter.Editor
                 "DirectionalFillLight"
             };
 
-            for (int i = 0; i < generatedNames.Length; i++)
+            foreach (var t in generatedNames)
             {
-                GameObject existing = GameObject.Find(generatedNames[i]);
+                var existing = GameObject.Find(t);
                 while (existing != null)
                 {
                     Object.DestroyImmediate(existing);
-                    existing = GameObject.Find(generatedNames[i]);
+                    existing = GameObject.Find(t);
                 }
             }
         }
@@ -480,33 +749,38 @@ namespace TopDownShooter.Editor
             RenderSettings.fogStartDistance = 52f;
             RenderSettings.fogEndDistance = 158f;
 
-            GameObject keyLightGo = GameObject.Find("Directional Light");
+            var keyLightGo = GameObject.Find("Directional Light");
             if (keyLightGo == null)
             {
                 keyLightGo = new GameObject("Directional Light");
                 keyLightGo.AddComponent<Light>();
             }
             keyLightGo.transform.rotation = Quaternion.Euler(48f, -38f, 0f);
-            Light keyLight = keyLightGo.GetComponent<Light>();
+            var keyLight = keyLightGo.GetComponent<Light>();
             keyLight.type = LightType.Directional;
             keyLight.color = Palette.KeyLightWarm;
             keyLight.intensity = 1.68f;
             keyLight.shadows = LightShadows.Soft;
 
-            GameObject rimLightGo = new GameObject("DirectionalFillLight");
-            rimLightGo.transform.rotation = Quaternion.Euler(35f, 145f, 0f);
-            Light rimLight = rimLightGo.AddComponent<Light>();
+            var rimLightGo = new GameObject("DirectionalFillLight")
+            {
+                transform =
+                {
+                    rotation = Quaternion.Euler(35f, 145f, 0f)
+                }
+            };
+            var rimLight = rimLightGo.AddComponent<Light>();
             rimLight.type = LightType.Directional;
             rimLight.color = Palette.AmbientSky;
             rimLight.intensity = 0.72f;
             rimLight.shadows = LightShadows.None;
 
-            GameObject volGo = GameObject.Find("Global Volume");
+            var volGo = GameObject.Find("Global Volume");
             if (volGo == null)
             {
                 volGo = new GameObject("Global Volume");
             }
-            Volume volume = volGo.GetComponent<Volume>();
+            var volume = volGo.GetComponent<Volume>();
             if (volume == null) volume = volGo.AddComponent<Volume>();
             volume.isGlobal = true;
             volume.priority = 1f;
@@ -515,11 +789,13 @@ namespace TopDownShooter.Editor
 
         private static UnityEngine.Camera ConfigureMainCamera()
         {
-            UnityEngine.Camera mainCam = UnityEngine.Camera.main;
+            var mainCam = UnityEngine.Camera.main;
             if (mainCam == null)
             {
-                GameObject camGo = new GameObject("Main Camera");
-                camGo.tag = "MainCamera";
+                var camGo = new GameObject("Main Camera")
+                {
+                    tag = "MainCamera"
+                };
                 mainCam = camGo.AddComponent<UnityEngine.Camera>();
             }
 
@@ -538,7 +814,7 @@ namespace TopDownShooter.Editor
                 mainCam.gameObject.AddComponent<AudioListener>();
             }
 
-            CinemachineBrain brain = mainCam.GetComponent<CinemachineBrain>();
+            var brain = mainCam.GetComponent<CinemachineBrain>();
             if (brain == null) brain = mainCam.gameObject.AddComponent<CinemachineBrain>();
             brain.IgnoreTimeScale = false;
             brain.DefaultBlend = new CinemachineBlendDefinition(CinemachineBlendDefinition.Styles.EaseInOut, 0.4f);
@@ -547,28 +823,33 @@ namespace TopDownShooter.Editor
         }
 
         private static CampaignCutsceneProps BuildArenaEnvironment(
-            Material matFloor,
-            Material matWalls,
-            Material matProps,
-            Material matTrim,
-            Material matAccent,
-            Material matCyan,
-            Material matOlive,
-            Material matRust,
-            Material matFuelSteel,
+            ArenaMaterialPack mats,
             VanguardMeshPack meshes)
         {
-            CampaignCutsceneProps props = new CampaignCutsceneProps();
-            GameObject env = new GameObject("ArenaEnvironment");
+            var matFloor = mats.Floor;
+            var matWalls = mats.Walls;
+            var matProps = mats.Props;
+            var matTrim = mats.Trim;
+            var matAccent = mats.Accent;
+            var matSodiumGlow = mats.SodiumGlow;
+            var matOlive = mats.Olive;
+            var matRust = mats.Rust;
+            var matFuelSteel = mats.FuelSteel;
+            var matDmzEarth = mats.DmzEarth;
+            var matSandbag = mats.Sandbag;
+            var matBarrelHazard = mats.BarrelHazard;
 
-            // Huge 3-Sector Echo-7 Tarmac Compound Floor (76m x 108m: x[-38..38], z[-52..56])
-            GameObject floorRoot = new GameObject("ArenaFloor");
+            var props = new CampaignCutsceneProps();
+            var env = new GameObject("ArenaEnvironment");
+
+            // Huge 3-Sector Hajin DMZ Compound Floor (76m x 108m: x[-38..38], z[-52..56])
+            var floorRoot = new GameObject("ArenaFloor");
             floorRoot.transform.SetParent(env.transform, false);
-            BoxCollider floorCol = floorRoot.AddComponent<BoxCollider>();
+            var floorCol = floorRoot.AddComponent<BoxCollider>();
             floorCol.size = new Vector3(76f, 0.4f, 108f);
             floorCol.center = new Vector3(0f, -0.2f, 2f);
 
-            GameObject floorVisual = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var floorVisual = GameObject.CreatePrimitive(PrimitiveType.Cube);
             floorVisual.name = "FloorDeck";
             floorVisual.transform.SetParent(floorRoot.transform, false);
             floorVisual.transform.localPosition = new Vector3(0f, -0.2f, 2f);
@@ -576,13 +857,16 @@ namespace TopDownShooter.Editor
             Object.DestroyImmediate(floorVisual.GetComponent<Collider>());
             floorVisual.GetComponent<MeshRenderer>().sharedMaterial = matFloor;
 
-            GameObject apron = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var apron = GameObject.CreatePrimitive(PrimitiveType.Cube);
             apron.name = "OuterFoundation";
             apron.transform.SetParent(env.transform, false);
             apron.transform.localPosition = new Vector3(0f, -0.55f, 2f);
-            apron.transform.localScale = new Vector3(116f, 0.4f, 148f);
+            apron.transform.localScale = new Vector3(156f, 0.4f, 188f);
             Object.DestroyImmediate(apron.GetComponent<Collider>());
-            apron.GetComponent<MeshRenderer>().sharedMaterial = matTrim;
+            apron.GetComponent<MeshRenderer>().sharedMaterial = matDmzEarth;
+
+            // Scenic Hajin DMZ Perimeter Ridges & Mountain Horizon outside playable walls
+            BuildDmzHillsides(env.transform, matDmzEarth, matOlive, matWalls);
 
             // Central Convoy Asphalt Road Strip & Hazard Road Markings (South Gate -> Helipad)
             BuildRoadDeck(env.transform, matTrim, matAccent);
@@ -611,28 +895,35 @@ namespace TopDownShooter.Editor
                 matWalls, matTrim, matAccent,
                 out props.Gate2Left, out props.Gate2Right);
 
-            // SECTOR 1 (z: -52..-14): South Insertion Checkpoint & Convoy Yard
+            // SECTOR 1 (z: -52..-14): Hajin DMZ South Checkpoint & Convoy Ambush Yard
             BuildEnvPropMesh(env.transform, "S1_Bunker_West", meshes.EnvBunker, new Vector3(-18.5f, 0f, -24.5f), 18f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
             BuildEnvPropMesh(env.transform, "S1_Container_SW", meshes.EnvShippingContainer, new Vector3(-14.5f, 0f, -40f), 14f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
             BuildEnvPropMesh(env.transform, "S1_Container_SE", meshes.EnvShippingContainer, new Vector3(15.5f, 0f, -38f), -12f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
             BuildEnvPropMesh(env.transform, "S1_Container_NE", meshes.EnvShippingContainer, new Vector3(17.5f, 0f, -22.5f), 86f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
 
-            BuildTacticalCover(env.transform, "S1_Cover_SW", new Vector3(-5.8f, 0f, -38.5f), 12f, new Vector3(3.2f, 1.25f, 1.1f), matProps, matTrim, matAccent, meshes.TacticalCrate);
-            BuildTacticalCover(env.transform, "S1_Cover_SE", new Vector3(5.8f, 0f, -38.5f), -12f, new Vector3(3.2f, 1.25f, 1.1f), matProps, matTrim, matAccent, meshes.TacticalCrate);
-            BuildTacticalCover(env.transform, "S1_Cover_MidW", new Vector3(-7.8f, 0f, -28.5f), -18f, new Vector3(3.5f, 1.3f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
-            BuildTacticalCover(env.transform, "S1_Cover_MidE", new Vector3(7.8f, 0f, -28.5f), 18f, new Vector3(3.5f, 1.3f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
-            BuildCornerPylon(env.transform, "Pylon_S1_SW", new Vector3(-24.5f, 0f, -48.5f), matTrim, matWalls, matCyan, Palette.KeyLightWarm, meshes.EnergyPylon);
-            BuildCornerPylon(env.transform, "Pylon_S1_SE", new Vector3(24.5f, 0f, -48.5f), matTrim, matWalls, matCyan, Palette.KeyLightWarm, meshes.EnergyPylon);
+            BuildFittedCoverProp(env.transform, "S1_HMMWV_West", meshes.EnvHMMWV, new Vector3(-10.5f, 0f, -34.0f), 22f, new Vector3(2.4f, 1.95f, 4.9f), matOlive);
+            BuildFittedCoverProp(env.transform, "S1_HMMWV_East", meshes.EnvHMMWV, new Vector3(10.8f, 0f, -43.5f), -155f, new Vector3(2.4f, 1.95f, 4.9f), matSandbag);
+            BuildFittedCoverProp(env.transform, "S1_Cover_SW", meshes.EnvHescoBarrier, new Vector3(-5.8f, 0f, -38.5f), 12f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
+            BuildFittedCoverProp(env.transform, "S1_Cover_SE", meshes.EnvHescoBarrier, new Vector3(5.8f, 0f, -38.5f), -12f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
+            BuildFittedCoverProp(env.transform, "S1_Cover_MidW", meshes.EnvSandbagWall, new Vector3(-7.8f, 0f, -28.5f), -18f, new Vector3(3.5f, 1.15f, 1.05f), matSandbag);
+            BuildFittedCoverProp(env.transform, "S1_Cover_MidE", meshes.EnvSandbagWall, new Vector3(7.8f, 0f, -28.5f), 18f, new Vector3(3.5f, 1.15f, 1.05f), matSandbag);
+            BuildExplosiveBarrel(env.transform, "Barrel_S1_W", new Vector3(-4.2f, 0f, -32.2f), meshes.PropExplosiveBarrel, matBarrelHazard);
+            BuildExplosiveBarrel(env.transform, "Barrel_S1_E", new Vector3(7.2f, 0f, -23.5f), meshes.PropExplosiveBarrel, matBarrelHazard);
+            BuildFloodlightTower(env.transform, "Pylon_S1_SW", new Vector3(-24.5f, 0f, -48.5f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
+            BuildFloodlightTower(env.transform, "Pylon_S1_SE", new Vector3(24.5f, 0f, -48.5f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
 
             // SECTOR 2 (z: -14..+22): Central Fuel Tank Farm & Cargo Container Depot
-            // Note: Keeps (0, 0, 0), (0, 0, 6), and (10, 0, 10) completely unobstructed!
-            BuildTacticalCover(env.transform, "Cover_NW", new Vector3(-5.2f, 0f, 5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
-            BuildTacticalCover(env.transform, "Cover_NE", new Vector3(5.2f, 0f, 5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
-            BuildTacticalCover(env.transform, "Cover_SW", new Vector3(-5.2f, 0f, -5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
-            BuildTacticalCover(env.transform, "Cover_SE", new Vector3(5.2f, 0f, -5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
+            // Note: Keeps (0, 0, 0), (0, 0, 6), (10, 0, 10), (-16.5, 0, -1.2), and (21.5, 0, 1.5) completely unobstructed!
+            BuildFittedCoverProp(env.transform, "Cover_NW", meshes.EnvHescoBarrier, new Vector3(-5.2f, 0f, 5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matSandbag);
+            BuildFittedCoverProp(env.transform, "Cover_NE", meshes.EnvHescoBarrier, new Vector3(5.2f, 0f, 5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matSandbag);
+            BuildFittedCoverProp(env.transform, "Cover_SW", meshes.EnvSandbagWall, new Vector3(-5.2f, 0f, -5.2f), -45f, new Vector3(3.0f, 1.15f, 1.0f), matSandbag);
+            BuildFittedCoverProp(env.transform, "Cover_SE", meshes.EnvSandbagWall, new Vector3(5.2f, 0f, -5.2f), 45f, new Vector3(3.0f, 1.15f, 1.0f), matSandbag);
             BuildTacticalCover(env.transform, "Cover_West", new Vector3(-8.2f, 0f, 0f), 90f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matAccent, meshes.TacticalCrate);
-            BuildCornerPylon(env.transform, "Pylon_NW", new Vector3(-11.8f, 0f, 11.8f), matTrim, matWalls, matCyan, Palette.KeyLightWarm, meshes.EnergyPylon);
-            BuildCornerPylon(env.transform, "Pylon_NE", new Vector3(11.8f, 0f, 11.8f), matTrim, matWalls, matCyan, Palette.KeyLightWarm, meshes.EnergyPylon);
+            BuildFittedCoverProp(env.transform, "S2_HMMWV_East", meshes.EnvHMMWV, new Vector3(14.5f, 0f, 15.5f), -118f, new Vector3(2.4f, 1.95f, 4.9f), matOlive);
+            BuildExplosiveBarrel(env.transform, "Barrel_S2_Fuel", new Vector3(-13.2f, 0f, 2.8f), meshes.PropExplosiveBarrel, matBarrelHazard);
+            BuildExplosiveBarrel(env.transform, "Barrel_S2_Cargo", new Vector3(15.2f, 0f, -1.2f), meshes.PropExplosiveBarrel, matBarrelHazard);
+            BuildFloodlightTower(env.transform, "Pylon_NW", new Vector3(-11.8f, 0f, 11.8f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
+            BuildFloodlightTower(env.transform, "Pylon_NE", new Vector3(11.8f, 0f, 11.8f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
 
             // West Fuel Farm Silos & Radar Array
             BuildEnvPropMesh(env.transform, "S2_FuelTank_1", meshes.EnvFuelTank, new Vector3(-25.5f, 0f, -6.0f), 0f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
@@ -656,24 +947,154 @@ namespace TopDownShooter.Editor
             BuildEnvPropMesh(env.transform, "S3_FuelTank_NW", meshes.EnvFuelTank, new Vector3(-23.5f, 0f, 50.0f), 120f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
             BuildEnvPropMesh(env.transform, "S3_Container_SW", meshes.EnvShippingContainer, new Vector3(-17.5f, 0f, 28.5f), 88f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
             BuildEnvPropMesh(env.transform, "S3_Container_SE", meshes.EnvShippingContainer, new Vector3(17.5f, 0f, 28.5f), -88f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
-            BuildCornerPylon(env.transform, "Pylon_S3_NW", new Vector3(-26.5f, 0f, 52.5f), matTrim, matWalls, matCyan, Palette.KeyLightWarm, meshes.EnergyPylon);
-            BuildCornerPylon(env.transform, "Pylon_S3_NE", new Vector3(26.5f, 0f, 52.5f), matTrim, matWalls, matCyan, Palette.KeyLightWarm, meshes.EnergyPylon);
+            BuildFittedCoverProp(env.transform, "S3_Hesco_W", meshes.EnvHescoBarrier, new Vector3(-10.8f, 0f, 34.0f), -28f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
+            BuildFittedCoverProp(env.transform, "S3_Hesco_E", meshes.EnvHescoBarrier, new Vector3(10.8f, 0f, 34.0f), 28f, new Vector3(3.2f, 1.35f, 1.1f), matSandbag);
+            BuildFittedCoverProp(env.transform, "S3_Sandbag_NW", meshes.EnvSandbagWall, new Vector3(-9.5f, 0f, 48.2f), 25f, new Vector3(3.4f, 1.15f, 1.05f), matSandbag);
+            BuildFittedCoverProp(env.transform, "S3_Sandbag_NE", meshes.EnvSandbagWall, new Vector3(9.5f, 0f, 48.2f), -25f, new Vector3(3.4f, 1.15f, 1.05f), matSandbag);
+            BuildFittedCoverProp(env.transform, "S3_HMMWV_NW", meshes.EnvHMMWV, new Vector3(-13.8f, 0f, 47.0f), 145f, new Vector3(2.4f, 1.95f, 4.9f), matOlive);
+            BuildExplosiveBarrel(env.transform, "Barrel_S3_W", new Vector3(-8.2f, 0f, 38.2f), meshes.PropExplosiveBarrel, matBarrelHazard);
+            BuildExplosiveBarrel(env.transform, "Barrel_S3_E", new Vector3(8.5f, 0f, 44.5f), meshes.PropExplosiveBarrel, matBarrelHazard);
+            BuildFloodlightTower(env.transform, "Pylon_S3_NW", new Vector3(-26.5f, 0f, 52.5f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
+            BuildFloodlightTower(env.transform, "Pylon_S3_NE", new Vector3(26.5f, 0f, 52.5f), matTrim, matWalls, matSodiumGlow, Palette.SodiumAmber, meshes.EnvFloodlightTower);
 
             // EVAC-6 Blackhawk Helicopter (parked sky-high inactive until Victory Evac Cutscene)
             BuildBlackhawkProp(env.transform, meshes.VehicleBlackhawk, meshes.VehicleBlackhawkRotor, matOlive, matTrim, out props.EvacChopperRoot, out props.EvacChopperRotor);
 
+            // Static batching, occluder flags, and clean layer separation
+            MarkStaticArenaObjects(env, props);
+
             return props;
+        }
+
+        private static void BuildDmzHillsides(Transform parent, Material matEarth, Material matFoliageDark, Material matRock)
+        {
+            var hills = new GameObject("DMZ_Hillsides");
+            hills.transform.SetParent(parent, false);
+
+            var ridgeSpecs = new (string name, Vector3 pos, Vector3 scale, Vector3 euler, Material mat)[]
+            {
+                ("Ridge_WestNorth", new Vector3(-54f, 3.2f, 38f), new Vector3(24f, 9f, 46f), new Vector3(4f, 8f, -12f), matEarth),
+                ("Ridge_WestSouth", new Vector3(-52f, 2.5f, -20f), new Vector3(22f, 7.5f, 54f), new Vector3(-3f, -10f, -10f), matRock),
+                ("Ridge_EastNorth", new Vector3(54f, 3.4f, 32f), new Vector3(24f, 9.5f, 50f), new Vector3(5f, -9f, 12f), matEarth),
+                ("Ridge_EastSouth", new Vector3(52f, 2.4f, -24f), new Vector3(22f, 7.2f, 52f), new Vector3(-4f, 12f, 11f), matRock),
+                ("Mountain_HorizonNorth", new Vector3(0f, 6.2f, 82f), new Vector3(135f, 16f, 28f), new Vector3(8f, 0f, 0f), matEarth),
+                ("Mountain_HorizonNW", new Vector3(-52f, 7.8f, 76f), new Vector3(52f, 19f, 32f), new Vector3(10f, 16f, 0f), matFoliageDark),
+                ("Mountain_HorizonNE", new Vector3(52f, 7.4f, 76f), new Vector3(52f, 18f, 32f), new Vector3(10f, -16f, 0f), matFoliageDark),
+                ("Ridge_SouthHorizon", new Vector3(0f, 2.2f, -72f), new Vector3(110f, 6.5f, 20f), new Vector3(-6f, 0f, 0f), matEarth)
+            };
+
+            foreach (var r in ridgeSpecs)
+            {
+                var go = CreateVisualPrimitive(r.name, PrimitiveType.Cube, hills.transform, r.pos, r.scale, r.mat, r.euler);
+                go.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+            }
+        }
+
+        private static void BuildFittedCoverProp(
+            Transform parent,
+            string propName,
+            Mesh mesh,
+            Vector3 worldPos,
+            float yawDeg,
+            Vector3 colliderSize,
+            Material mat)
+        {
+            var root = new GameObject(propName);
+            root.transform.SetParent(parent, false);
+            root.transform.SetPositionAndRotation(worldPos, Quaternion.Euler(0f, yawDeg, 0f));
+
+            var col = root.AddComponent<BoxCollider>();
+            col.size = colliderSize;
+            col.center = new Vector3(0f, colliderSize.y * 0.5f, 0f);
+
+            if (mesh != null)
+            {
+                CreateVisualMeshFit(propName + "_Mesh", mesh, PrimitiveType.Cube, root.transform, new Vector3(0f, colliderSize.y * 0.5f, 0f), colliderSize, mat);
+            }
+            else
+            {
+                CreateVisualBox(propName + "_Fallback", root.transform, new Vector3(0f, colliderSize.y * 0.5f, 0f), colliderSize, mat);
+            }
+        }
+
+        private static void BuildExplosiveBarrel(
+            Transform parent,
+            string barrelName,
+            Vector3 worldPos,
+            Mesh barrelMesh,
+            Material matHazard)
+        {
+            var destructibleLayer = LayerMask.NameToLayer("Destructible");
+            var root = new GameObject(barrelName);
+            if (destructibleLayer >= 0) root.layer = destructibleLayer;
+            root.transform.SetParent(parent, false);
+            root.transform.SetPositionAndRotation(worldPos, Quaternion.identity);
+
+            var col = root.AddComponent<CapsuleCollider>();
+            col.radius = 0.44f;
+            col.height = 1.15f;
+            col.center = new Vector3(0f, 0.575f, 0f);
+
+            root.AddComponent<ExplosiveBarrel>();
+
+            var vis = barrelMesh != null
+                ? CreateVisualMeshFit("BarrelVisual", barrelMesh, PrimitiveType.Cylinder, root.transform, new Vector3(0f, 0.56f, 0f), new Vector3(0.76f, 1.12f, 0.76f), matHazard)
+                : CreateVisualPrimitive("BarrelVisual", PrimitiveType.Cylinder, root.transform, new Vector3(0f, 0.56f, 0f), new Vector3(0.76f, 0.56f, 0.76f), matHazard);
+            if (destructibleLayer >= 0) vis.layer = destructibleLayer;
+        }
+
+        private static void MarkStaticArenaObjects(GameObject envRoot, CampaignCutsceneProps props)
+        {
+            var envLayer = LayerMask.NameToLayer("Environment");
+            var dynamicRoots = new HashSet<Transform>();
+            if (props.Gate1Left != null) dynamicRoots.Add(props.Gate1Left);
+            if (props.Gate1Right != null) dynamicRoots.Add(props.Gate1Right);
+            if (props.Gate2Left != null) dynamicRoots.Add(props.Gate2Left);
+            if (props.Gate2Right != null) dynamicRoots.Add(props.Gate2Right);
+            if (props.EvacChopperRoot != null) dynamicRoots.Add(props.EvacChopperRoot);
+
+            var allTransforms = envRoot.GetComponentsInChildren<Transform>(true);
+            foreach (var tr in allTransforms)
+            {
+                if (tr == null) continue;
+                var go = tr.gameObject;
+
+                var isExplosiveBarrel = tr.GetComponentInParent<ExplosiveBarrel>() != null;
+                if (isExplosiveBarrel) continue;
+
+                var underDynamicRoot = false;
+                var cursor = tr;
+                while (cursor != null)
+                {
+                    if (dynamicRoots.Contains(cursor))
+                    {
+                        underDynamicRoot = true;
+                        break;
+                    }
+                    cursor = cursor.parent;
+                }
+
+                if (envLayer >= 0) go.layer = envLayer;
+                if (underDynamicRoot) continue;
+                if (go.GetComponent<Light>() != null) continue;
+
+                GameObjectUtility.SetStaticEditorFlags(
+                    go,
+                    StaticEditorFlags.BatchingStatic |
+                    StaticEditorFlags.OccluderStatic |
+                    StaticEditorFlags.OccludeeStatic);
+            }
         }
 
         private static void BuildRoadDeck(Transform parent, Material matAsphaltDark, Material matStripeYellow)
         {
-            GameObject road = CreateVisualBox("ConvoyMainRoad", parent, new Vector3(0f, 0.005f, -5f), new Vector3(11.5f, 0.01f, 88f), matAsphaltDark);
-            road.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            var road = CreateVisualBox("ConvoyMainRoad", parent, new Vector3(0f, 0.005f, -5f), new Vector3(11.5f, 0.01f, 88f), matAsphaltDark);
+            road.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
 
-            for (float z = -47f; z <= 31f; z += 5.5f)
+            for (var z = -47f; z <= 31f; z += 5.5f)
             {
-                GameObject dash = CreateVisualBox("RoadCenterDash_" + Mathf.RoundToInt(z), parent, new Vector3(0f, 0.012f, z), new Vector3(0.32f, 0.01f, 2.6f), matStripeYellow);
-                dash.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                var dash = CreateVisualBox("RoadCenterDash_" + Mathf.RoundToInt(z), parent, new Vector3(0f, 0.012f, z), new Vector3(0.32f, 0.01f, 2.6f), matStripeYellow);
+                dash.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
             }
         }
 
@@ -689,11 +1110,11 @@ namespace TopDownShooter.Editor
             out Transform leftLeafOut,
             out Transform rightLeafOut)
         {
-            GameObject root = new GameObject(gateName);
+            var root = new GameObject(gateName);
             root.transform.SetParent(parent, false);
 
-            float wingW = Mathf.Max(2f, (totalWidth - openingWidth) * 0.5f);
-            float wingOffsetX = openingWidth * 0.5f + wingW * 0.5f;
+            var wingW = Mathf.Max(2f, (totalWidth - openingWidth) * 0.5f);
+            var wingOffsetX = openingWidth * 0.5f + wingW * 0.5f;
             BuildPerimeterWall(root.transform, gateName + "_WingWest", new Vector3(-wingOffsetX, 0f, zPos), new Vector3(wingW, 2.6f, 1.5f), matWalls, matTrim, matTrim);
             BuildPerimeterWall(root.transform, gateName + "_WingEast", new Vector3(wingOffsetX, 0f, zPos), new Vector3(wingW, 2.6f, 1.5f), matWalls, matTrim, matTrim);
 
@@ -701,18 +1122,18 @@ namespace TopDownShooter.Editor
             CreateVisualBox(gateName + "_GantryBeam", root.transform, new Vector3(0f, 3.25f, zPos), new Vector3(openingWidth + 2.4f, 0.65f, 1.6f), matTrim);
             CreateVisualBox(gateName + "_GantryHazard", root.transform, new Vector3(0f, 3.00f, zPos - 0.82f), new Vector3(openingWidth, 0.16f, 0.08f), matAccent);
 
-            float leafW = openingWidth * 0.5f;
+            var leafW = openingWidth * 0.5f;
             leftLeafOut = CreateSlidingBlastLeaf(root.transform, gateName + "_LeafLeft", new Vector3(-leafW * 0.5f, 0f, zPos), new Vector3(leafW, 2.45f, 0.72f), matTrim, matAccent);
             rightLeafOut = CreateSlidingBlastLeaf(root.transform, gateName + "_LeafRight", new Vector3(leafW * 0.5f, 0f, zPos), new Vector3(leafW, 2.45f, 0.72f), matTrim, matAccent);
         }
 
         private static Transform CreateSlidingBlastLeaf(Transform parent, string leafName, Vector3 pos, Vector3 size, Material matDoor, Material matStripe)
         {
-            GameObject leaf = new GameObject(leafName);
+            var leaf = new GameObject(leafName);
             leaf.transform.SetParent(parent, false);
             leaf.transform.position = pos;
 
-            BoxCollider col = leaf.AddComponent<BoxCollider>();
+            var col = leaf.AddComponent<BoxCollider>();
             col.size = size;
             col.center = new Vector3(0f, size.y * 0.5f, 0f);
 
@@ -723,12 +1144,12 @@ namespace TopDownShooter.Editor
 
         private static void BuildHelipadMarkings(Transform parent, Vector3 centerPos, Material matPadDark, Material matYellow)
         {
-            GameObject pad = new GameObject("NorthHelipad_LZ");
+            var pad = new GameObject("NorthHelipad_LZ");
             pad.transform.SetParent(parent, false);
             pad.transform.position = centerPos;
 
-            GameObject deck = CreateVisualBox("HelipadConcretePad", pad.transform, Vector3.zero, new Vector3(15f, 0.02f, 15f), matPadDark);
-            deck.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            var deck = CreateVisualBox("HelipadConcretePad", pad.transform, Vector3.zero, new Vector3(15f, 0.02f, 15f), matPadDark);
+            deck.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
 
             // Bold yellow "H" marking + outer apron border strips (visual decals cleanly on y=0.02)
             CreateVisualBox("H_LeftLeg", pad.transform, new Vector3(-2.1f, 0.02f, 0f), new Vector3(0.9f, 0.015f, 6.2f), matYellow);
@@ -750,21 +1171,21 @@ namespace TopDownShooter.Editor
             Vector3 colliderSize,
             Material mat)
         {
-            GameObject root = new GameObject(propName);
+            var root = new GameObject(propName);
             root.transform.SetParent(parent, false);
             root.transform.SetPositionAndRotation(worldPos, Quaternion.Euler(0f, yawDeg, 0f));
 
-            BoxCollider col = root.AddComponent<BoxCollider>();
+            var col = root.AddComponent<BoxCollider>();
             col.size = colliderSize;
             col.center = new Vector3(0f, colliderSize.y * 0.5f, 0f);
 
             if (mesh != null)
             {
-                GameObject vis = new GameObject("VisualMesh");
+                var vis = new GameObject("VisualMesh");
                 vis.transform.SetParent(root.transform, false);
-                MeshFilter mf = vis.AddComponent<MeshFilter>();
+                var mf = vis.AddComponent<MeshFilter>();
                 mf.sharedMesh = mesh;
-                MeshRenderer mr = vis.AddComponent<MeshRenderer>();
+                var mr = vis.AddComponent<MeshRenderer>();
                 mr.sharedMaterial = mat;
             }
             else
@@ -782,13 +1203,13 @@ namespace TopDownShooter.Editor
             out Transform rootOut,
             out Transform rotorOut)
         {
-            GameObject chopper = new GameObject("EVAC6_Blackhawk");
+            var chopper = new GameObject("EVAC6_Blackhawk");
             chopper.transform.SetParent(parent, false);
             chopper.transform.SetPositionAndRotation(new Vector3(0f, 28f, 66f), Quaternion.Euler(0f, 180f, 0f));
 
             if (hullMesh != null)
             {
-                GameObject hull = new GameObject("BlackhawkHull");
+                var hull = new GameObject("BlackhawkHull");
                 hull.transform.SetParent(chopper.transform, false);
                 hull.AddComponent<MeshFilter>().sharedMesh = hullMesh;
                 hull.AddComponent<MeshRenderer>().sharedMaterial = matHull;
@@ -798,7 +1219,7 @@ namespace TopDownShooter.Editor
                 CreateVisualBox("BlackhawkHullFallback", chopper.transform, new Vector3(0f, 1.4f, 0f), new Vector3(2.8f, 2.2f, 9.5f), matHull);
             }
 
-            GameObject rotor = new GameObject("MainRotor");
+            var rotor = new GameObject("MainRotor");
             rotor.transform.SetParent(chopper.transform, false);
             rotor.transform.localPosition = new Vector3(0f, 2.66f, 0.25f);
             if (rotorMesh != null)
@@ -819,11 +1240,11 @@ namespace TopDownShooter.Editor
 
         private static void BuildPerimeterWall(Transform parent, string wallName, Vector3 pos, Vector3 size, Material matWall, Material matTrim, Material matGlow)
         {
-            GameObject root = new GameObject(wallName);
+            var root = new GameObject(wallName);
             root.transform.SetParent(parent, false);
             root.transform.localPosition = pos;
 
-            BoxCollider col = root.AddComponent<BoxCollider>();
+            var col = root.AddComponent<BoxCollider>();
             col.size = size;
             col.center = new Vector3(0f, size.y * 0.5f, 0f);
 
@@ -834,11 +1255,11 @@ namespace TopDownShooter.Editor
 
         private static void BuildTacticalCover(Transform parent, string coverName, Vector3 pos, float yawDeg, Vector3 size, Material matBody, Material matTrim, Material matGlow, Mesh crateMesh)
         {
-            GameObject root = new GameObject(coverName);
+            var root = new GameObject(coverName);
             root.transform.SetParent(parent, false);
             root.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yawDeg, 0f));
 
-            BoxCollider col = root.AddComponent<BoxCollider>();
+            var col = root.AddComponent<BoxCollider>();
             col.size = size;
             col.center = new Vector3(0f, size.y * 0.5f, 0f);
 
@@ -857,43 +1278,43 @@ namespace TopDownShooter.Editor
             }
         }
 
-        private static void BuildCornerPylon(Transform parent, string pylonName, Vector3 pos, Material matBody, Material matTrim, Material matGlow, Color lightColor, Mesh pylonMesh)
+        private static void BuildFloodlightTower(Transform parent, string towerName, Vector3 pos, Material matBody, Material matTrim, Material matSodiumGlow, Color lightColor, Mesh towerMesh)
         {
-            GameObject root = new GameObject(pylonName);
+            var root = new GameObject(towerName);
             root.transform.SetParent(parent, false);
             root.transform.localPosition = pos;
 
-            BoxCollider col = root.AddComponent<BoxCollider>();
-            col.size = new Vector3(1.1f, 3.2f, 1.1f);
-            col.center = new Vector3(0f, 1.6f, 0f);
+            var col = root.AddComponent<BoxCollider>();
+            col.size = new Vector3(1.1f, 3.6f, 1.1f);
+            col.center = new Vector3(0f, 1.8f, 0f);
 
-            if (pylonMesh != null)
+            if (towerMesh != null)
             {
-                CreateVisualMeshFit("EnergyPylonMesh", pylonMesh, PrimitiveType.Cube, root.transform, new Vector3(0f, 1.6f, 0f), new Vector3(1.25f, 3.2f, 1.25f), matBody);
-                CreateVisualBox("FloodlightBank", root.transform, new Vector3(0f, 3.06f, 0f), new Vector3(0.74f, 0.18f, 0.54f), matGlow);
+                CreateVisualMeshFit("FloodlightTowerMesh", towerMesh, PrimitiveType.Cube, root.transform, new Vector3(0f, 1.95f, 0f), new Vector3(1.35f, 3.9f, 1.35f), matBody);
+                CreateVisualBox("FloodlightBank", root.transform, new Vector3(0f, 3.72f, 0f), new Vector3(0.86f, 0.22f, 0.56f), matSodiumGlow);
             }
             else
             {
-                CreateVisualBox("Base", root.transform, new Vector3(0f, 0.2f, 0f), new Vector3(1.3f, 0.4f, 1.3f), matTrim);
-                CreateVisualBox("Shaft", root.transform, new Vector3(0f, 1.4f, 0f), new Vector3(0.85f, 2.2f, 0.85f), matBody);
-                CreateVisualBox("FloodlightBank", root.transform, new Vector3(0f, 2.85f, 0f), new Vector3(0.85f, 0.30f, 0.85f), matGlow);
-                CreateVisualBox("Cap", root.transform, new Vector3(0f, 3.1f, 0f), new Vector3(1.1f, 0.22f, 1.1f), matTrim);
+                CreateVisualBox("Base", root.transform, new Vector3(0f, 0.22f, 0f), new Vector3(1.3f, 0.44f, 1.3f), matTrim);
+                CreateVisualBox("Shaft", root.transform, new Vector3(0f, 1.85f, 0f), new Vector3(0.55f, 3.1f, 0.55f), matBody);
+                CreateVisualBox("FloodlightBank", root.transform, new Vector3(0f, 3.55f, 0f), new Vector3(0.95f, 0.26f, 0.72f), matSodiumGlow);
+                CreateVisualBox("Cap", root.transform, new Vector3(0f, 3.74f, 0f), new Vector3(1.1f, 0.16f, 1.1f), matTrim);
             }
 
-            GameObject lightGo = new GameObject("PylonLight");
+            var lightGo = new GameObject("TowerLight");
             lightGo.transform.SetParent(root.transform, false);
-            lightGo.transform.localPosition = new Vector3(0f, 3.05f, 0f);
-            Light pt = lightGo.AddComponent<Light>();
+            lightGo.transform.localPosition = new Vector3(0f, 3.70f, 0f);
+            var pt = lightGo.AddComponent<Light>();
             pt.type = LightType.Point;
             pt.color = lightColor;
-            pt.intensity = 3.2f;
-            pt.range = 12f;
+            pt.intensity = 3.4f;
+            pt.range = 14f;
             pt.shadows = LightShadows.None;
         }
 
         private static GameObject CreateVisualBox(string name, Transform parent, Vector3 localPos, Vector3 scale, Material mat)
         {
-            GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
             go.name = name;
             go.transform.SetParent(parent, false);
             go.transform.localPosition = localPos;
@@ -905,7 +1326,7 @@ namespace TopDownShooter.Editor
 
         private static GameObject CreateVisualPrimitive(string name, PrimitiveType type, Transform parent, Vector3 localPos, Vector3 localScale, Material mat, Vector3? localEuler = null)
         {
-            GameObject go = GameObject.CreatePrimitive(type);
+            var go = GameObject.CreatePrimitive(type);
             go.name = name;
             go.transform.SetParent(parent, false);
             go.transform.localPosition = localPos;
@@ -931,21 +1352,21 @@ namespace TopDownShooter.Editor
                 return CreateVisualPrimitive(name, fallbackType, parent, localPos, targetSize, mat);
             }
 
-            GameObject go = new GameObject(name);
+            var go = new GameObject(name);
             go.transform.SetParent(parent, false);
 
-            MeshFilter mf = go.AddComponent<MeshFilter>();
+            var mf = go.AddComponent<MeshFilter>();
             mf.sharedMesh = mesh;
-            MeshRenderer mr = go.AddComponent<MeshRenderer>();
+            var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterial = mat;
 
-            Vector3 bSize = mesh.bounds.size;
+            var bSize = mesh.bounds.size;
             Vector3 fitScale;
             if (uniformAspect)
             {
-                float maxTarget = Mathf.Max(targetSize.x, Mathf.Max(targetSize.y, targetSize.z));
-                float maxMesh = Mathf.Max(0.01f, Mathf.Max(bSize.x, Mathf.Max(bSize.y, bSize.z)));
-                float s = maxTarget / maxMesh;
+                var maxTarget = Mathf.Max(targetSize.x, Mathf.Max(targetSize.y, targetSize.z));
+                var maxMesh = Mathf.Max(0.01f, Mathf.Max(bSize.x, Mathf.Max(bSize.y, bSize.z)));
+                var s = maxTarget / maxMesh;
                 fitScale = new Vector3(s, s, s);
             }
             else
@@ -965,70 +1386,72 @@ namespace TopDownShooter.Editor
             InputActionAsset inputAsset,
             Material matPrimary,
             Material matSecondary,
-            Material matAccent,
             Material matCyan,
-            Material matHealth,
             VanguardMeshPack meshes)
         {
-            GameObject root = new GameObject("Player");
-            root.tag = "Player";
+            var playerLayer = LayerMask.NameToLayer("Player");
+            var root = new GameObject("Player")
+            {
+                tag = "Player",
+                layer = playerLayer >= 0 ? playerLayer : 0
+            };
             root.transform.SetPositionAndRotation(new Vector3(0f, 0.02f, -43f), Quaternion.identity);
 
-            CharacterController cc = root.AddComponent<CharacterController>();
+            var cc = root.AddComponent<CharacterController>();
             cc.radius = 0.45f;
             cc.height = 1.76f;
             cc.center = new Vector3(0f, 0.88f, 0f);
             cc.stepOffset = 0.25f;
 
-            Rigidbody rb = root.AddComponent<Rigidbody>();
+            var rb = root.AddComponent<Rigidbody>();
             rb.isKinematic = true;
             rb.useGravity = false;
 
-            SphereCollider trigger = root.AddComponent<SphereCollider>();
+            var trigger = root.AddComponent<SphereCollider>();
             trigger.isTrigger = true;
             trigger.radius = 0.88f;
             trigger.center = new Vector3(0f, 0.88f, 0f);
 
-            ProceduralCharacterMotion motion = root.AddComponent<ProceduralCharacterMotion>();
-            WeaponController weapon = root.AddComponent<WeaponController>();
-            PlayerController player = root.AddComponent<PlayerController>();
+            var motion = root.AddComponent<ProceduralCharacterMotion>();
+            var weapon = root.AddComponent<WeaponController>();
+            var player = root.AddComponent<PlayerController>();
 
-            GameObject visualRoot = new GameObject("VisualRoot");
+            var visualRoot = new GameObject("VisualRoot");
             visualRoot.transform.SetParent(root.transform, false);
 
             // Operator Plate Carrier & Combat Torso (Blender custom meshes)
-            Material matWeaponSteel = SaveOrUpdateLitMaterial("Mat_WeaponSteel", Palette.Gunmetal, 0.78f, 0.56f, false, 0f);
-            GameObject torsoGo = CreateVisualMeshFit("Torso", meshes.PlayerTorso, PrimitiveType.Cube, visualRoot.transform, new Vector3(0f, 1.05f, 0f), new Vector3(0.58f, 0.58f, 0.38f), matPrimary);
+            var matWeaponSteel = SaveOrUpdateLitMaterial("Mat_WeaponSteel", Palette.Gunmetal, 0.78f, 0.56f, false, 0f);
+            var torsoGo = CreateVisualMeshFit("Torso", meshes.PlayerTorso, PrimitiveType.Cube, visualRoot.transform, new Vector3(0f, 1.05f, 0f), new Vector3(0.58f, 0.58f, 0.38f), matPrimary);
             CreateVisualMeshFit("ChestRig", meshes.PlayerChestRig, PrimitiveType.Cube, visualRoot.transform, new Vector3(0f, 1.11f, 0.04f), new Vector3(0.62f, 0.36f, 0.34f), matSecondary);
 
             // FAST Tactical Helmet & NVG Goggles
-            GameObject headPivot = new GameObject("HeadPivot");
+            var headPivot = new GameObject("HeadPivot");
             headPivot.transform.SetParent(visualRoot.transform, false);
             headPivot.transform.localPosition = new Vector3(0f, 1.48f, 0.02f);
-            GameObject helmetGo = CreateVisualMeshFit("Helmet", meshes.PlayerHelmet, PrimitiveType.Cube, headPivot.transform, Vector3.zero, new Vector3(0.42f, 0.36f, 0.44f), matPrimary);
+            var helmetGo = CreateVisualMeshFit("Helmet", meshes.PlayerHelmet, PrimitiveType.Cube, headPivot.transform, Vector3.zero, new Vector3(0.42f, 0.36f, 0.44f), matPrimary);
             CreateVisualMeshFit("TacticalVisor", meshes.PlayerVisor, PrimitiveType.Cube, headPivot.transform, new Vector3(0f, 0.02f, 0.22f), new Vector3(0.36f, 0.12f, 0.14f), matCyan);
             CreateVisualPrimitive("Antenna", PrimitiveType.Cylinder, headPivot.transform, new Vector3(0.18f, 0.14f, -0.10f), new Vector3(0.018f, 0.10f, 0.018f), matWeaponSteel);
 
             // Articulated Two-Bone Tactical Arms + Gloved Hands (UpperArm 0.34m + Forearm/Glove 0.35m)
-            Transform leftArmPivot = BuildOperatorArm(
+            var leftArmPivot = BuildOperatorArm(
                 "Left", visualRoot.transform, new Vector3(-0.28f, 1.24f, 0.07f),
                 meshes.PlayerUpperArm, meshes.PlayerForearm, matPrimary, matWeaponSteel,
-                out Transform leftElbowPivot, out MeshRenderer leftUpperRenderer, out MeshRenderer leftForearmRenderer);
+                out var leftElbowPivot, out var leftUpperRenderer, out var leftForearmRenderer);
 
-            Transform rightArmPivot = BuildOperatorArm(
+            var rightArmPivot = BuildOperatorArm(
                 "Right", visualRoot.transform, new Vector3(0.30f, 1.24f, -0.02f),
                 meshes.PlayerUpperArm, meshes.PlayerForearm, matPrimary, matWeaponSteel,
-                out Transform rightElbowPivot, out MeshRenderer rightUpperRenderer, out MeshRenderer rightForearmRenderer);
+                out var rightElbowPivot, out var rightUpperRenderer, out var rightForearmRenderer);
 
             // 6 Switchable Modern Military Firearms mounted dead-straight under WeaponAnchor with exact grip & muzzle nodes
-            GameObject weaponAnchor = new GameObject("WeaponAnchor");
+            var weaponAnchor = new GameObject("WeaponAnchor");
             weaponAnchor.transform.SetParent(visualRoot.transform, false);
             weaponAnchor.transform.localPosition = new Vector3(0.11f, 1.18f, 0.43f);
 
-            GameObject[] weaponVisuals = new GameObject[SaveManager.WeaponCount];
-            Transform[] weaponLeftGrips = new Transform[SaveManager.WeaponCount];
-            Transform[] weaponRightGrips = new Transform[SaveManager.WeaponCount];
-            Transform[] weaponMuzzleTips = new Transform[SaveManager.WeaponCount];
+            var weaponVisuals = new GameObject[SaveManager.WeaponCount];
+            var weaponLeftGrips = new Transform[SaveManager.WeaponCount];
+            var weaponRightGrips = new Transform[SaveManager.WeaponCount];
+            var weaponMuzzleTips = new Transform[SaveManager.WeaponCount];
 
             weaponVisuals[0] = BuildWeaponModel(
                 "Weapon_PulseRifle", weaponAnchor.transform, meshes.WeaponPulseRifle, 0.65f,
@@ -1066,34 +1489,34 @@ namespace TopDownShooter.Editor
                 new Vector3(0f, -0.042f, 0.165f), new Vector3(0f, -0.060f, -0.032f), new Vector3(0f, 0.014f, 0.362f),
                 out weaponLeftGrips[5], out weaponRightGrips[5], out weaponMuzzleTips[5]);
 
-            GameObject muzzlePoint = new GameObject("MuzzlePoint");
+            var muzzlePoint = new GameObject("MuzzlePoint");
             muzzlePoint.transform.SetParent(weaponAnchor.transform, false);
             muzzlePoint.transform.SetPositionAndRotation(weaponMuzzleTips[0].position, weaponMuzzleTips[0].rotation);
 
             // Legs
-            GameObject leftLegPivot = new GameObject("LeftLegPivot");
+            var leftLegPivot = new GameObject("LeftLegPivot");
             leftLegPivot.transform.SetParent(visualRoot.transform, false);
             leftLegPivot.transform.localPosition = new Vector3(-0.15f, 0.74f, 0f);
             CreateVisualMeshFit("LeftLeg", meshes.PlayerLimb, PrimitiveType.Cube, leftLegPivot.transform, new Vector3(0f, -0.35f, 0f), new Vector3(0.21f, 0.68f, 0.22f), matSecondary);
 
-            GameObject rightLegPivot = new GameObject("RightLegPivot");
+            var rightLegPivot = new GameObject("RightLegPivot");
             rightLegPivot.transform.SetParent(visualRoot.transform, false);
             rightLegPivot.transform.localPosition = new Vector3(0.15f, 0.74f, 0f);
             CreateVisualMeshFit("RightLeg", meshes.PlayerLimb, PrimitiveType.Cube, rightLegPivot.transform, new Vector3(0f, -0.35f, 0f), new Vector3(0.21f, 0.68f, 0.22f), matSecondary);
 
             // Tactical Field Rucksack (secondary lag pivot - zero thrusters)
-            GameObject secondaryPivot = new GameObject("SecondaryPivot");
+            var secondaryPivot = new GameObject("SecondaryPivot");
             secondaryPivot.transform.SetParent(visualRoot.transform, false);
             secondaryPivot.transform.localPosition = new Vector3(0f, 1.10f, -0.24f);
             CreateVisualMeshFit("JetpackBody", meshes.PlayerJetpack, PrimitiveType.Cube, secondaryPivot.transform, Vector3.zero, new Vector3(0.38f, 0.44f, 0.22f), matSecondary);
 
             motion.BindPivots(visualRoot.transform, headPivot.transform, leftArmPivot, rightArmPivot, leftLegPivot.transform, rightLegPivot.transform, secondaryPivot.transform);
-            motion.BindWeaponArmIk(leftElbowPivot, rightElbowPivot, weaponAnchor.transform, weaponLeftGrips[0], weaponRightGrips[0], 0.34f, 0.35f);
+            motion.BindWeaponArmIk(leftElbowPivot, rightElbowPivot, weaponAnchor.transform, weaponLeftGrips[0], weaponRightGrips[0]);
             weapon.BindReferences(muzzlePoint.transform, motion, null);
             weapon.BindWeaponVisuals(weaponVisuals);
             weapon.BindWeaponGrips(weaponLeftGrips, weaponRightGrips, weaponMuzzleTips);
 
-            MeshRenderer[] primaryArmorParts = new[]
+            var primaryArmorParts = new[]
             {
                 torsoGo.GetComponent<MeshRenderer>(),
                 helmetGo.GetComponent<MeshRenderer>(),
@@ -1119,7 +1542,7 @@ namespace TopDownShooter.Editor
             out MeshRenderer upperRendererOut,
             out MeshRenderer forearmRendererOut)
         {
-            GameObject armPivot = new GameObject(side + "ArmPivot");
+            var armPivot = new GameObject(side + "ArmPivot");
             armPivot.transform.SetParent(visualRoot, false);
             armPivot.transform.localPosition = shoulderLocalPos;
 
@@ -1140,7 +1563,7 @@ namespace TopDownShooter.Editor
                 upperRendererOut = upperGo.GetComponent<MeshRenderer>();
             }
 
-            GameObject elbowPivot = new GameObject(side + "ElbowPivot");
+            var elbowPivot = new GameObject(side + "ElbowPivot");
             elbowPivot.transform.SetParent(armPivot.transform, false);
             elbowPivot.transform.localPosition = new Vector3(0f, -0.34f, 0f);
             elbowPivotOut = elbowPivot.transform;
@@ -1181,14 +1604,14 @@ namespace TopDownShooter.Editor
             out Transform rightGripOut,
             out Transform muzzleOut)
         {
-            GameObject container = new GameObject(name);
+            var container = new GameObject(name);
             container.transform.SetParent(anchor, false);
             container.transform.localPosition = localOffset;
             container.transform.localRotation = Quaternion.Euler(localEuler);
 
             if (weaponMesh != null)
             {
-                GameObject body = new GameObject("MeshBody");
+                var body = new GameObject("MeshBody");
                 body.transform.SetParent(container.transform, false);
                 body.transform.localPosition = Vector3.zero;
                 body.transform.localScale = Vector3.one * uniformScale;
@@ -1200,17 +1623,17 @@ namespace TopDownShooter.Editor
                 CreateVisualPrimitive("Receiver", PrimitiveType.Cube, container.transform, new Vector3(0f, 0f, 0.16f), new Vector3(0.10f, 0.16f, 0.60f), matBody);
             }
 
-            GameObject leftGrip = new GameObject("LeftHandGrip");
+            var leftGrip = new GameObject("LeftHandGrip");
             leftGrip.transform.SetParent(container.transform, false);
             leftGrip.transform.localPosition = leftGripLocal;
             leftGripOut = leftGrip.transform;
 
-            GameObject rightGrip = new GameObject("RightHandGrip");
+            var rightGrip = new GameObject("RightHandGrip");
             rightGrip.transform.SetParent(container.transform, false);
             rightGrip.transform.localPosition = rightGripLocal;
             rightGripOut = rightGrip.transform;
 
-            GameObject muzzleTip = new GameObject("MuzzleTip");
+            var muzzleTip = new GameObject("MuzzleTip");
             muzzleTip.transform.SetParent(container.transform, false);
             muzzleTip.transform.localPosition = muzzleLocal;
             muzzleOut = muzzleTip.transform;
@@ -1220,16 +1643,21 @@ namespace TopDownShooter.Editor
 
         private static TopDownCameraRig BuildCameraRig(Transform playerTransform, UnityEngine.Camera mainCam)
         {
-            GameObject proxyGo = new GameObject("CameraFollowProxy");
-            proxyGo.transform.position = playerTransform.position + Vector3.up * 0.9f;
+            var proxyGo = new GameObject("CameraFollowProxy")
+            {
+                transform =
+                {
+                    position = playerTransform.position + Vector3.up * 0.9f
+                }
+            };
 
-            GameObject vcamGo = new GameObject("TopDownVirtualCamera");
+            var vcamGo = new GameObject("TopDownVirtualCamera");
             vcamGo.transform.SetPositionAndRotation(mainCam.transform.position, mainCam.transform.rotation);
 
-            CinemachineCamera vcam = vcamGo.AddComponent<CinemachineCamera>();
-            CinemachineFollow follow = vcamGo.AddComponent<CinemachineFollow>();
-            CinemachineImpulseListener listener = vcamGo.AddComponent<CinemachineImpulseListener>();
-            TopDownCameraRig rig = vcamGo.AddComponent<TopDownCameraRig>();
+            var vcam = vcamGo.AddComponent<CinemachineCamera>();
+            var follow = vcamGo.AddComponent<CinemachineFollow>();
+            var listener = vcamGo.AddComponent<CinemachineImpulseListener>();
+            var rig = vcamGo.AddComponent<TopDownCameraRig>();
             rig.BindComponents(vcam, follow, listener, proxyGo.transform, playerTransform);
 
             return rig;
@@ -1241,371 +1669,530 @@ namespace TopDownShooter.Editor
             Sprite roundedSprite,
             Sprite shieldSprite,
             Sprite crosshairSprite,
-            Sprite circleSprite)
+            Sprite circleSprite,
+            Sprite chevronSprite,
+            Sprite damageVignetteSprite)
         {
             // EventSystem using New Input System UI Module
-            GameObject esGo = new GameObject("EventSystem");
+            var esGo = new GameObject("EventSystem");
             esGo.AddComponent<EventSystem>();
             esGo.AddComponent<InputSystemUIInputModule>();
 
             // Root Canvas
-            GameObject canvasGo = new GameObject("GameCanvas");
-            Canvas canvas = canvasGo.AddComponent<Canvas>();
+            var canvasGo = new GameObject("GameCanvas");
+            var canvas = canvasGo.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.sortingOrder = 10;
 
-            CanvasScaler scaler = canvasGo.AddComponent<CanvasScaler>();
+            var scaler = canvasGo.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920f, 1080f);
             scaler.matchWidthOrHeight = 0.5f;
             canvasGo.AddComponent<GraphicRaycaster>();
 
             // 1. HUD PANEL
-            CanvasGroup hudGroup = CreateFullScreenGroup("HUDPanel", canvasGo.transform);
+            var hudGroup = CreateFullScreenGroup("HUDPanel", canvasGo.transform);
 
-            // Top-Left Status Card (HP + Dash)
-            RectTransform hpCard = CreatePanel("StatusCard_Left", hudGroup.transform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(28f, -24f), new Vector2(360f, 104f), roundedSprite, Palette.PanelSurface);
-            CreateImage("CardAccentTop", hpCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 3f), solidSprite, Palette.Accent, false);
-            CreateIcon("ShieldIcon", hpCard, new Vector2(0f, 0.5f), new Vector2(16f, 0f), new Vector2(44f, 44f), shieldSprite, Palette.HealthGreen);
+            // AN/PVS-31 Tactical Night-Vision Goggles Overlay (toggled by [N], non-blocking)
+            var nvgOverlayGroup = CreateFullScreenGroup("NvgOverlayGroup", hudGroup.transform);
+            nvgOverlayGroup.alpha = 0f;
+            nvgOverlayGroup.blocksRaycasts = false;
+            nvgOverlayGroup.interactable = false;
+            CreateImage("NvgPhosphorTint", nvgOverlayGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.WithAlpha(Palette.NvgPhosphor, 0.12f), false);
+            CreateImage("NvgVignetteMask", nvgOverlayGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, damageVignetteSprite, Palette.WithAlpha(Palette.Shadow, 0.42f), false);
+            var nvgStamp = CreateStyledText("NvgHudStamp", nvgOverlayGroup.transform, "AN/PVS-31 NVG // IR GAIN HIGH", 11f, FontStyles.Bold, 3.0f, Palette.WithAlpha(Palette.NvgPhosphor, 0.85f), TextAlignmentOptions.Center);
+            SetAnchoredRect(nvgStamp.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -6f), new Vector2(340f, 16f));
 
-            TextMeshProUGUI hpLabel = CreateStyledText("HPLabel", hpCard, "OPERATOR HP", 13f, FontStyles.Bold, 3.5f, Palette.MutedText, TextAlignmentOptions.TopLeft);
-            SetAnchoredRect(hpLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(74f, -14f), new Vector2(140f, 22f));
+            // Fullscreen CoD Crimson Damage Vignette (Non-blocking background overlay)
+            var damageVignetteImg = CreateImage("DamageVignette", hudGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, damageVignetteSprite, Palette.WithAlpha(Palette.DamageBloodRed, 0f), false);
 
-            TextMeshProUGUI hpValueText = CreateStyledText("HPValueText", hpCard, "100 / 100", 16f, FontStyles.Bold, 2f, Palette.CharacterSecondary, TextAlignmentOptions.TopRight);
-            SetAnchoredRect(hpValueText.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-16f, -13f), new Vector2(130f, 24f));
+            // Top-Left CoD Tactical Radar Minimap
+            var radarBox = CreatePanel("TacticalRadarBox", hudGroup.transform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -20f), new Vector2(182f, 182f), roundedSprite, Palette.HudDarkGlass);
+            radarBox.GetComponent<Image>().raycastTarget = false;
+            CreateImage("RadarAccentTop", radarBox, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-18f, 3f), solidSprite, Palette.SquadBlue, false);
 
-            Image hpBg = CreateImage("HPBarBg", hpCard, new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), Vector2.zero, new Vector2(0f, 18f), roundedSprite, TrimBarBg(), false);
-            SetHorizontalBarRect(hpBg.rectTransform, 74f, 16f, 4f, 18f);
+            var radarUavTxt = CreateStyledText("RadarUavStatusText", radarBox, "TAC-RADAR // HAJIN DMZ", 10f, FontStyles.Bold, 1.8f, Palette.MutedText, TextAlignmentOptions.Center);
+            SetAnchoredRect(radarUavTxt.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -15f), new Vector2(168f, 18f));
 
-            Image hpFill = CreateFilledBar("HPBarFill", hpBg.transform, roundedSprite, Palette.HealthGreen);
+            var radarFieldRt = CreatePanel("RadarField", radarBox, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -12f), new Vector2(142f, 142f), roundedSprite, Palette.WithAlpha(Palette.Shadow, 0.72f));
+            radarFieldRt.GetComponent<Image>().raycastTarget = false;
+            CreateImage("RadarGridH", radarFieldRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(138f, 1f), solidSprite, Palette.WithAlpha(Palette.CharacterSecondary, 0.14f), false);
+            CreateImage("RadarGridV", radarFieldRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1f, 138f), solidSprite, Palette.WithAlpha(Palette.CharacterSecondary, 0.14f), false);
 
-            TextMeshProUGUI dashLabel = CreateStyledText("DashLabel", hpCard, "SPRINT [SHIFT]", 11f, FontStyles.Bold, 2.5f, Palette.Accent, TextAlignmentOptions.BottomLeft);
-            SetAnchoredRect(dashLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(74f, 14f), new Vector2(150f, 18f));
+            var radarObjectiveDots = new Image[4];
+            for (var i = 0; i < radarObjectiveDots.Length; i++)
+            {
+                radarObjectiveDots[i] = CreateImage("RadarObjDot_" + i, radarFieldRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(12f, 12f), circleSprite, Palette.C4Amber, false);
+                radarObjectiveDots[i].gameObject.SetActive(false);
+            }
+            var radarEnemyDots = new Image[16];
+            for (var i = 0; i < radarEnemyDots.Length; i++)
+            {
+                radarEnemyDots[i] = CreateImage("RadarEnemyDot_" + i, radarFieldRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(8f, 8f), circleSprite, Palette.EnemySecondary, false);
+                radarEnemyDots[i].gameObject.SetActive(false);
+            }
+            var radarSquadDots = new Image[3];
+            for (var i = 0; i < radarSquadDots.Length; i++)
+            {
+                radarSquadDots[i] = CreateImage("RadarSquadDot_" + i, radarFieldRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(9f, 9f), circleSprite, Palette.SquadBlue, false);
+                radarSquadDots[i].gameObject.SetActive(false);
+            }
+            var playerChevronImg = CreateImage("RadarPlayerChevron", radarFieldRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(16f, 16f), chevronSprite, Palette.CharacterSecondary, false);
 
-            Image dashBg = CreateImage("DashBarBg", hpCard, new Vector2(0f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 7f), roundedSprite, TrimBarBg(), false);
-            SetHorizontalBarRect(dashBg.rectTransform, 225f, 16f, -31f, 7f);
-            Image dashFill = CreateFilledBar("DashBarFill", dashBg.transform, roundedSprite, Palette.Accent);
-
-            // Top-Left Credits Pill (below HP card)
-            RectTransform crPill = CreatePanel("CreditsPill_Left", hudGroup.transform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(28f, -136f), new Vector2(200f, 34f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.92f));
+            // Top-Left Credits Pill (placed cleanly beside Radar)
+            var crPill = CreatePanel("CreditsPill_Left", hudGroup.transform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(218f, -20f), new Vector2(184f, 34f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.92f));
             CreateImage("CreditsAccentLeft", crPill, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(5f, 0f), new Vector2(4f, 20f), solidSprite, Palette.CreditGold, false);
-            TextMeshProUGUI hudCreditsText = CreateStyledText("HUD_CreditsText", crPill, "200 CR", 14f, FontStyles.Bold, 2.5f, Palette.CreditGold, TextAlignmentOptions.MidlineLeft);
+            var hudCreditsText = CreateStyledText("HUD_CreditsText", crPill, "200 CR", 14f, FontStyles.Bold, 2.5f, Palette.CreditGold, TextAlignmentOptions.MidlineLeft);
             SetAnchoredRect(hudCreditsText.rectTransform, new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), new Vector2(10f, 0f), new Vector2(-24f, 28f));
 
-            // Top-Left Non-Blocking TAC-NET Radio Comms Box (below Credits pill)
-            RectTransform radioRt = CreatePanel("RadioCommsBox", hudGroup.transform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(28f, -182f), new Vector2(410f, 98f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.92f));
-            Image radioBgImg = radioRt.GetComponent<Image>();
+            // Top-Left Non-Blocking TAC-NET Radio Comms Box (cleanly below Radar)
+            var radioRt = CreatePanel("RadioCommsBox", hudGroup.transform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -214f), new Vector2(400f, 92f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.92f));
+            var radioBgImg = radioRt.GetComponent<Image>();
             if (radioBgImg != null) radioBgImg.raycastTarget = false;
-            CanvasGroup radioCg = radioRt.gameObject.AddComponent<CanvasGroup>();
+            var radioCg = radioRt.gameObject.AddComponent<CanvasGroup>();
             radioCg.alpha = 0f;
             radioCg.interactable = false;
             radioCg.blocksRaycasts = false;
-            Image radioStripe = CreateImage("RadioAccentStripe", radioRt, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(6f, 0f), new Vector2(4f, 70f), solidSprite, Palette.Accent, false);
-            TextMeshProUGUI radioCallsignTxt = CreateStyledText("RadioCallsignText", radioRt, "OVERWATCH // TAC-NET CH-04", 12.5f, FontStyles.Bold, 2.2f, Palette.Accent, TextAlignmentOptions.TopLeft);
-            SetAnchoredRect(radioCallsignTxt.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -10f), new Vector2(376f, 22f));
-            TextMeshProUGUI radioBodyTxt = CreateStyledText("RadioBodyText", radioRt, "", 13f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.TopLeft);
+            var radioStripe = CreateImage("RadioAccentStripe", radioRt, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(6f, 0f), new Vector2(4f, 68f), solidSprite, Palette.Accent, false);
+            var radioCallsignTxt = CreateStyledText("RadioCallsignText", radioRt, "OVERWATCH // TAC-NET CH-04", 12f, FontStyles.Bold, 2.0f, Palette.Accent, TextAlignmentOptions.TopLeft);
+            SetAnchoredRect(radioCallsignTxt.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -10f), new Vector2(368f, 20f));
+            var radioBodyTxt = CreateStyledText("RadioBodyText", radioRt, "", 12.5f, FontStyles.Normal, 0.7f, Palette.CharacterSecondary, TextAlignmentOptions.TopLeft);
             radioBodyTxt.textWrappingMode = TextWrappingModes.Normal;
-            SetAnchoredRect(radioBodyTxt.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -34f), new Vector2(376f, 56f));
+            SetAnchoredRect(radioBodyTxt.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -32f), new Vector2(368f, 54f));
 
-            // Top-Center Wave & Score Pill
-            RectTransform centerPill = CreatePanel("StatusPill_Center", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -24f), new Vector2(360f, 74f), roundedSprite, Palette.PanelSurface);
+            // Bottom-Left Combined Fireteam Bravo-6 Squad Roster, Orders & Operator Vitals Card
+            var sqCard = CreatePanel("StatusCard_Left", hudGroup.transform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(24f, 20f), new Vector2(420f, 232f), roundedSprite, Palette.HudDarkGlass);
+            CreateImage("CardAccentTop", sqCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 3f), solidSprite, Palette.SquadBlue, false);
+
+            string[] orderLabels = { "[Z] FOLLOW", "[X] HOLD", "[C] BREACH" };
+            var orderBtns = new Button[3];
+            var orderBgs = new Image[3];
+            for (var i = 0; i < 3; i++)
+            {
+                var ob = CreateButton("SquadOrderBtn_" + i, sqCard, orderLabels[i], new Vector2(0f, 1f), new Vector2(16f + i * 132f, -26f), new Vector2(124f, 26f), roundedSprite, i == 0 ? Palette.SquadBlue : Palette.SecondaryButtonBg, Palette.CharacterSecondary, 10.5f);
+                var ort = ob.GetComponent<RectTransform>();
+                ort.pivot = new Vector2(0f, 0.5f);
+                ort.anchoredPosition = new Vector2(16f + i * 132f, -26f);
+                orderBtns[i] = ob;
+                orderBgs[i] = ob.GetComponent<Image>();
+                var olbl = ob.GetComponentInChildren<TextMeshProUGUI>();
+                if (olbl != null) olbl.characterSpacing = 1.3f;
+            }
+
+            string[] defaultSqNames = { "CPT. PRICE", "GHOST", "SGT. GAZ" };
+            var sqNames = new TextMeshProUGUI[3];
+            var sqBars = new Image[3];
+            var sqStatuses = new TextMeshProUGUI[3];
+            for (var i = 0; i < 3; i++)
+            {
+                var rowY = -58f - i * 28f;
+                sqNames[i] = CreateStyledText("SquadName_" + i, sqCard, defaultSqNames[i], 11.5f, FontStyles.Bold, 1.8f, Palette.CharacterSecondary, TextAlignmentOptions.MidlineLeft);
+                SetAnchoredRect(sqNames[i].rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(16f, rowY), new Vector2(124f, 20f));
+
+                var sBarBg = CreateImage("SquadHpBg_" + i, sqCard, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(146f, rowY - 5f), new Vector2(178f, 10f), roundedSprite, TrimBarBg(), false);
+                sqBars[i] = CreateFilledBar("SquadHpFill_" + i, sBarBg.transform, roundedSprite, Palette.SquadBlue);
+
+                sqStatuses[i] = CreateStyledText("SquadStatus_" + i, sqCard, "100%", 11f, FontStyles.Bold, 1.4f, Palette.SquadBlue, TextAlignmentOptions.MidlineRight);
+                SetAnchoredRect(sqStatuses[i].rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-16f, rowY), new Vector2(72f, 20f));
+            }
+
+            CreateImage("SquadVitalsDivider", sqCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -138f), new Vector2(-32f, 1f), solidSprite, Palette.WithAlpha(Palette.CharacterSecondary, 0.16f), false);
+            CreateIcon("ShieldIcon", sqCard, new Vector2(0f, 0f), new Vector2(36f, 48f), new Vector2(38f, 38f), shieldSprite, Palette.HealthGreen);
+
+            var hpLabel = CreateStyledText("HPLabel", sqCard, "YOU // TF-141 ACTUAL", 11.5f, FontStyles.Bold, 2.5f, Palette.MutedText, TextAlignmentOptions.BottomLeft);
+            SetAnchoredRect(hpLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(72f, 64f), new Vector2(190f, 20f));
+
+            var hpValueText = CreateStyledText("HPValueText", sqCard, "100 / 100", 15f, FontStyles.Bold, 2f, Palette.CharacterSecondary, TextAlignmentOptions.BottomRight);
+            SetAnchoredRect(hpValueText.rectTransform, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-16f, 63f), new Vector2(130f, 22f));
+
+            var hpBg = CreateImage("HPBarBg", sqCard, new Vector2(0f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 15f), roundedSprite, TrimBarBg(), false);
+            hpBg.rectTransform.anchorMin = new Vector2(0f, 0f);
+            hpBg.rectTransform.anchorMax = new Vector2(1f, 0f);
+            hpBg.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            hpBg.rectTransform.offsetMin = new Vector2(72f, 41f);
+            hpBg.rectTransform.offsetMax = new Vector2(-16f, 56f);
+            var hpFill = CreateFilledBar("HPBarFill", hpBg.transform, roundedSprite, Palette.HealthGreen);
+
+            var dashLabel = CreateStyledText("DashLabel", sqCard, "TACTICAL SPRINT [SHIFT]", 10.5f, FontStyles.Bold, 2.0f, Palette.Accent, TextAlignmentOptions.BottomLeft);
+            SetAnchoredRect(dashLabel.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(72f, 14f), new Vector2(180f, 16f));
+
+            var dashBg = CreateImage("DashBarBg", sqCard, new Vector2(0f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 7f), roundedSprite, TrimBarBg(), false);
+            dashBg.rectTransform.anchorMin = new Vector2(0f, 0f);
+            dashBg.rectTransform.anchorMax = new Vector2(1f, 0f);
+            dashBg.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            dashBg.rectTransform.offsetMin = new Vector2(262f, 18f);
+            dashBg.rectTransform.offsetMax = new Vector2(-16f, 25f);
+            var dashFill = CreateFilledBar("DashBarFill", dashBg.transform, roundedSprite, Palette.Accent);
+
+            // Top-Center Mission Act, Hostile Status & Score Pill (Replaces arcade Wave counter)
+            var centerPill = CreatePanel("StatusPill_Center", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -20f), new Vector2(520f, 68f), roundedSprite, Palette.PanelSurface);
             CreateImage("PillAccent", centerPill, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 3f), solidSprite, Palette.Accent, false);
 
-            TextMeshProUGUI waveText = CreateStyledText("WaveText", centerPill, "WAVE 01", 22f, FontStyles.Bold, 3.5f, Palette.CharacterSecondary, TextAlignmentOptions.TopLeft);
-            SetAnchoredRect(waveText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(20f, -12f), new Vector2(150f, 28f));
+            var waveText = CreateStyledText("WaveText", centerPill, "ACT I: HAJIN DMZ INSERTION", 15f, FontStyles.Bold, 2.4f, Palette.CharacterSecondary, TextAlignmentOptions.TopLeft);
+            SetAnchoredRect(waveText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(20f, -11f), new Vector2(310f, 24f));
 
-            TextMeshProUGUI enemiesText = CreateStyledText("EnemiesText", centerPill, "8 HOSTILES", 13f, FontStyles.Bold, 2.5f, Palette.EnemySecondary, TextAlignmentOptions.BottomLeft);
-            SetAnchoredRect(enemiesText.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(20f, 12f), new Vector2(160f, 22f));
+            var enemiesText = CreateStyledText("EnemiesText", centerPill, "8 HOSTILES IN SECTOR", 12f, FontStyles.Bold, 2.2f, Palette.EnemySecondary, TextAlignmentOptions.BottomLeft);
+            SetAnchoredRect(enemiesText.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(20f, 11f), new Vector2(310f, 20f));
 
-            TextMeshProUGUI scoreText = CreateStyledText("ScoreText", centerPill, "0 PTS", 22f, FontStyles.Bold, 2.5f, Palette.Accent, TextAlignmentOptions.MidlineRight);
+            var scoreText = CreateStyledText("ScoreText", centerPill, "0 PTS", 22f, FontStyles.Bold, 2.5f, Palette.Accent, TextAlignmentOptions.MidlineRight);
             SetAnchoredRect(scoreText.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(-20f, 0f), new Vector2(165f, 44f));
 
             // Top-Center Objective Banner + Boss Bar below StatusPill_Center
-            RectTransform objPill = CreatePanel("ObjectivePill_Center", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -104f), new Vector2(460f, 30f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.97f));
-            CreateImage("ObjAccentLeft", objPill, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(6f, 0f), new Vector2(4f, 18f), solidSprite, Palette.Accent, false);
-            TextMeshProUGUI objectiveText = CreateStyledText("ObjectiveBannerText", objPill, "OBJ I // BREACH SOUTH CHECKPOINT", 11.5f, FontStyles.Bold, 2.4f, Palette.Accent, TextAlignmentOptions.Center);
+            var objPill = CreatePanel("ObjectivePill_Center", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -96f), new Vector2(520f, 32f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.97f));
+            CreateImage("ObjAccentLeft", objPill, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(6f, 0f), new Vector2(4f, 18f), solidSprite, Palette.C4Amber, false);
+            var objectiveText = CreateStyledText("ObjectiveBannerText", objPill, "OBJ I // BREACH HAJIN CHECKPOINT (0/8)", 12f, FontStyles.Bold, 2.2f, Palette.Accent, TextAlignmentOptions.Center);
             StretchRect(objectiveText.rectTransform);
 
             // Boss Encounter Health Bar (anchored cleanly beneath Objective Pill)
-            RectTransform bossRoot = CreatePanel("BossBarRoot", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -142f), new Vector2(540f, 56f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.94f));
+            var bossRoot = CreatePanel("BossBarRoot", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -136f), new Vector2(540f, 56f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.94f));
             CreateImage("BossBarAccent", bossRoot, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 3f), solidSprite, Palette.EnemySecondary, false);
 
-            TextMeshProUGUI bossNameText = CreateStyledText("BossNameText", bossRoot, "ARMORED IFV // IRONCLAD", 13f, FontStyles.Bold, 3.5f, Palette.EnemySecondary, TextAlignmentOptions.TopLeft);
+            var bossNameText = CreateStyledText("BossNameText", bossRoot, "KONNI IFV 'VIPER-01'", 13f, FontStyles.Bold, 3.5f, Palette.EnemySecondary, TextAlignmentOptions.TopLeft);
             SetAnchoredRect(bossNameText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -10f), new Vector2(300f, 20f));
 
-            TextMeshProUGUI bossHpText = CreateStyledText("BossHpText", bossRoot, "1200 / 1200", 13f, FontStyles.Bold, 2f, Palette.CharacterSecondary, TextAlignmentOptions.TopRight);
+            var bossHpText = CreateStyledText("BossHpText", bossRoot, "380 / 380", 13f, FontStyles.Bold, 2f, Palette.CharacterSecondary, TextAlignmentOptions.TopRight);
             SetAnchoredRect(bossHpText.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-18f, -10f), new Vector2(160f, 20f));
 
-            Image bossHpBg = CreateImage("BossHpBg", bossRoot, new Vector2(0f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 12f), roundedSprite, TrimBarBg(), false);
+            var bossHpBg = CreateImage("BossHpBg", bossRoot, new Vector2(0f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 12f), roundedSprite, TrimBarBg(), false);
             SetHorizontalBarRect(bossHpBg.rectTransform, 18f, 18f, -14f, 12f);
-            Image bossHpFill = CreateFilledBar("BossHpFill", bossHpBg.transform, roundedSprite, Palette.EnemySecondary);
+            var bossHpFill = CreateFilledBar("BossHpFill", bossHpBg.transform, roundedSprite, Palette.EnemySecondary);
             bossRoot.gameObject.SetActive(false);
 
-            // Top-Right Rank/XP & Pause Card
-            RectTransform rightCard = CreatePanel("StatusCard_Right", hudGroup.transform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-28f, -24f), new Vector2(340f, 88f), roundedSprite, Palette.PanelSurface);
+            // Top-Right Killstreak UAV / Mortar Charge & Pause Card
+            var rightCard = CreatePanel("StatusCard_Right", hudGroup.transform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-24f, -20f), new Vector2(340f, 82f), roundedSprite, Palette.PanelSurface);
             CreateImage("RightAccentTop", rightCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 3f), solidSprite, Palette.Accent, false);
 
-            TextMeshProUGUI levelText = CreateStyledText("LevelText", rightCard, "RANK 01", 20f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.TopLeft);
-            SetAnchoredRect(levelText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -14f), new Vector2(140f, 28f));
+            var levelText = CreateStyledText("LevelText", rightCard, "KILLSTREAK // 0 KILLS", 14.5f, FontStyles.Bold, 2.2f, Palette.Accent, TextAlignmentOptions.TopLeft);
+            SetAnchoredRect(levelText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -12f), new Vector2(246f, 24f));
 
-            Image xpBg = CreateImage("XPBarBg", rightCard, new Vector2(0f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 14f), roundedSprite, TrimBarBg(), false);
-            SetHorizontalBarRect(xpBg.rectTransform, 18f, 84f, -22f, 14f);
-            Image xpFill = CreateFilledBar("XPBarFill", xpBg.transform, roundedSprite, Palette.Accent);
+            var streakTxt = CreateStyledText("StreakText", rightCard, "STREAK 0 // UAV 3K", 11f, FontStyles.Bold, 1.8f, Palette.MutedText, TextAlignmentOptions.BottomLeft);
+            SetAnchoredRect(streakTxt.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(18f, 27f), new Vector2(246f, 18f));
+
+            var xpBg = CreateImage("XPBarBg", rightCard, new Vector2(0f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 10f), roundedSprite, TrimBarBg(), false);
+            xpBg.rectTransform.anchorMin = new Vector2(0f, 0f);
+            xpBg.rectTransform.anchorMax = new Vector2(1f, 0f);
+            xpBg.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            xpBg.rectTransform.offsetMin = new Vector2(18f, 11f);
+            xpBg.rectTransform.offsetMax = new Vector2(-84f, 21f);
+            var xpFill = CreateFilledBar("XPBarFill", xpBg.transform, roundedSprite, Palette.Accent);
             xpFill.fillAmount = 0f;
 
-            Button hudPauseBtn = CreateButton("HUD_PauseButton", rightCard, "| |", new Vector2(1f, 0.5f), new Vector2(-14f, 0f), new Vector2(56f, 52f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
+            var hudPauseBtn = CreateButton("HUD_PauseButton", rightCard, "| |", new Vector2(1f, 0.5f), new Vector2(-14f, 0f), new Vector2(56f, 52f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
+
+            // Top-Right Rolling CoD Killfeed (non-blocking text stack below StatusCard_Right)
+            var killFeedTxt = CreateStyledText("KillFeedText", hudGroup.transform, string.Empty, 12f, FontStyles.Bold, 1.3f, Palette.CharacterSecondary, TextAlignmentOptions.TopRight);
+            SetAnchoredRect(killFeedTxt.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-24f, -110f), new Vector2(360f, 70f));
+
+            // Bottom-Right Tactical Equipment, Ammo/Reload & NVG Card ([G] Frag, [F] Mortar, [R] Reload, [N] NVG)
+            var equipCard = CreatePanel("TacticalEquipCard", hudGroup.transform, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-24f, 20f), new Vector2(360f, 148f), roundedSprite, Palette.HudDarkGlass);
+            CreateImage("EquipAccentTop", equipCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 3f), solidSprite, Palette.Accent, false);
+            var equipHdr = CreateStyledText("EquipHeaderText", equipCard, "ORDNANCE // MAG & NVG", 10.5f, FontStyles.Bold, 2.0f, Palette.MutedText, TextAlignmentOptions.MidlineLeft);
+            SetAnchoredRect(equipHdr.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(16f, -11f), new Vector2(196f, 20f));
+
+            var nvgToggleBtn = CreateButton("NvgToggleButton", equipCard, "[N] NVG: OFF", new Vector2(1f, 1f), new Vector2(-16f, -9f), new Vector2(126f, 24f), roundedSprite, Palette.SecondaryButtonBg, Palette.MutedText, 10.5f);
+            var nvgStatusTxt = nvgToggleBtn.GetComponentInChildren<TextMeshProUGUI>();
+            if (nvgStatusTxt != null) nvgStatusTxt.characterSpacing = 1.4f;
+
+            var ammoHudTxt = CreateStyledText("AmmoHudText", equipCard, "30 / 30  [R]", 16.5f, FontStyles.Bold, 1.8f, Palette.CharacterSecondary, TextAlignmentOptions.MidlineLeft);
+            SetAnchoredRect(ammoHudTxt.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(16f, -44f), new Vector2(220f, 22f));
+
+            var reloadBg = CreateImage("ReloadBarBg", equipCard, new Vector2(0f, 1f), new Vector2(1f, 1f), Vector2.zero, new Vector2(0f, 7f), roundedSprite, TrimBarBg(), false);
+            reloadBg.rectTransform.offsetMin = new Vector2(16f, -72f);
+            reloadBg.rectTransform.offsetMax = new Vector2(-16f, -65f);
+            var reloadProgressFill = CreateFilledBar("ReloadProgressFill", reloadBg.transform, roundedSprite, Palette.Accent);
+
+            var fragBtn = CreateButton("FragOrdnanceBtn", equipCard, "[G] FRAG x3", new Vector2(0f, 0f), new Vector2(16f, 14f), new Vector2(158f, 50f), roundedSprite, Palette.SecondaryButtonBg, Palette.Accent, 12.5f);
+            fragBtn.GetComponent<RectTransform>().pivot = new Vector2(0f, 0f);
+            var fragCountTxt = fragBtn.GetComponentInChildren<TextMeshProUGUI>();
+            if (fragCountTxt != null) fragCountTxt.characterSpacing = 1.6f;
+
+            var strikeBtn = CreateButton("MortarStrikeBtn", equipCard, "[F] MORTAR (0/5)", new Vector2(1f, 0f), new Vector2(-16f, 14f), new Vector2(162f, 50f), roundedSprite, Palette.SecondaryButtonBg, Palette.MutedText, 12f);
+            strikeBtn.GetComponent<RectTransform>().pivot = new Vector2(1f, 0f);
+            var strikeStatusTxt = strikeBtn.GetComponentInChildren<TextMeshProUGUI>();
+            if (strikeStatusTxt != null) strikeStatusTxt.characterSpacing = 1.5f;
+
+            // Bottom-Center Context Action Prompt Pill ([E] C4 Breach / Sabotage / Buddy Revive)
+            var ctxPill = CreatePanel("ContextActionPill", hudGroup.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 90f), new Vector2(460f, 36f), roundedSprite, Palette.HudDarkGlass);
+            ctxPill.GetComponent<Image>().raycastTarget = false;
+            var ctxGroup = ctxPill.gameObject.AddComponent<CanvasGroup>();
+            ctxGroup.alpha = 0f;
+            ctxGroup.blocksRaycasts = false;
+            ctxGroup.interactable = false;
+            CreateImage("CtxAccentLeft", ctxPill, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(6f, 0f), new Vector2(4f, 20f), solidSprite, Palette.C4Amber, false);
+            var ctxText = CreateStyledText("ContextPromptText", ctxPill, "[E] PLANT C4 ON BLAST GATE ALPHA", 12.5f, FontStyles.Bold, 2.0f, Palette.C4Amber, TextAlignmentOptions.Center);
+            StretchRect(ctxText.rectTransform);
 
             // Bottom-Center 6-Weapon Loadout Bar
-            RectTransform weaponBar = CreatePanel("WeaponLoadoutBar", hudGroup.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 22f), new Vector2(976f, 64f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.90f));
+            var weaponBar = CreatePanel("WeaponLoadoutBar", hudGroup.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 20f), new Vector2(920f, 60f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.90f));
             CreateImage("WeaponBarAccent", weaponBar, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0f, 1f), new Vector2(-28f, 2f), solidSprite, Palette.Accent, false);
 
-            Button[] wpnBtns = new Button[SaveManager.WeaponCount];
-            Image[] wpnBgs = new Image[SaveManager.WeaponCount];
-            TextMeshProUGUI[] wpnLbls = new TextMeshProUGUI[SaveManager.WeaponCount];
+            var wpnBtns = new Button[SaveManager.WeaponCount];
+            var wpnBgs = new Image[SaveManager.WeaponCount];
+            var wpnLbls = new TextMeshProUGUI[SaveManager.WeaponCount];
             string[] wpnSlotDefault = { "[1] M4A1 CARBINE", "[2] M870 SHOTGUN", "[3] MK14 SNIPER", "[4] RPG-7", "[5] AN-94 ABAKAN", "[6] VECTOR .45 SMG" };
-            for (int i = 0; i < SaveManager.WeaponCount; i++)
+            for (var i = 0; i < SaveManager.WeaponCount; i++)
             {
-                float slotX = -395f + i * 158f;
-                Button b = CreateButton("WeaponSlot_" + i, weaponBar, wpnSlotDefault[i], new Vector2(0.5f, 0.5f), new Vector2(slotX, 0f), new Vector2(150f, 44f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 11.2f);
+                var slotX = -375f + i * 150f;
+                var b = CreateButton("WeaponSlot_" + i, weaponBar, wpnSlotDefault[i], new Vector2(0.5f, 0.5f), new Vector2(slotX, 0f), new Vector2(142f, 42f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 10.6f);
                 wpnBtns[i] = b;
                 wpnBgs[i] = b.GetComponent<Image>();
                 wpnLbls[i] = b.GetComponentInChildren<TextMeshProUGUI>();
-                if (wpnLbls[i] != null) wpnLbls[i].characterSpacing = 1.6f;
+                if (wpnLbls[i] != null) wpnLbls[i].characterSpacing = 1.3f;
             }
 
             // Mobile / Touch Controls (Shown strictly on mobile/handheld devices, hidden on PC)
-            GameObject touchRoot = new GameObject("MobileTouchControls");
+            var touchRoot = new GameObject("MobileTouchControls");
             touchRoot.transform.SetParent(hudGroup.transform, false);
-            RectTransform touchRt = touchRoot.AddComponent<RectTransform>();
+            var touchRt = touchRoot.AddComponent<RectTransform>();
             StretchRect(touchRt);
 
-            RectTransform moveBgRt = CreatePanel("MoveStickBg", touchRt, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(138f, 138f), new Vector2(168f, 168f), circleSprite, Palette.WithAlpha(Palette.PanelSurface, 0.44f));
+            var moveBgRt = CreatePanel("MoveStickBg", touchRt, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(138f, 138f), new Vector2(168f, 168f), circleSprite, Palette.WithAlpha(Palette.PanelSurface, 0.44f));
             moveBgRt.pivot = new Vector2(0.5f, 0.5f);
             moveBgRt.anchoredPosition = new Vector2(138f, 138f);
-            Image moveHandleImg = CreateImage("MoveStickHandle", moveBgRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(66f, 66f), circleSprite, Palette.WithAlpha(Palette.CharacterSecondary, 0.65f), false);
-            VirtualJoystick leftStick = moveBgRt.gameObject.AddComponent<VirtualJoystick>();
-            leftStick.BindRects(moveBgRt, moveHandleImg.rectTransform, 52f);
+            var moveHandleImg = CreateImage("MoveStickHandle", moveBgRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(66f, 66f), circleSprite, Palette.WithAlpha(Palette.CharacterSecondary, 0.65f), false);
+            var leftStick = moveBgRt.gameObject.AddComponent<VirtualJoystick>();
+            leftStick.BindRects(moveBgRt, moveHandleImg.rectTransform);
 
-            RectTransform aimBgRt = CreatePanel("AimStickBg", touchRt, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-138f, 138f), new Vector2(168f, 168f), circleSprite, Palette.WithAlpha(Palette.PanelSurface, 0.44f));
+            var aimBgRt = CreatePanel("AimStickBg", touchRt, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-138f, 138f), new Vector2(168f, 168f), circleSprite, Palette.WithAlpha(Palette.PanelSurface, 0.44f));
             aimBgRt.pivot = new Vector2(0.5f, 0.5f);
             aimBgRt.anchoredPosition = new Vector2(-138f, 138f);
-            Image aimHandleImg = CreateImage("AimStickHandle", aimBgRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(66f, 66f), circleSprite, Palette.WithAlpha(Palette.Accent, 0.78f), false);
-            VirtualJoystick rightStick = aimBgRt.gameObject.AddComponent<VirtualJoystick>();
-            rightStick.BindRects(aimBgRt, aimHandleImg.rectTransform, 52f);
+            var aimHandleImg = CreateImage("AimStickHandle", aimBgRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(66f, 66f), circleSprite, Palette.WithAlpha(Palette.Accent, 0.78f), false);
+            var rightStick = aimBgRt.gameObject.AddComponent<VirtualJoystick>();
+            rightStick.BindRects(aimBgRt, aimHandleImg.rectTransform);
 
-            Button touchDashBtn = CreateButton("TouchDashButton", touchRt, "SPRINT", new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(92f, 92f), circleSprite, Palette.WithAlpha(Palette.Accent, 0.30f), Palette.CharacterSecondary, 15f);
-            RectTransform dashBtnRt = touchDashBtn.GetComponent<RectTransform>();
+            var touchDashBtn = CreateButton("TouchDashButton", touchRt, "SPRINT", new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(92f, 92f), circleSprite, Palette.WithAlpha(Palette.Accent, 0.30f), Palette.CharacterSecondary, 15f);
+            var dashBtnRt = touchDashBtn.GetComponent<RectTransform>();
             dashBtnRt.anchorMin = dashBtnRt.anchorMax = new Vector2(1f, 0f);
             dashBtnRt.pivot = new Vector2(0.5f, 0.5f);
             dashBtnRt.anchoredPosition = new Vector2(-288f, 114f);
 
             // Transient Milestone Banner
-            GameObject bannerGo = new GameObject("MilestoneBanner");
+            var bannerGo = new GameObject("MilestoneBanner");
             bannerGo.transform.SetParent(hudGroup.transform, false);
-            RectTransform bannerRt = bannerGo.AddComponent<RectTransform>();
+            var bannerRt = bannerGo.AddComponent<RectTransform>();
             bannerRt.anchorMin = bannerRt.anchorMax = new Vector2(0.5f, 0.80f);
-            bannerRt.sizeDelta = new Vector2(460f, 54f);
-            CanvasGroup bannerCg = bannerGo.AddComponent<CanvasGroup>();
+            bannerRt.sizeDelta = new Vector2(580f, 54f);
+            var bannerCg = bannerGo.AddComponent<CanvasGroup>();
             bannerCg.alpha = 0f;
             bannerCg.blocksRaycasts = false;
-            Image bannerBg = bannerGo.AddComponent<Image>();
+            var bannerBg = bannerGo.AddComponent<Image>();
             bannerBg.sprite = roundedSprite;
             bannerBg.color = Palette.WithAlpha(Palette.Shadow, 0.88f);
             bannerBg.raycastTarget = false;
             CreateImage("BannerStripe", bannerRt, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0f, 1f), new Vector2(-24f, 3f), solidSprite, Palette.Accent, false);
-            TextMeshProUGUI milestoneTxt = CreateStyledText("MilestoneText", bannerRt, "RANK UP // SUPPLY DROP", 22f, FontStyles.Bold, 4f, Palette.Accent, TextAlignmentOptions.Center);
+            var milestoneTxt = CreateStyledText("MilestoneText", bannerRt, "KILLSTREAK // ONLINE", 18.5f, FontStyles.Bold, 3.2f, Palette.Accent, TextAlignmentOptions.Center);
             StretchRect(milestoneTxt.rectTransform);
 
-            // Reticle Crosshair
-            Image crosshairImg = CreateImage("Crosshair", hudGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(36f, 36f), crosshairSprite, Palette.WithAlpha(Palette.Accent, 0.9f), false);
+            // Reticle Crosshair & Center CoD Hitmarker (4 diagonal ticks)
+            var crosshairImg = CreateImage("Crosshair", hudGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(36f, 36f), crosshairSprite, Palette.WithAlpha(Palette.Accent, 0.9f), false);
+
+            var hitmarkerGo = new GameObject("HitmarkerGroup");
+            hitmarkerGo.transform.SetParent(crosshairImg.transform, false);
+            var hmRt = hitmarkerGo.AddComponent<RectTransform>();
+            hmRt.anchorMin = hmRt.anchorMax = new Vector2(0.5f, 0.5f);
+            hmRt.anchoredPosition = Vector2.zero;
+            hmRt.sizeDelta = new Vector2(34f, 34f);
+            var hitmarkerGroup = hitmarkerGo.AddComponent<CanvasGroup>();
+            hitmarkerGroup.alpha = 0f;
+            hitmarkerGroup.blocksRaycasts = false;
+            hitmarkerGroup.interactable = false;
+
+            var hmTicks = new Image[4];
+            Vector2[] tickPos = { new Vector2(-8f, 8f), new Vector2(8f, 8f), new Vector2(-8f, -8f), new Vector2(8f, -8f) };
+            float[] tickAngles = { -45f, 45f, 45f, -45f };
+            for (var i = 0; i < 4; i++)
+            {
+                hmTicks[i] = CreateImage("HmTick_" + i, hmRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), tickPos[i], new Vector2(11f, 2.6f), solidSprite, Palette.HitmarkerWhite, false);
+                hmTicks[i].rectTransform.localRotation = Quaternion.Euler(0f, 0f, tickAngles[i]);
+            }
 
             // 2. TITLE PANEL
-            CanvasGroup titleGroup = CreateFullScreenGroup("TitlePanel", canvasGo.transform);
+            var titleGroup = CreateFullScreenGroup("TitlePanel", canvasGo.transform);
             CreateImage("TitleScrim", titleGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.WithAlpha(Palette.Shadow, 0.36f), true);
 
-            RectTransform titleCard = CreatePanel("TitleCard", titleGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(760f, 470f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.93f));
+            var titleCard = CreatePanel("TitleCard", titleGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(760f, 470f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.93f));
             CreateImage("TitleAccentTop", titleCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 5f), solidSprite, Palette.Accent, false);
 
-            TextMeshProUGUI gameTitle = CreateStyledText("GameTitleText", titleCard, "TASK FORCE // ZERO", 46f, FontStyles.Bold, 6f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
+            var gameTitle = CreateStyledText("GameTitleText", titleCard, "TASK FORCE // 141", 46f, FontStyles.Bold, 6f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
             SetAnchoredRect(gameTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -58f), new Vector2(680f, 70f));
 
-            TextMeshProUGUI subtitle = CreateStyledText("SubtitleText", titleCard, "OPERATION IRON HARVEST // SECTOR ECHO-7", 15.5f, FontStyles.Bold, 4f, Palette.Accent, TextAlignmentOptions.Center);
+            var subtitle = CreateStyledText("SubtitleText", titleCard, "OPERATION NIGHTFALL // HAJIN DMZ", 15.5f, FontStyles.Bold, 4f, Palette.Accent, TextAlignmentOptions.Center);
             SetAnchoredRect(subtitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -114f), new Vector2(660f, 28f));
 
-            TextMeshProUGUI titleBrief = CreateStyledText("TitleBriefText", titleCard, "Break Kronos PMC's blockade, flank PKM gunners, and destroy Col. Volkov's Wave 9 Ironclad IFV to clear Evac-6.", 13.5f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
+            var titleBrief = CreateStyledText("TitleBriefText", titleCard, "Lead TF-141 (Capt. Price, Ghost, Gaz & Pvt. Park) into Hajin DMZ: breach Border Gate Alpha, sabotage Konni fuel & SAM radar, and eliminate Komander Volkov.", 13.5f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
             titleBrief.textWrappingMode = TextWrappingModes.Normal;
             SetAnchoredRect(titleBrief.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -152f), new Vector2(700f, 46f));
 
-            TextMeshProUGUI titleBest = CreateStyledText("TitleHighScoreText", titleCard, "HIGH SCORE // 0", 16f, FontStyles.Bold, 3f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
+            var titleBest = CreateStyledText("TitleHighScoreText", titleCard, "HIGH SCORE // 0", 16f, FontStyles.Bold, 3f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
             SetAnchoredRect(titleBest.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 24f), new Vector2(460f, 28f));
 
-            TextMeshProUGUI titleCredits = CreateStyledText("TitleCreditsText", titleCard, "FUNDS // 200 CR", 16f, FontStyles.Bold, 3f, Palette.CreditGold, TextAlignmentOptions.Center);
+            var titleCredits = CreateStyledText("TitleCreditsText", titleCard, "FUNDS // 200 CR", 16f, FontStyles.Bold, 3f, Palette.CreditGold, TextAlignmentOptions.Center);
             SetAnchoredRect(titleCredits.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -6f), new Vector2(460f, 26f));
 
-            TextMeshProUGUI controlsHint = CreateStyledText("ControlsHintText", titleCard, "WASD MOVE  ·  MOUSE AIM / FIRE  ·  1-6 WEAPONS  ·  SHIFT SPRINT  ·  ESC PAUSE", 11.5f, FontStyles.Bold, 1.8f, Palette.MutedText, TextAlignmentOptions.Center);
+            var controlsHint = CreateStyledText("ControlsHintText", titleCard, "WASD MOVE · MOUSE FIRE · [R] RELOAD · [N] NVG · [G] FRAG · [F] MORTAR · [E] C4/REVIVE · [Z/X/C] ORDERS", 10.5f, FontStyles.Bold, 1.3f, Palette.MutedText, TextAlignmentOptions.Center);
             SetAnchoredRect(controlsHint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 30f), new Vector2(700f, 24f));
 
-            Button startBtn = CreateButton("StartMissionButton", titleCard, "DEPLOY", new Vector2(0.5f, 0.5f), new Vector2(-216f, -82f), new Vector2(204f, 58f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
-            Button armoryBtn = CreateButton("TitleArmoryButton", titleCard, "ARMORY", new Vector2(0.5f, 0.5f), new Vector2(0f, -82f), new Vector2(204f, 58f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
-            Button intelBtn = CreateButton("TitleIntelButton", titleCard, "INTEL DOSSIER", new Vector2(0.5f, 0.5f), new Vector2(216f, -82f), new Vector2(204f, 58f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 17f);
+            var startBtn = CreateButton("StartMissionButton", titleCard, "DEPLOY", new Vector2(0.5f, 0.5f), new Vector2(-216f, -82f), new Vector2(204f, 58f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
+            var armoryBtn = CreateButton("TitleArmoryButton", titleCard, "ARMORY", new Vector2(0.5f, 0.5f), new Vector2(0f, -82f), new Vector2(204f, 58f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
+            var intelBtn = CreateButton("TitleIntelButton", titleCard, "INTEL DOSSIER", new Vector2(0.5f, 0.5f), new Vector2(216f, -82f), new Vector2(204f, 58f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 17f);
 
             // 3. PAUSE PANEL
-            CanvasGroup pauseGroup = CreateFullScreenGroup("PausePanel", canvasGo.transform);
+            var pauseGroup = CreateFullScreenGroup("PausePanel", canvasGo.transform);
             CreateImage("PauseScrim", pauseGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.ScrimDark, true);
 
-            RectTransform pauseCard = CreatePanel("PauseCard", pauseGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(480f, 440f), roundedSprite, Palette.PanelSurface);
+            var pauseCard = CreatePanel("PauseCard", pauseGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(480f, 440f), roundedSprite, Palette.PanelSurface);
             CreateImage("PauseAccentTop", pauseCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 4f), solidSprite, Palette.Accent, false);
 
-            TextMeshProUGUI pauseHeader = CreateStyledText("PauseHeaderText", pauseCard, "PAUSED", 34f, FontStyles.Bold, 6f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
+            var pauseHeader = CreateStyledText("PauseHeaderText", pauseCard, "PAUSED", 34f, FontStyles.Bold, 6f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
             SetAnchoredRect(pauseHeader.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -44f), new Vector2(400f, 48f));
 
-            Slider musicSlider = CreateLabeledSlider(pauseCard, "Music", "MUSIC", new Vector2(0f, 70f), roundedSprite, solidSprite, Palette.HealthGreen, out TextMeshProUGUI musicPct);
-            Slider sfxSlider = CreateLabeledSlider(pauseCard, "SFX", "SFX", new Vector2(0f, 14f), roundedSprite, solidSprite, Palette.Accent, out TextMeshProUGUI sfxPct);
+            var musicSlider = CreateLabeledSlider(pauseCard, "Music", "MUSIC", new Vector2(0f, 70f), roundedSprite, solidSprite, Palette.HealthGreen, out var musicPct);
+            var sfxSlider = CreateLabeledSlider(pauseCard, "SFX", "SFX", new Vector2(0f, 14f), roundedSprite, solidSprite, Palette.Accent, out var sfxPct);
 
-            Button resumeBtn = CreateButton("ResumeButton", pauseCard, "RESUME", new Vector2(0.5f, 0.5f), new Vector2(0f, -56f), new Vector2(260f, 52f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
-            Button pRestartBtn = CreateButton("PauseRestartButton", pauseCard, "REDEPLOY", new Vector2(0.5f, 0.5f), new Vector2(0f, -118f), new Vector2(260f, 46f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 17f);
-            Button pTitleBtn = CreateButton("PauseTitleButton", pauseCard, "ABORT TO HQ", new Vector2(0.5f, 0.5f), new Vector2(0f, -174f), new Vector2(260f, 46f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 17f);
+            var resumeBtn = CreateButton("ResumeButton", pauseCard, "RESUME", new Vector2(0.5f, 0.5f), new Vector2(0f, -56f), new Vector2(260f, 52f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
+            var pRestartBtn = CreateButton("PauseRestartButton", pauseCard, "REDEPLOY", new Vector2(0.5f, 0.5f), new Vector2(0f, -118f), new Vector2(260f, 46f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 17f);
+            var pTitleBtn = CreateButton("PauseTitleButton", pauseCard, "ABORT TO HQ", new Vector2(0.5f, 0.5f), new Vector2(0f, -174f), new Vector2(260f, 46f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 17f);
 
             // 4. ENDED PANEL
-            CanvasGroup endedGroup = CreateFullScreenGroup("EndedPanel", canvasGo.transform);
+            var endedGroup = CreateFullScreenGroup("EndedPanel", canvasGo.transform);
             CreateImage("EndedScrim", endedGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.ScrimDark, true);
 
-            RectTransform endedCard = CreatePanel("EndedCard", endedGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(600f, 476f), roundedSprite, Palette.PanelSurface);
-            Image endedAccent = CreateImage("EndedAccentTop", endedCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 5f), solidSprite, Palette.EnemySecondary, false);
+            var endedCard = CreatePanel("EndedCard", endedGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(600f, 476f), roundedSprite, Palette.PanelSurface);
+            var endedAccent = CreateImage("EndedAccentTop", endedCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 5f), solidSprite, Palette.EnemySecondary, false);
 
-            TextMeshProUGUI endedTitle = CreateStyledText("EndedTitleText", endedCard, "K.I.A. // MISSION FAILED", 30f, FontStyles.Bold, 4.5f, Palette.EnemySecondary, TextAlignmentOptions.Center);
+            var endedTitle = CreateStyledText("EndedTitleText", endedCard, "K.I.A. // MISSION FAILED", 30f, FontStyles.Bold, 4.5f, Palette.EnemySecondary, TextAlignmentOptions.Center);
             SetAnchoredRect(endedTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -48f), new Vector2(540f, 50f));
 
-            TextMeshProUGUI endedScore = CreateStyledText("EndedScoreText", endedCard, "0 PTS", 44f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.Center);
+            var endedScore = CreateStyledText("EndedScoreText", endedCard, "0 PTS", 44f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.Center);
             SetAnchoredRect(endedScore.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 84f), new Vector2(460f, 56f));
 
-            TextMeshProUGUI endedBest = CreateStyledText("EndedBestText", endedCard, "BEST // 0", 18f, FontStyles.Bold, 3.5f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
+            var endedBest = CreateStyledText("EndedBestText", endedCard, "BEST // 0", 18f, FontStyles.Bold, 3.5f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
             SetAnchoredRect(endedBest.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 34f), new Vector2(460f, 28f));
 
-            TextMeshProUGUI endedStats = CreateStyledText("EndedStatsText", endedCard, "ELIMINATIONS: 0   |   WAVE REACHED: 1", 15f, FontStyles.Bold, 2f, Palette.MutedText, TextAlignmentOptions.Center);
+            var endedStats = CreateStyledText("EndedStatsText", endedCard, "ELIMINATIONS: 0   |   WAVE REACHED: 1", 15f, FontStyles.Bold, 2f, Palette.MutedText, TextAlignmentOptions.Center);
             SetAnchoredRect(endedStats.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -6f), new Vector2(500f, 24f));
 
-            TextMeshProUGUI endedCredits = CreateStyledText("EndedCreditsText", endedCard, "EARNED +0 CR   |   FUNDS: 200 CR", 15f, FontStyles.Bold, 2f, Palette.CreditGold, TextAlignmentOptions.Center);
+            var endedCredits = CreateStyledText("EndedCreditsText", endedCard, "EARNED +0 CR   |   FUNDS: 200 CR", 15f, FontStyles.Bold, 2f, Palette.CreditGold, TextAlignmentOptions.Center);
             SetAnchoredRect(endedCredits.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -40f), new Vector2(520f, 24f));
 
-            TextMeshProUGUI endedNarrative = CreateStyledText("EndedNarrativeText", endedCard, "", 13f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
+            var endedNarrative = CreateStyledText("EndedNarrativeText", endedCard, "", 13f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
             endedNarrative.textWrappingMode = TextWrappingModes.Normal;
             SetAnchoredRect(endedNarrative.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -90f), new Vector2(520f, 58f));
 
-            Button eReplayBtn = CreateButton("EndedReplayButton", endedCard, "REDEPLOY", new Vector2(0.5f, 0.5f), new Vector2(-115f, -168f), new Vector2(205f, 54f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
-            Button eTitleBtn = CreateButton("EndedTitleButton", endedCard, "HQ MENU", new Vector2(0.5f, 0.5f), new Vector2(115f, -168f), new Vector2(205f, 54f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
+            var eReplayBtn = CreateButton("EndedReplayButton", endedCard, "REDEPLOY", new Vector2(0.5f, 0.5f), new Vector2(-115f, -168f), new Vector2(205f, 54f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
+            var eTitleBtn = CreateButton("EndedTitleButton", endedCard, "HQ MENU", new Vector2(0.5f, 0.5f), new Vector2(115f, -168f), new Vector2(205f, 54f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
 
             // 5. ARMORY & LOADOUT MODAL PANEL
-            CanvasGroup armoryGroup = CreateFullScreenGroup("ArmoryPanel", canvasGo.transform);
+            var armoryGroup = CreateFullScreenGroup("ArmoryPanel", canvasGo.transform);
             CreateImage("ArmoryScrim", armoryGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.ScrimDark, true);
 
-            RectTransform armoryCard = CreatePanel("ArmoryCard", armoryGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(980f, 680f), roundedSprite, Palette.PanelSurface);
+            var armoryCard = CreatePanel("ArmoryCard", armoryGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(980f, 680f), roundedSprite, Palette.PanelSurface);
             CreateImage("ArmoryAccentTop", armoryCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-36f, 4f), solidSprite, Palette.Accent, false);
 
-            TextMeshProUGUI armoryHeader = CreateStyledText("ArmoryHeaderText", armoryCard, "TACTICAL ARMORY // FIELD LOADOUT", 23f, FontStyles.Bold, 3.5f, Palette.CharacterSecondary, TextAlignmentOptions.MidlineLeft);
+            var armoryHeader = CreateStyledText("ArmoryHeaderText", armoryCard, "TACTICAL ARMORY // FIELD LOADOUT", 23f, FontStyles.Bold, 3.5f, Palette.CharacterSecondary, TextAlignmentOptions.MidlineLeft);
             SetAnchoredRect(armoryHeader.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(36f, -44f), new Vector2(620f, 44f));
 
-            TextMeshProUGUI armoryCreditsText = CreateStyledText("ArmoryCreditsText", armoryCard, "200 CR", 22f, FontStyles.Bold, 3f, Palette.CreditGold, TextAlignmentOptions.MidlineRight);
+            var armoryCreditsText = CreateStyledText("ArmoryCreditsText", armoryCard, "200 CR", 22f, FontStyles.Bold, 3f, Palette.CreditGold, TextAlignmentOptions.MidlineRight);
             SetAnchoredRect(armoryCreditsText.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-36f, -44f), new Vector2(280f, 44f));
 
             // Left Column: 4 Permanent Field Training Upgrades
-            TextMeshProUGUI leftColHdr = CreateStyledText("UpgradesSectionTitle", armoryCard, "FIELD TRAINING & PERKS", 14f, FontStyles.Bold, 3.5f, Palette.Accent, TextAlignmentOptions.MidlineLeft);
+            var leftColHdr = CreateStyledText("UpgradesSectionTitle", armoryCard, "FIELD TRAINING & PERKS", 14f, FontStyles.Bold, 3.5f, Palette.Accent, TextAlignmentOptions.MidlineLeft);
             SetAnchoredRect(leftColHdr.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-235f, 212f), new Vector2(440f, 26f));
 
             string[] upgDescs = { "+20 MAX HP / RANK", "+10% BALLISTIC DMG / RANK", "+8% SPRINT SPD / RANK", "+15% FUNDS / RANK" };
-            Button[] upgBtns = new Button[4];
-            TextMeshProUGUI[] upgRankLbls = new TextMeshProUGUI[4];
-            TextMeshProUGUI[] upgCostLbls = new TextMeshProUGUI[4];
+            var upgBtns = new Button[4];
+            var upgRankLbls = new TextMeshProUGUI[4];
+            var upgCostLbls = new TextMeshProUGUI[4];
 
-            for (int i = 0; i < 4; i++)
+            for (var i = 0; i < 4; i++)
             {
-                float rowY = 152f - i * 94f;
-                RectTransform row = CreatePanel("UpgradeRow_" + i, armoryCard, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-235f, rowY), new Vector2(440f, 80f), roundedSprite, TrimBarBg());
+                var rowY = 152f - i * 94f;
+                var row = CreatePanel("UpgradeRow_" + i, armoryCard, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-235f, rowY), new Vector2(440f, 80f), roundedSprite, TrimBarBg());
                 CreateImage("UpgRowStripe", row, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(5f, 0f), new Vector2(4f, 50f), solidSprite, Palette.Accent, false);
 
-                TextMeshProUGUI uRank = CreateStyledText("UpgRank_" + i, row, "UPGRADE   [LV 0/5]", 13f, FontStyles.Bold, 1f, Palette.CharacterSecondary, TextAlignmentOptions.TopLeft);
+                var uRank = CreateStyledText("UpgRank_" + i, row, "UPGRADE   [LV 0/5]", 13f, FontStyles.Bold, 1f, Palette.CharacterSecondary, TextAlignmentOptions.TopLeft);
                 SetAnchoredRect(uRank.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -14f), new Vector2(280f, 22f));
                 upgRankLbls[i] = uRank;
 
-                TextMeshProUGUI uDesc = CreateStyledText("UpgSub_" + i, row, upgDescs[i], 12f, FontStyles.Bold, 1.5f, Palette.MutedText, TextAlignmentOptions.BottomLeft);
+                var uDesc = CreateStyledText("UpgSub_" + i, row, upgDescs[i], 12f, FontStyles.Bold, 1.5f, Palette.MutedText, TextAlignmentOptions.BottomLeft);
                 SetAnchoredRect(uDesc.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(18f, 14f), new Vector2(275f, 20f));
 
-                Button buyBtn = CreateButton("UpgradeBtn_" + i, row, "100 CR", new Vector2(1f, 0.5f), new Vector2(-12f, 0f), new Vector2(128f, 52f), roundedSprite, Palette.Accent, Palette.Shadow, 15f);
+                var buyBtn = CreateButton("UpgradeBtn_" + i, row, "100 CR", new Vector2(1f, 0.5f), new Vector2(-12f, 0f), new Vector2(128f, 52f), roundedSprite, Palette.Accent, Palette.Shadow, 15f);
                 upgBtns[i] = buyBtn;
                 upgCostLbls[i] = buyBtn.GetComponentInChildren<TextMeshProUGUI>();
             }
 
             // Right Column Top: 6 Unlockable Firearms (2x3 Tactical Grid)
-            TextMeshProUGUI rightWpnHdr = CreateStyledText("WeaponsSectionTitle", armoryCard, "WEAPONS ARSENAL", 14f, FontStyles.Bold, 3.5f, Palette.Accent, TextAlignmentOptions.MidlineLeft);
+            var rightWpnHdr = CreateStyledText("WeaponsSectionTitle", armoryCard, "WEAPONS ARSENAL", 14f, FontStyles.Bold, 3.5f, Palette.Accent, TextAlignmentOptions.MidlineLeft);
             SetAnchoredRect(rightWpnHdr.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(235f, 212f), new Vector2(440f, 26f));
 
-            Button[] shopWpnBtns = new Button[SaveManager.WeaponCount];
-            TextMeshProUGUI[] shopWpnLbls = new TextMeshProUGUI[SaveManager.WeaponCount];
-            for (int i = 0; i < SaveManager.WeaponCount; i++)
+            var shopWpnBtns = new Button[SaveManager.WeaponCount];
+            var shopWpnLbls = new TextMeshProUGUI[SaveManager.WeaponCount];
+            for (var i = 0; i < SaveManager.WeaponCount; i++)
             {
-                int col = i % 2;
-                int row = i / 2;
-                float wx = col == 0 ? 122f : 348f;
-                float wy = 162f - row * 64f;
-                Button wb = CreateButton("ShopWeapon_" + i, armoryCard, "WEAPON " + i, new Vector2(0.5f, 0.5f), new Vector2(wx, wy), new Vector2(214f, 54f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 11.5f);
+                var col = i % 2;
+                var row = i / 2;
+                var wx = col == 0 ? 122f : 348f;
+                var wy = 162f - row * 64f;
+                var wb = CreateButton("ShopWeapon_" + i, armoryCard, "WEAPON " + i, new Vector2(0.5f, 0.5f), new Vector2(wx, wy), new Vector2(214f, 54f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 11.5f);
                 shopWpnBtns[i] = wb;
                 shopWpnLbls[i] = wb.GetComponentInChildren<TextMeshProUGUI>();
                 if (shopWpnLbls[i] != null) shopWpnLbls[i].characterSpacing = 1.6f;
             }
 
             // Right Column Bottom: 3 Tactical Uniform Camo Patterns
-            TextMeshProUGUI rightSkinHdr = CreateStyledText("SkinsSectionTitle", armoryCard, "CAMO UNIFORMS", 14f, FontStyles.Bold, 3.5f, Palette.CreditGold, TextAlignmentOptions.MidlineLeft);
+            var rightSkinHdr = CreateStyledText("SkinsSectionTitle", armoryCard, "CAMO UNIFORMS", 14f, FontStyles.Bold, 3.5f, Palette.CreditGold, TextAlignmentOptions.MidlineLeft);
             SetAnchoredRect(rightSkinHdr.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(235f, -48f), new Vector2(440f, 26f));
 
-            Button[] shopSkinBtns = new Button[3];
-            TextMeshProUGUI[] shopSkinLbls = new TextMeshProUGUI[3];
+            var shopSkinBtns = new Button[3];
+            var shopSkinLbls = new TextMeshProUGUI[3];
             Color[] skinSwatches = { Palette.CharacterPrimary, Palette.SkinGoldPrimary, Palette.SkinCrimsonPrimary };
-            for (int i = 0; i < 3; i++)
+            for (var i = 0; i < 3; i++)
             {
-                float sx = 85f + i * 150f;
-                Button sb = CreateButton("ShopSkin_" + i, armoryCard, "CAMO " + i, new Vector2(0.5f, 0.5f), new Vector2(sx, -114f), new Vector2(138f, 70f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 12f);
+                var sx = 85f + i * 150f;
+                var sb = CreateButton("ShopSkin_" + i, armoryCard, "CAMO " + i, new Vector2(0.5f, 0.5f), new Vector2(sx, -114f), new Vector2(138f, 70f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 12f);
                 CreateImage("Swatch", sb.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -6f), new Vector2(96f, 5f), solidSprite, skinSwatches[i], false);
                 shopSkinBtns[i] = sb;
                 shopSkinLbls[i] = sb.GetComponentInChildren<TextMeshProUGUI>();
             }
 
-            Button armoryCloseBtn = CreateButton("ArmoryCloseButton", armoryCard, "BACK TO HQ", new Vector2(0.5f, 0.5f), new Vector2(0f, -292f), new Vector2(240f, 52f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
+            var armoryCloseBtn = CreateButton("ArmoryCloseButton", armoryCard, "BACK TO HQ", new Vector2(0.5f, 0.5f), new Vector2(0f, -292f), new Vector2(240f, 52f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
 
             // 6. FIELD PERK SUPPLY DROP MODAL PANEL
-            CanvasGroup draftGroup = CreateFullScreenGroup("LevelUpDraftPanel", canvasGo.transform);
+            var draftGroup = CreateFullScreenGroup("LevelUpDraftPanel", canvasGo.transform);
             CreateImage("DraftScrim", draftGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.ScrimDark, true);
 
-            RectTransform draftRoot = CreatePanel("DraftContainer", draftGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1040f, 470f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.96f));
+            var draftRoot = CreatePanel("DraftContainer", draftGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1040f, 470f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.96f));
             CreateImage("DraftAccentTop", draftRoot, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-36f, 5f), solidSprite, Palette.CardRareBorder, false);
 
-            TextMeshProUGUI draftTitle = CreateStyledText("DraftHeaderTitle", draftRoot, "FIELD PERK SUPPLY DROP", 30f, FontStyles.Bold, 5.5f, Palette.Accent, TextAlignmentOptions.Center);
+            var draftTitle = CreateStyledText("DraftHeaderTitle", draftRoot, "FIELD PERK SUPPLY DROP", 30f, FontStyles.Bold, 5.5f, Palette.Accent, TextAlignmentOptions.Center);
             SetAnchoredRect(draftTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -40f), new Vector2(800f, 42f));
 
-            TextMeshProUGUI draftSub = CreateStyledText("DraftHeaderSub", draftRoot, "SELECT ONE TACTICAL PERK TO EQUIP", 13.5f, FontStyles.Bold, 3f, Palette.MutedText, TextAlignmentOptions.Center);
+            var draftSub = CreateStyledText("DraftHeaderSub", draftRoot, "SELECT ONE TACTICAL PERK TO EQUIP", 13.5f, FontStyles.Bold, 3f, Palette.MutedText, TextAlignmentOptions.Center);
             SetAnchoredRect(draftSub.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -72f), new Vector2(800f, 24f));
 
-            Button[] drftBtns = new Button[3];
-            TextMeshProUGUI[] drftTitles = new TextMeshProUGUI[3];
-            TextMeshProUGUI[] drftRanks = new TextMeshProUGUI[3];
-            TextMeshProUGUI[] drftDescs = new TextMeshProUGUI[3];
+            var drftBtns = new Button[3];
+            var drftTitles = new TextMeshProUGUI[3];
+            var drftRanks = new TextMeshProUGUI[3];
+            var drftDescs = new TextMeshProUGUI[3];
 
-            for (int i = 0; i < 3; i++)
+            for (var i = 0; i < 3; i++)
             {
-                float cx = -325f + i * 325f;
-                Button cardBtn = CreateButton("DraftCard_" + i, draftRoot, string.Empty, new Vector2(0.5f, 0.5f), new Vector2(cx, -32f), new Vector2(296f, 290f), roundedSprite, TrimBarBg(), Palette.CharacterSecondary, 16f);
+                var cx = -325f + i * 325f;
+                var cardBtn = CreateButton("DraftCard_" + i, draftRoot, string.Empty, new Vector2(0.5f, 0.5f), new Vector2(cx, -32f), new Vector2(296f, 290f), roundedSprite, TrimBarBg(), Palette.CharacterSecondary, 16f);
                 CreateImage("CardTopStripe", cardBtn.transform, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -2f), new Vector2(-24f, 4f), solidSprite, Palette.CardRareBorder, false);
 
-                TextMeshProUGUI dTitle = CreateStyledText("DraftTitle_" + i, cardBtn.transform, "STOPPING POWER", 19f, FontStyles.Bold, 2.5f, Palette.Accent, TextAlignmentOptions.Center);
+                var dTitle = CreateStyledText("DraftTitle_" + i, cardBtn.transform, "STOPPING POWER", 19f, FontStyles.Bold, 2.5f, Palette.Accent, TextAlignmentOptions.Center);
                 SetAnchoredRect(dTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -44f), new Vector2(260f, 36f));
 
-                TextMeshProUGUI dRank = CreateStyledText("DraftRank_" + i, cardBtn.transform, "PERK TIER 1", 14f, FontStyles.Bold, 2.5f, Palette.HealthGreen, TextAlignmentOptions.Center);
+                var dRank = CreateStyledText("DraftRank_" + i, cardBtn.transform, "PERK TIER 1", 14f, FontStyles.Bold, 2.5f, Palette.HealthGreen, TextAlignmentOptions.Center);
                 SetAnchoredRect(dRank.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -84f), new Vector2(240f, 26f));
 
-                TextMeshProUGUI dDesc = CreateStyledText("DraftDesc_" + i, cardBtn.transform, "+18% Ballistic Damage across all firearms", 15f, FontStyles.Normal, 1.2f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
+                var dDesc = CreateStyledText("DraftDesc_" + i, cardBtn.transform, "+18% Ballistic Damage across all firearms", 15f, FontStyles.Normal, 1.2f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
                 dDesc.textWrappingMode = TextWrappingModes.Normal;
                 SetAnchoredRect(dDesc.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -10f), new Vector2(248f, 96f));
 
-                TextMeshProUGUI dInstall = CreateStyledText("DraftAction_" + i, cardBtn.transform, "[ EQUIP PERK ]", 14f, FontStyles.Bold, 3f, Palette.CreditGold, TextAlignmentOptions.Center);
+                var dInstall = CreateStyledText("DraftAction_" + i, cardBtn.transform, "[ EQUIP PERK ]", 14f, FontStyles.Bold, 3f, Palette.CreditGold, TextAlignmentOptions.Center);
                 SetAnchoredRect(dInstall.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 28f), new Vector2(200f, 28f));
 
                 drftBtns[i] = cardBtn;
@@ -1615,46 +2202,46 @@ namespace TopDownShooter.Editor
             }
 
             // 7. INTEL DOSSIER MODAL OVERLAY
-            CanvasGroup intelGroup = CreateFullScreenGroup("IntelPanel", canvasGo.transform);
+            var intelGroup = CreateFullScreenGroup("IntelPanel", canvasGo.transform);
             intelGroup.alpha = 0f;
             intelGroup.interactable = false;
             intelGroup.blocksRaycasts = false;
             CreateImage("IntelScrim", intelGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.ScrimDark, true);
 
-            RectTransform intelCard = CreatePanel("IntelCard", intelGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(880f, 590f), roundedSprite, Palette.PanelSurface);
+            var intelCard = CreatePanel("IntelCard", intelGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(880f, 590f), roundedSprite, Palette.PanelSurface);
             CreateImage("IntelAccentTop", intelCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-36f, 4f), solidSprite, Palette.Accent, false);
 
-            TextMeshProUGUI intelHeader = CreateStyledText("IntelHeaderText", intelCard, "TAC-NET INTEL DOSSIER // OPERATION IRON HARVEST", 21f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.MidlineLeft);
+            var intelHeader = CreateStyledText("IntelHeaderText", intelCard, "TAC-NET INTEL DOSSIER // OPERATION NIGHTFALL", 21f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.MidlineLeft);
             SetAnchoredRect(intelHeader.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(34f, -42f), new Vector2(810f, 40f));
 
-            TextMeshProUGUI intelBodyText = CreateStyledText("IntelBodyText", intelCard, StoryDirector.BuildIntelDossierText(0), 13.5f, FontStyles.Normal, 0.6f, Palette.CharacterSecondary, TextAlignmentOptions.TopLeft);
+            var intelBodyText = CreateStyledText("IntelBodyText", intelCard, StoryDirector.BuildIntelDossierText(0), 13.5f, FontStyles.Normal, 0.6f, Palette.CharacterSecondary, TextAlignmentOptions.TopLeft);
             intelBodyText.textWrappingMode = TextWrappingModes.Normal;
             SetAnchoredRect(intelBodyText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 6f), new Vector2(810f, 420f));
 
-            Button intelCloseBtn = CreateButton("IntelCloseButton", intelCard, "CLOSE DOSSIER", new Vector2(0.5f, 0f), new Vector2(0f, 40f), new Vector2(240f, 48f), roundedSprite, Palette.Accent, Palette.Shadow, 17f);
+            var intelCloseBtn = CreateButton("IntelCloseButton", intelCard, "CLOSE DOSSIER", new Vector2(0.5f, 0f), new Vector2(0f, 40f), new Vector2(240f, 48f), roundedSprite, Palette.Accent, Palette.Shadow, 17f);
 
             // 8. CALL-OF-DUTY WIDESCREEN CUTSCENE LETTERBOX OVERLAY
-            CanvasGroup cinemaGroup = CreateFullScreenGroup("CinemaOverlay", canvasGo.transform);
+            var cinemaGroup = CreateFullScreenGroup("CinemaOverlay", canvasGo.transform);
             cinemaGroup.alpha = 0f;
             cinemaGroup.interactable = false;
             cinemaGroup.blocksRaycasts = false;
 
             CreateImage("TopCinemaBar", cinemaGroup.transform, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, 0f), new Vector2(0f, 100f), solidSprite, Palette.Shadow, true);
-            RectTransform bottomCinemaBar = CreatePanel("BottomCinemaBar", cinemaGroup.transform, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0f, 0f), new Vector2(0f, 136f), solidSprite, Palette.Shadow);
+            var bottomCinemaBar = CreatePanel("BottomCinemaBar", cinemaGroup.transform, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0f, 0f), new Vector2(0f, 136f), solidSprite, Palette.Shadow);
 
-            TextMeshProUGUI cinemaStampTxt = CreateStyledText("CinemaMissionStampText", bottomCinemaBar, "OPERATION: IRON HARVEST\nSECTOR ECHO-7", 17f, FontStyles.Bold, 2.2f, Palette.HealthGreen, TextAlignmentOptions.BottomLeft);
+            var cinemaStampTxt = CreateStyledText("CinemaMissionStampText", bottomCinemaBar, "OPERATION: NIGHTFALL\nHAJIN DMZ // KOREA", 17f, FontStyles.Bold, 2.2f, Palette.HealthGreen, TextAlignmentOptions.BottomLeft);
             SetAnchoredRect(cinemaStampTxt.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(42f, 20f), new Vector2(540f, 96f));
 
-            TextMeshProUGUI cinemaSpeakerTxt = CreateStyledText("CinemaSpeakerText", bottomCinemaBar, "OVERWATCH // TAC-NET CH-04", 13f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.Center);
+            var cinemaSpeakerTxt = CreateStyledText("CinemaSpeakerText", bottomCinemaBar, "CPT. PRICE // TF-141 ACTUAL", 13f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.Center);
             SetAnchoredRect(cinemaSpeakerTxt.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(30f, -14f), new Vector2(680f, 24f));
 
-            TextMeshProUGUI cinemaDialogueTxt = CreateStyledText("CinemaDialogueText", bottomCinemaBar, "", 15.5f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.Top);
+            var cinemaDialogueTxt = CreateStyledText("CinemaDialogueText", bottomCinemaBar, "", 15.5f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.Top);
             cinemaDialogueTxt.textWrappingMode = TextWrappingModes.Normal;
             SetAnchoredRect(cinemaDialogueTxt.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(30f, -10f), new Vector2(720f, 68f));
 
-            Button skipCutsceneBtn = CreateButton("SkipCutsceneButton", bottomCinemaBar, "SKIP [SPACE] >>", new Vector2(1f, 0.5f), new Vector2(-36f, 0f), new Vector2(204f, 46f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 14f);
+            var skipCutsceneBtn = CreateButton("SkipCutsceneButton", bottomCinemaBar, "SKIP [SPACE] >>", new Vector2(1f, 0.5f), new Vector2(-36f, 0f), new Vector2(204f, 46f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 14f);
 
-            UIManager ui = systemsRoot.AddComponent<UIManager>();
+            var ui = systemsRoot.AddComponent<UIManager>();
             ui.BindCore(
                 titleGroup, hudGroup, pauseGroup, endedGroup, armoryGroup, draftGroup,
                 hpFill, xpFill, dashFill,
@@ -1685,30 +2272,62 @@ namespace TopDownShooter.Editor
                 cinemaGroup, cinemaStampTxt, cinemaSpeakerTxt, cinemaDialogueTxt,
                 skipCutsceneBtn, objectiveText);
 
+            ui.BindTacticalSquadWidgets(
+                damageVignetteImg,
+                ctxGroup, ctxText,
+                radarFieldRt, playerChevronImg.rectTransform,
+                radarSquadDots, radarEnemyDots, radarObjectiveDots, radarUavTxt,
+                sqNames, sqBars, sqStatuses,
+                orderBtns, orderBgs,
+                fragCountTxt, strikeStatusTxt, streakTxt,
+                fragBtn, strikeBtn);
+
+            ui.BindMw4HudWidgets(
+                hitmarkerGroup, hmTicks, killFeedTxt,
+                ammoHudTxt, reloadProgressFill,
+                nvgOverlayGroup, nvgStatusTxt, nvgToggleBtn);
+
+            OptimizeCanvasRaycastTargets(canvasGo);
+
             return ui;
+        }
+
+        private static void OptimizeCanvasRaycastTargets(GameObject canvasRoot)
+        {
+            var graphics = canvasRoot.GetComponentsInChildren<Graphic>(true);
+            foreach (var g in graphics)
+            {
+                if (g == null) continue;
+                var keepInteractive =
+                    g.GetComponent<Selectable>() != null ||
+                    g.GetComponent<VirtualJoystick>() != null ||
+                    g.name.EndsWith("Scrim") ||
+                    (g.GetComponentInParent<Slider>() != null && g.name is "Handle" or "Background");
+                g.raycastTarget = keepInteractive;
+            }
         }
 
         private static CanvasGroup CreateFullScreenGroup(string name, Transform parent)
         {
-            GameObject go = new GameObject(name);
+            var go = new GameObject(name);
             go.transform.SetParent(parent, false);
-            RectTransform rt = go.AddComponent<RectTransform>();
+            var rt = go.AddComponent<RectTransform>();
             StretchRect(rt);
             return go.AddComponent<CanvasGroup>();
         }
 
         private static RectTransform CreatePanel(string name, Transform parent, Vector2 anchorMin, Vector2 anchorMax, Vector2 pos, Vector2 size, Sprite sprite, Color bgColor)
         {
-            GameObject go = new GameObject(name);
+            var go = new GameObject(name);
             go.transform.SetParent(parent, false);
-            RectTransform rt = go.AddComponent<RectTransform>();
+            var rt = go.AddComponent<RectTransform>();
             rt.anchorMin = anchorMin;
             rt.anchorMax = anchorMax;
             rt.pivot = new Vector2((anchorMin.x + anchorMax.x) * 0.5f, (anchorMin.y + anchorMax.y) * 0.5f);
             rt.anchoredPosition = pos;
             rt.sizeDelta = size;
 
-            Image img = go.AddComponent<Image>();
+            var img = go.AddComponent<Image>();
             img.sprite = sprite;
             img.color = bgColor;
             img.raycastTarget = true;
@@ -1717,35 +2336,36 @@ namespace TopDownShooter.Editor
 
         private static Image CreateImage(string name, Transform parent, Vector2 anchorMin, Vector2 anchorMax, Vector2 pos, Vector2 size, Sprite sprite, Color color, bool raycastTarget)
         {
-            GameObject go = new GameObject(name);
+            var go = new GameObject(name);
             go.transform.SetParent(parent, false);
-            RectTransform rt = go.AddComponent<RectTransform>();
+            var rt = go.AddComponent<RectTransform>();
             rt.anchorMin = anchorMin;
             rt.anchorMax = anchorMax;
             rt.pivot = new Vector2((anchorMin.x + anchorMax.x) * 0.5f, (anchorMin.y + anchorMax.y) * 0.5f);
             rt.anchoredPosition = pos;
             rt.sizeDelta = size;
 
-            Image img = go.AddComponent<Image>();
+            var img = go.AddComponent<Image>();
             img.sprite = sprite;
             img.color = color;
             img.raycastTarget = raycastTarget;
             return img;
         }
 
-        private static Image CreateIcon(string name, Transform parent, Vector2 anchor, Vector2 pos, Vector2 size, Sprite sprite, Color color)
+        private static void CreateIcon(string name, Transform parent, Vector2 anchor, Vector2 pos, Vector2 size,
+            Sprite sprite, Color color)
         {
-            return CreateImage(name, parent, anchor, anchor, pos, size, sprite, color, false);
+            CreateImage(name, parent, anchor, anchor, pos, size, sprite, color, false);
         }
 
         private static Image CreateFilledBar(string name, Transform bgParent, Sprite fillSprite, Color fillColor)
         {
-            GameObject go = new GameObject(name);
+            var go = new GameObject(name);
             go.transform.SetParent(bgParent, false);
-            RectTransform rt = go.AddComponent<RectTransform>();
+            var rt = go.AddComponent<RectTransform>();
             StretchRect(rt);
 
-            Image img = go.AddComponent<Image>();
+            var img = go.AddComponent<Image>();
             img.sprite = fillSprite;
             img.color = fillColor;
             img.type = Image.Type.Filled;
@@ -1758,11 +2378,11 @@ namespace TopDownShooter.Editor
 
         private static TextMeshProUGUI CreateStyledText(string name, Transform parent, string text, float size, FontStyles style, float spacing, Color color, TextAlignmentOptions align)
         {
-            GameObject go = new GameObject(name);
+            var go = new GameObject(name);
             go.transform.SetParent(parent, false);
             go.AddComponent<RectTransform>();
 
-            TextMeshProUGUI tmp = go.AddComponent<TextMeshProUGUI>();
+            var tmp = go.AddComponent<TextMeshProUGUI>();
             tmp.text = text;
             tmp.fontSize = size;
             tmp.fontStyle = style;
@@ -1777,70 +2397,70 @@ namespace TopDownShooter.Editor
 
         private static Button CreateButton(string name, Transform parent, string label, Vector2 anchor, Vector2 pos, Vector2 size, Sprite sprite, Color bgColor, Color textColor, float fontSize)
         {
-            GameObject go = new GameObject(name);
+            var go = new GameObject(name);
             go.transform.SetParent(parent, false);
-            RectTransform rt = go.AddComponent<RectTransform>();
+            var rt = go.AddComponent<RectTransform>();
             rt.anchorMin = rt.anchorMax = anchor;
             rt.pivot = anchor;
             rt.anchoredPosition = pos;
             rt.sizeDelta = size;
 
-            Image img = go.AddComponent<Image>();
+            var img = go.AddComponent<Image>();
             img.sprite = sprite;
             img.color = bgColor;
 
-            Button btn = go.AddComponent<Button>();
-            ColorBlock cb = btn.colors;
+            var btn = go.AddComponent<Button>();
+            var cb = btn.colors;
             cb.normalColor = Palette.ButtonTintIdle;
             cb.highlightedColor = Palette.ButtonTintHover;
             cb.pressedColor = Palette.CharacterSecondary;
             cb.colorMultiplier = 1f;
             btn.colors = cb;
 
-            TextMeshProUGUI txt = CreateStyledText("Label", rt, label, fontSize, FontStyles.Bold, 3.5f, textColor, TextAlignmentOptions.Center);
+            var txt = CreateStyledText("Label", rt, label, fontSize, FontStyles.Bold, 3.5f, textColor, TextAlignmentOptions.Center);
             StretchRect(txt.rectTransform);
             return btn;
         }
 
         private static Slider CreateLabeledSlider(Transform parent, string key, string title, Vector2 pos, Sprite roundedSprite, Sprite solidSprite, Color fillColor, out TextMeshProUGUI pctOut)
         {
-            RectTransform row = CreatePanel("Row_" + key, parent, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), pos, new Vector2(380f, 40f), roundedSprite, Palette.Transparent);
+            var row = CreatePanel("Row_" + key, parent, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), pos, new Vector2(380f, 40f), roundedSprite, Palette.Transparent);
             row.GetComponent<Image>().raycastTarget = false;
 
-            TextMeshProUGUI lbl = CreateStyledText("Label_" + key, row, title, 15f, FontStyles.Bold, 3f, Palette.MutedText, TextAlignmentOptions.MidlineLeft);
+            var lbl = CreateStyledText("Label_" + key, row, title, 15f, FontStyles.Bold, 3f, Palette.MutedText, TextAlignmentOptions.MidlineLeft);
             SetAnchoredRect(lbl.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(0f, 0f), new Vector2(90f, 30f));
 
             pctOut = CreateStyledText("Pct_" + key, row, "80%", 15f, FontStyles.Bold, 2f, Palette.CharacterPrimary, TextAlignmentOptions.MidlineRight);
             SetAnchoredRect(pctOut.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(0f, 0f), new Vector2(60f, 30f));
 
-            GameObject sliderGo = new GameObject("Slider_" + key);
+            var sliderGo = new GameObject("Slider_" + key);
             sliderGo.transform.SetParent(row, false);
-            RectTransform sliderRt = sliderGo.AddComponent<RectTransform>();
+            var sliderRt = sliderGo.AddComponent<RectTransform>();
             sliderRt.anchorMin = sliderRt.anchorMax = new Vector2(0.5f, 0.5f);
             sliderRt.anchoredPosition = new Vector2(10f, 0f);
             sliderRt.sizeDelta = new Vector2(210f, 24f);
 
-            Image bg = CreateImage("Background", sliderRt, new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), Vector2.zero, new Vector2(0f, 10f), roundedSprite, TrimBarBg(), true);
+            var bg = CreateImage("Background", sliderRt, new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), Vector2.zero, new Vector2(0f, 10f), roundedSprite, TrimBarBg(), true);
             bg.rectTransform.sizeDelta = new Vector2(0f, 10f);
 
-            GameObject fillArea = new GameObject("Fill Area");
+            var fillArea = new GameObject("Fill Area");
             fillArea.transform.SetParent(sliderRt, false);
-            RectTransform fillAreaRt = fillArea.AddComponent<RectTransform>();
+            var fillAreaRt = fillArea.AddComponent<RectTransform>();
             fillAreaRt.anchorMin = new Vector2(0f, 0.5f);
             fillAreaRt.anchorMax = new Vector2(1f, 0.5f);
             fillAreaRt.offsetMin = new Vector2(0f, -5f);
             fillAreaRt.offsetMax = new Vector2(0f, 5f);
 
-            Image fillImg = CreateImage("Fill", fillAreaRt, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, roundedSprite, fillColor, false);
+            var fillImg = CreateImage("Fill", fillAreaRt, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, roundedSprite, fillColor, false);
 
-            GameObject handleArea = new GameObject("Handle Slide Area");
+            var handleArea = new GameObject("Handle Slide Area");
             handleArea.transform.SetParent(sliderRt, false);
-            RectTransform handleAreaRt = handleArea.AddComponent<RectTransform>();
+            var handleAreaRt = handleArea.AddComponent<RectTransform>();
             StretchRect(handleAreaRt);
 
-            Image handleImg = CreateImage("Handle", handleAreaRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(18f, 22f), solidSprite, Palette.CharacterPrimary, true);
+            var handleImg = CreateImage("Handle", handleAreaRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(18f, 22f), solidSprite, Palette.CharacterPrimary, true);
 
-            Slider slider = sliderGo.AddComponent<Slider>();
+            var slider = sliderGo.AddComponent<Slider>();
             slider.fillRect = fillImg.rectTransform;
             slider.handleRect = handleImg.rectTransform;
             slider.minValue = 0f;

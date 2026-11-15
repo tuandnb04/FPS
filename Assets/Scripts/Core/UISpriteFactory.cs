@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TopDownShooter.Core
+namespace Core
 {
     /// <summary>
     /// Procedurally generates crisp palette-compliant UI sprites, icons, particle shapes,
@@ -16,6 +16,8 @@ namespace TopDownShooter.Core
         private static Sprite _starIcon;
         private static Sprite _crosshairIcon;
         private static Sprite _speakerIcon;
+        private static Sprite _chevronIcon;
+        private static Sprite _damageVignette;
         private static Texture2D _softParticleTex;
         private static Texture2D _floorGridTex;
         private static Texture2D _telegraphRingTex;
@@ -23,15 +25,15 @@ namespace TopDownShooter.Core
         public static Sprite GetSolidRectSprite()
         {
             if (_solidRect != null) return _solidRect;
-            Texture2D tex = new Texture2D(16, 16, TextureFormat.RGBA32, false)
+            var tex = new Texture2D(16, 16, TextureFormat.RGBA32, false)
             {
                 name = "UI_SolidRectTex",
                 filterMode = FilterMode.Point,
                 wrapMode = TextureWrapMode.Clamp
             };
-            Color fill = new Color(1f, 1f, 1f, 1f);
-            Color[] pixels = new Color[16 * 16];
-            for (int i = 0; i < pixels.Length; i++) pixels[i] = fill;
+            var fill = new Color(1f, 1f, 1f, 1f);
+            var pixels = new Color[16 * 16];
+            for (var i = 0; i < pixels.Length; i++) pixels[i] = fill;
             tex.SetPixels(pixels);
             tex.Apply();
             _solidRect = Sprite.Create(tex, new Rect(0, 0, 16, 16), new Vector2(0.5f, 0.5f), 100f);
@@ -44,26 +46,26 @@ namespace TopDownShooter.Core
             if (_roundedRect != null) return _roundedRect;
             const int size = 64;
             const int radius = 8;
-            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
             {
                 name = "UI_RoundedRectTex",
                 filterMode = FilterMode.Bilinear,
                 wrapMode = TextureWrapMode.Clamp
             };
 
-            Color[] pixels = new Color[size * size];
-            for (int y = 0; y < size; y++)
+            var pixels = new Color[size * size];
+            for (var y = 0; y < size; y++)
             {
-                for (int x = 0; x < size; x++)
+                for (var x = 0; x < size; x++)
                 {
-                    float alpha = RoundedBoxAlpha(x, y, size, size, radius);
+                    var alpha = RoundedBoxAlpha(x, y, size, size, radius);
                     pixels[y * size + x] = new Color(1f, 1f, 1f, alpha);
                 }
             }
             tex.SetPixels(pixels);
             tex.Apply();
 
-            Vector4 border = new Vector4(radius + 2, radius + 2, radius + 2, radius + 2);
+            var border = new Vector4(radius + 2, radius + 2, radius + 2, radius + 2);
             _roundedRect = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect, border);
             _roundedRect.name = "UI_RoundedRectSprite";
             return _roundedRect;
@@ -73,22 +75,20 @@ namespace TopDownShooter.Core
         {
             if (_shieldIcon != null) return _shieldIcon;
             const int s = 64;
-            Texture2D tex = CreateBlankTexture("UI_ShieldTex", s);
-            for (int y = 0; y < s; y++)
+            var tex = CreateBlankTexture("UI_ShieldTex", s);
+            for (var y = 0; y < s; y++)
             {
-                for (int x = 0; x < s; x++)
+                for (var x = 0; x < s; x++)
                 {
-                    float nx = (x - s * 0.5f) / (s * 0.4f);
-                    float ny = (y - s * 0.5f) / (s * 0.42f);
-                    bool insideTop = ny >= 0f && Mathf.Abs(nx) <= 0.9f && ny <= 0.9f;
-                    bool insideBottom = ny < 0f && ny >= -0.95f && Mathf.Abs(nx) <= 0.9f * (1f - (-ny / 1.05f) * 0.85f);
-                    if (insideTop || insideBottom)
-                    {
-                        bool inner = (ny >= 0.05f && Mathf.Abs(nx) <= 0.62f && ny <= 0.65f) ||
-                                     (ny < 0.05f && ny >= -0.68f && Mathf.Abs(nx) <= 0.62f * (1f - (-ny / 0.85f) * 0.85f));
-                        float a = inner ? 0.45f : 1f;
-                        tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
-                    }
+                    var nx = (x - s * 0.5f) / (s * 0.4f);
+                    var ny = (y - s * 0.5f) / (s * 0.42f);
+                    var insideTop = ny >= 0f && Mathf.Abs(nx) <= 0.9f && ny <= 0.9f;
+                    var insideBottom = ny is < 0f and >= -0.95f && Mathf.Abs(nx) <= 0.9f * (1f - (-ny / 1.05f) * 0.85f);
+                    if (!insideTop && !insideBottom) continue;
+                    var inner = (ny >= 0.05f && Mathf.Abs(nx) <= 0.62f && ny <= 0.65f) ||
+                                (ny is < 0.05f and >= -0.68f && Mathf.Abs(nx) <= 0.62f * (1f - (-ny / 0.85f) * 0.85f));
+                    var a = inner ? 0.45f : 1f;
+                    tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
                 }
             }
             tex.Apply();
@@ -101,21 +101,19 @@ namespace TopDownShooter.Core
         {
             if (_starIcon != null) return _starIcon;
             const int s = 64;
-            Texture2D tex = CreateBlankTexture("UI_StarTex", s);
-            for (int y = 0; y < s; y++)
+            var tex = CreateBlankTexture("UI_StarTex", s);
+            for (var y = 0; y < s; y++)
             {
-                for (int x = 0; x < s; x++)
+                for (var x = 0; x < s; x++)
                 {
-                    float dx = (x - s * 0.5f) / (s * 0.45f);
-                    float dy = (y - s * 0.5f) / (s * 0.45f);
-                    float r = Mathf.Sqrt(dx * dx + dy * dy);
-                    float angle = Mathf.Atan2(dy, dx);
-                    float spikes = 0.55f + 0.42f * Mathf.Cos(4f * angle);
-                    if (r <= spikes)
-                    {
-                        float alpha = Mathf.Clamp01((spikes - r) * 8f);
-                        tex.SetPixel(x, y, new Color(1f, 1f, 1f, alpha));
-                    }
+                    var dx = (x - s * 0.5f) / (s * 0.45f);
+                    var dy = (y - s * 0.5f) / (s * 0.45f);
+                    var r = Mathf.Sqrt(dx * dx + dy * dy);
+                    var angle = Mathf.Atan2(dy, dx);
+                    var spikes = 0.55f + 0.42f * Mathf.Cos(4f * angle);
+                    if (!(r <= spikes)) continue;
+                    var alpha = Mathf.Clamp01((spikes - r) * 8f);
+                    tex.SetPixel(x, y, new Color(1f, 1f, 1f, alpha));
                 }
             }
             tex.Apply();
@@ -128,18 +126,18 @@ namespace TopDownShooter.Core
         {
             if (_crosshairIcon != null) return _crosshairIcon;
             const int s = 64;
-            Texture2D tex = CreateBlankTexture("UI_CrosshairTex", s);
-            for (int y = 0; y < s; y++)
+            var tex = CreateBlankTexture("UI_CrosshairTex", s);
+            for (var y = 0; y < s; y++)
             {
-                for (int x = 0; x < s; x++)
+                for (var x = 0; x < s; x++)
                 {
-                    float dx = x - s * 0.5f;
-                    float dy = y - s * 0.5f;
-                    float r = Mathf.Sqrt(dx * dx + dy * dy);
-                    bool ring = r >= 16f && r <= 20f;
-                    bool horiz = Mathf.Abs(dy) <= 2f && Mathf.Abs(dx) >= 8f && Mathf.Abs(dx) <= 27f;
-                    bool vert = Mathf.Abs(dx) <= 2f && Mathf.Abs(dy) >= 8f && Mathf.Abs(dy) <= 27f;
-                    bool center = r <= 3f;
+                    var dx = x - s * 0.5f;
+                    var dy = y - s * 0.5f;
+                    var r = Mathf.Sqrt(dx * dx + dy * dy);
+                    var ring = r is >= 16f and <= 20f;
+                    var horiz = Mathf.Abs(dy) <= 2f && Mathf.Abs(dx) >= 8f && Mathf.Abs(dx) <= 27f;
+                    var vert = Mathf.Abs(dx) <= 2f && Mathf.Abs(dy) >= 8f && Mathf.Abs(dy) <= 27f;
+                    var center = r <= 3f;
                     if (ring || horiz || vert || center)
                     {
                         tex.SetPixel(x, y, new Color(1f, 1f, 1f, 1f));
@@ -156,20 +154,18 @@ namespace TopDownShooter.Core
         {
             if (_ringSprite != null) return _ringSprite;
             const int s = 64;
-            Texture2D tex = CreateBlankTexture("UI_RingTex", s);
-            for (int y = 0; y < s; y++)
+            var tex = CreateBlankTexture("UI_RingTex", s);
+            for (var y = 0; y < s; y++)
             {
-                for (int x = 0; x < s; x++)
+                for (var x = 0; x < s; x++)
                 {
-                    float dx = x - s * 0.5f;
-                    float dy = y - s * 0.5f;
-                    float r = Mathf.Sqrt(dx * dx + dy * dy);
-                    if (r >= 22f && r <= 28f)
-                    {
-                        float edge = Mathf.Min(r - 22f, 28f - r);
-                        float a = Mathf.Clamp01(edge / 1.5f);
-                        tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
-                    }
+                    var dx = x - s * 0.5f;
+                    var dy = y - s * 0.5f;
+                    var r = Mathf.Sqrt(dx * dx + dy * dy);
+                    if (!(r >= 22f) || !(r <= 28f)) continue;
+                    var edge = Mathf.Min(r - 22f, 28f - r);
+                    var a = Mathf.Clamp01(edge / 1.5f);
+                    tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
                 }
             }
             tex.Apply();
@@ -182,21 +178,19 @@ namespace TopDownShooter.Core
         {
             if (_circleSprite != null) return _circleSprite;
             const int s = 64;
-            Texture2D tex = CreateBlankTexture("UI_CircleTex", s);
-            float center = (s - 1) * 0.5f;
-            float maxR = s * 0.48f;
-            for (int y = 0; y < s; y++)
+            var tex = CreateBlankTexture("UI_CircleTex", s);
+            const float center = (s - 1) * 0.5f;
+            const float maxR = s * 0.48f;
+            for (var y = 0; y < s; y++)
             {
-                for (int x = 0; x < s; x++)
+                for (var x = 0; x < s; x++)
                 {
-                    float dx = x - center;
-                    float dy = y - center;
-                    float r = Mathf.Sqrt(dx * dx + dy * dy);
-                    if (r <= maxR)
-                    {
-                        float a = Mathf.Clamp01((maxR - r) / 1.5f);
-                        tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
-                    }
+                    var dx = x - center;
+                    var dy = y - center;
+                    var r = Mathf.Sqrt(dx * dx + dy * dy);
+                    if (!(r <= maxR)) continue;
+                    var a = Mathf.Clamp01((maxR - r) / 1.5f);
+                    tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
                 }
             }
             tex.Apply();
@@ -205,32 +199,54 @@ namespace TopDownShooter.Core
             return _circleSprite;
         }
 
-        public static Sprite GetSpeakerIcon()
+        public static Sprite GetChevronIcon()
         {
-            if (_speakerIcon != null) return _speakerIcon;
-            const int s = 64;
-            Texture2D tex = CreateBlankTexture("UI_SpeakerTex", s);
-            for (int y = 0; y < s; y++)
+            if (_chevronIcon != null) return _chevronIcon;
+            const int s = 32;
+            var tex = CreateBlankTexture("UI_ChevronTex", s);
+            for (var y = 0; y < s; y++)
             {
-                for (int x = 0; x < s; x++)
+                for (var x = 0; x < s; x++)
                 {
-                    bool body = x >= 12 && x <= 24 && y >= 22 && y <= 42;
-                    bool cone = x > 24 && x <= 38 && Mathf.Abs(y - 32) <= 10 + (x - 24) * 0.85f;
-                    float dx = x - 36f;
-                    float dy = y - 32f;
-                    float r = Mathf.Sqrt(dx * dx + dy * dy);
-                    bool wave1 = x >= 40 && r >= 11f && r <= 14.5f;
-                    bool wave2 = x >= 44 && r >= 19f && r <= 22.5f;
-                    if (body || cone || wave1 || wave2)
+                    var nx = (x - (s - 1) * 0.5f) / (s * 0.38f);
+                    var ny = (y - (s - 1) * 0.5f) / (s * 0.42f);
+                    if (!(ny >= -0.75f) || !(ny <= 0.85f)) continue;
+                    var halfW = (0.85f - ny) / 1.6f * 0.92f;
+                    var notch = -0.35f - Mathf.Abs(nx) * 0.45f;
+                    if (Mathf.Abs(nx) <= halfW && ny >= notch)
                     {
                         tex.SetPixel(x, y, new Color(1f, 1f, 1f, 1f));
                     }
                 }
             }
             tex.Apply();
-            _speakerIcon = Sprite.Create(tex, new Rect(0, 0, s, s), new Vector2(0.5f, 0.5f), 100f);
-            _speakerIcon.name = "UI_SpeakerIcon";
-            return _speakerIcon;
+            _chevronIcon = Sprite.Create(tex, new Rect(0, 0, s, s), new Vector2(0.5f, 0.5f), 100f);
+            _chevronIcon.name = "UI_ChevronIcon";
+            return _chevronIcon;
+        }
+
+        public static Sprite GetDamageVignetteSprite()
+        {
+            if (_damageVignette != null) return _damageVignette;
+            const int s = 128;
+            var tex = CreateBlankTexture("UI_DamageVignetteTex", s);
+            const float center = (s - 1) * 0.5f;
+            for (var y = 0; y < s; y++)
+            {
+                for (var x = 0; x < s; x++)
+                {
+                    var nx = Mathf.Abs(x - center) / center;
+                    var ny = Mathf.Abs(y - center) / center;
+                    var edge = Mathf.Sqrt(nx * nx * 0.65f + ny * ny * 0.65f);
+                    var alpha = Mathf.Clamp01((edge - 0.52f) / 0.62f);
+                    alpha = alpha * alpha * 0.92f;
+                    tex.SetPixel(x, y, new Color(1f, 1f, 1f, alpha));
+                }
+            }
+            tex.Apply();
+            _damageVignette = Sprite.Create(tex, new Rect(0, 0, s, s), new Vector2(0.5f, 0.5f), 100f);
+            _damageVignette.name = "UI_DamageVignette";
+            return _damageVignette;
         }
 
         public static Texture2D GetSoftParticleTexture()
@@ -238,14 +254,14 @@ namespace TopDownShooter.Core
             if (_softParticleTex != null) return _softParticleTex;
             const int s = 64;
             _softParticleTex = CreateBlankTexture("VFX_SoftParticleTex", s);
-            for (int y = 0; y < s; y++)
+            for (var y = 0; y < s; y++)
             {
-                for (int x = 0; x < s; x++)
+                for (var x = 0; x < s; x++)
                 {
-                    float dx = (x - s * 0.5f) / (s * 0.48f);
-                    float dy = (y - s * 0.5f) / (s * 0.48f);
-                    float d = Mathf.Sqrt(dx * dx + dy * dy);
-                    float a = Mathf.Clamp01(1f - d);
+                    var dx = (x - s * 0.5f) / (s * 0.48f);
+                    var dy = (y - s * 0.5f) / (s * 0.48f);
+                    var d = Mathf.Sqrt(dx * dx + dy * dy);
+                    var a = Mathf.Clamp01(1f - d);
                     a = a * a;
                     _softParticleTex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
                 }
@@ -259,23 +275,23 @@ namespace TopDownShooter.Core
             if (_telegraphRingTex != null) return _telegraphRingTex;
             const int s = 128;
             _telegraphRingTex = CreateBlankTexture("VFX_TelegraphRingTex", s);
-            float center = (s - 1) * 0.5f;
-            float maxR = s * 0.485f;
+            const float center = (s - 1) * 0.5f;
+            const float maxR = s * 0.485f;
 
-            for (int y = 0; y < s; y++)
+            for (var y = 0; y < s; y++)
             {
-                for (int x = 0; x < s; x++)
+                for (var x = 0; x < s; x++)
                 {
-                    float dx = x - center;
-                    float dy = y - center;
-                    float nr = Mathf.Sqrt(dx * dx + dy * dy) / maxR;
+                    var dx = x - center;
+                    var dy = y - center;
+                    var nr = Mathf.Sqrt(dx * dx + dy * dy) / maxR;
                     if (nr > 1.0f) continue;
 
-                    float aaOuter = Mathf.Clamp01((1.0f - nr) * 32f);
-                    float outerRing = Mathf.Clamp01(1f - Mathf.Abs(nr - 0.92f) / 0.065f);
-                    float innerRing = Mathf.Clamp01(1f - Mathf.Abs(nr - 0.45f) / 0.03f);
-                    float fill = 0.14f + 0.08f * nr;
-                    float a = Mathf.Clamp01(Mathf.Max(fill, Mathf.Max(outerRing * 0.88f, innerRing * 0.36f))) * aaOuter;
+                    var aaOuter = Mathf.Clamp01((1.0f - nr) * 32f);
+                    var outerRing = Mathf.Clamp01(1f - Mathf.Abs(nr - 0.92f) / 0.065f);
+                    var innerRing = Mathf.Clamp01(1f - Mathf.Abs(nr - 0.45f) / 0.03f);
+                    var fill = 0.14f + 0.08f * nr;
+                    var a = Mathf.Clamp01(Mathf.Max(fill, Mathf.Max(outerRing * 0.88f, innerRing * 0.36f))) * aaOuter;
                     _telegraphRingTex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
                 }
             }
@@ -295,19 +311,19 @@ namespace TopDownShooter.Core
                 wrapMode = TextureWrapMode.Repeat
             };
 
-            Color baseTone = new Color(0.86f, 0.86f, 0.82f, 1f);
-            Color jointLine = new Color(0.62f, 0.63f, 0.59f, 1f);
-            Color subtleWear = new Color(0.79f, 0.79f, 0.75f, 1f);
+            var baseTone = new Color(0.86f, 0.86f, 0.82f, 1f);
+            var jointLine = new Color(0.62f, 0.63f, 0.59f, 1f);
+            var subtleWear = new Color(0.79f, 0.79f, 0.75f, 1f);
 
-            for (int y = 0; y < s; y++)
+            for (var y = 0; y < s; y++)
             {
-                for (int x = 0; x < s; x++)
+                for (var x = 0; x < s; x++)
                 {
-                    bool mainBorder = x < 2 || y < 2;
-                    bool quarterSeam = (x == 32 && y % 6 < 3) || (y == 32 && x % 6 < 3);
-                    uint hash = (uint)(x * 73856093 ^ y * 19349663);
-                    float grain = ((hash & 31u) / 31f - 0.5f) * 0.05f;
-                    Color c = mainBorder ? jointLine : (quarterSeam ? subtleWear : baseTone);
+                    var mainBorder = x < 2 || y < 2;
+                    var quarterSeam = (x == 32 && y % 6 < 3) || (y == 32 && x % 6 < 3);
+                    var hash = (uint)(x * 73856093 ^ y * 19349663);
+                    var grain = ((hash & 31u) / 31f - 0.5f) * 0.05f;
+                    var c = mainBorder ? jointLine : (quarterSeam ? subtleWear : baseTone);
                     c = new Color(
                         Mathf.Clamp01(c.r + grain),
                         Mathf.Clamp01(c.g + grain),
@@ -322,25 +338,25 @@ namespace TopDownShooter.Core
 
         private static Texture2D CreateBlankTexture(string name, int size)
         {
-            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
             {
                 name = name,
                 filterMode = FilterMode.Bilinear,
                 wrapMode = TextureWrapMode.Clamp
             };
-            Color[] clear = new Color[size * size];
-            for (int i = 0; i < clear.Length; i++) clear[i] = Palette.Transparent;
+            var clear = new Color[size * size];
+            for (var i = 0; i < clear.Length; i++) clear[i] = Palette.Transparent;
             tex.SetPixels(clear);
             return tex;
         }
 
         private static float RoundedBoxAlpha(int x, int y, int width, int height, int radius)
         {
-            float px = x + 0.5f;
-            float py = y + 0.5f;
-            float dx = Mathf.Max(0f, Mathf.Max(radius - px, px - (width - radius)));
-            float dy = Mathf.Max(0f, Mathf.Max(radius - py, py - (height - radius)));
-            float dist = Mathf.Sqrt(dx * dx + dy * dy);
+            var px = x + 0.5f;
+            var py = y + 0.5f;
+            var dx = Mathf.Max(0f, Mathf.Max(radius - px, px - (width - radius)));
+            var dy = Mathf.Max(0f, Mathf.Max(radius - py, py - (height - radius)));
+            var dist = Mathf.Sqrt(dx * dx + dy * dy);
             return Mathf.Clamp01((radius + 0.5f) - dist);
         }
     }

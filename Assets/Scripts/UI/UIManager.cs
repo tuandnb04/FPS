@@ -1,15 +1,16 @@
 using System.Collections;
 using System.Collections.Generic;
+using Audio;
+using Camera;
+using Character;
+using Core;
+using Enemies;
 using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
-using TopDownShooter.Audio;
-using TopDownShooter.CameraRig;
-using TopDownShooter.Character;
-using TopDownShooter.Core;
 
-namespace TopDownShooter.UI
+namespace UI
 {
     public enum GameState
     {
@@ -123,6 +124,33 @@ namespace TopDownShooter.UI
         [SerializeField] private Button titleIntelButton;
         [SerializeField] private Button intelCloseButton;
 
+        [Header("CoD Damage Vignette & Context Prompt")]
+        [SerializeField] private Image damageVignetteImage;
+        [SerializeField] private CanvasGroup contextPromptGroup;
+        [SerializeField] private TextMeshProUGUI contextPromptText;
+
+        [Header("Tactical Radar Minimap")]
+        [SerializeField] private RectTransform radarContainerRect;
+        [SerializeField] private RectTransform radarPlayerChevron;
+        [SerializeField] private Image[] radarSquadDots;
+        [SerializeField] private Image[] radarEnemyDots;
+        [SerializeField] private Image[] radarObjectiveDots;
+        [SerializeField] private TextMeshProUGUI radarUavStatusText;
+
+        [Header("Fireteam Bravo-6 Squad Roster & Orders")]
+        [SerializeField] private TextMeshProUGUI[] squadMemberNames;
+        [SerializeField] private Image[] squadMemberBars;
+        [SerializeField] private TextMeshProUGUI[] squadMemberStatusTexts;
+        [SerializeField] private Button[] squadOrderButtons;
+        [SerializeField] private Image[] squadOrderBgs;
+
+        [Header("Tactical Equipment & Killstreaks")]
+        [SerializeField] private TextMeshProUGUI fragCountText;
+        [SerializeField] private TextMeshProUGUI strikeStatusText;
+        [SerializeField] private TextMeshProUGUI streakText;
+        [SerializeField] private Button fragButton;
+        [SerializeField] private Button strikeButton;
+
         [Header("Cutscene Cinema Letterbox & Objective")]
         [SerializeField] private CanvasGroup cinemaOverlayGroup;
         [SerializeField] private TextMeshProUGUI cinemaStampText;
@@ -130,6 +158,16 @@ namespace TopDownShooter.UI
         [SerializeField] private TextMeshProUGUI cinemaDialogueText;
         [SerializeField] private Button cinemaSkipButton;
         [SerializeField] private TextMeshProUGUI objectiveBannerText;
+
+        [Header("Modern Warfare 4 Tactical Combat HUD")]
+        [SerializeField] private CanvasGroup hitmarkerGroup;
+        [SerializeField] private Image[] hitmarkerTicks;
+        [SerializeField] private TextMeshProUGUI killFeedText;
+        [SerializeField] private TextMeshProUGUI ammoHudText;
+        [SerializeField] private Image reloadProgressFill;
+        [SerializeField] private CanvasGroup nvgOverlayGroup;
+        [SerializeField] private TextMeshProUGUI nvgStatusText;
+        [SerializeField] private Button nvgToggleButton;
 
         [Header("Core Navigation Buttons")]
         [SerializeField] private Button startButton;
@@ -140,13 +178,24 @@ namespace TopDownShooter.UI
         [SerializeField] private Button endedReplayButton;
         [SerializeField] private Button endedTitleButton;
 
-        private Coroutine hpTween;
-        private Coroutine xpTween;
-        private Coroutine transitionTween;
-        private Coroutine milestoneRoutine;
-        private Coroutine radioRoutine;
-        private bool touchDashQueued;
-        private List<RogueliteSkillInfo> currentDraftOptions = new List<RogueliteSkillInfo>();
+        private Coroutine _hpTween;
+        private Coroutine _xpTween;
+        private Coroutine _transitionTween;
+        private Coroutine _milestoneRoutine;
+        private Coroutine _radioRoutine;
+        private bool _touchDashQueued;
+        private float _hitmarkerTimer;
+        private float _hitmarkerDuration = 0.12f;
+        private float _killFeedClearTimer;
+        private readonly string[] _killFeedLines = new string[3];
+        private int _killFeedCursor;
+        private List<RogueliteSkillInfo> _currentDraftOptions = new();
+
+        private int HitmarkerFlashCount { get; set; }
+        private int KillFeedCount { get; set; }
+        public string LastKillFeedLine { get; private set; } = string.Empty;
+        public string CurrentAmmoText { get; private set; } = "30 // INF";
+        public bool IsNvgHudActive { get; private set; }
 
         public float HpBarFill => hpFillImage != null ? hpFillImage.fillAmount : 0f;
         public float XpBarFill => xpFillImage != null ? xpFillImage.fillAmount : 0f;
@@ -164,12 +213,16 @@ namespace TopDownShooter.UI
         public bool IsCinemaOverlayVisible => cinemaOverlayGroup != null && cinemaOverlayGroup.alpha > 0.5f;
         public string CurrentObjectiveText => objectiveBannerText != null ? objectiveBannerText.text : string.Empty;
         public bool IsBossBarVisible => bossBarRoot != null && bossBarRoot.gameObject.activeSelf;
+        public int RadarEnemyActiveCount { get; private set; }
+        public float DamageVignetteAlpha => damageVignetteImage != null ? damageVignetteImage.color.a : 0f;
+        public SquadOrder CurrentOrderDisplayed { get; private set; } = SquadOrder.Follow;
+
         public static bool? ForceMobileControlsOverride { get; set; }
         public VirtualJoystick LeftJoystick => leftJoystick;
         public VirtualJoystick RightJoystick => rightJoystick;
         public bool IsMobileTouchControlsVisible => mobileTouchControlsRoot != null && mobileTouchControlsRoot.activeSelf;
 
-        public static bool ShouldShowMobileControls()
+        private static bool ShouldShowMobileControls()
         {
             if (ForceMobileControlsOverride.HasValue)
             {
@@ -182,7 +235,7 @@ namespace TopDownShooter.UI
         {
             if (mobileTouchControlsRoot == null && hudGroup != null)
             {
-                Transform found = hudGroup.transform.Find("MobileTouchControls");
+                var found = hudGroup.transform.Find("MobileTouchControls");
                 if (found != null) mobileTouchControlsRoot = found.gameObject;
             }
             if (mobileTouchControlsRoot != null)
@@ -320,6 +373,106 @@ namespace TopDownShooter.UI
             objectiveBannerText = objectiveText;
         }
 
+        public void BindTacticalSquadWidgets(
+            Image vignetteImg,
+            CanvasGroup ctxGroup,
+            TextMeshProUGUI ctxText,
+            RectTransform radarRect,
+            RectTransform playerChevron,
+            Image[] squadDots,
+            Image[] enemyDots,
+            Image[] objectiveDots,
+            TextMeshProUGUI uavStatusText,
+            TextMeshProUGUI[] sqNames,
+            Image[] sqBars,
+            TextMeshProUGUI[] sqStatuses,
+            Button[] orderBtns,
+            Image[] orderBgs,
+            TextMeshProUGUI fragTxt,
+            TextMeshProUGUI strikeTxt,
+            TextMeshProUGUI streakTxt,
+            Button fragBtn,
+            Button strikeBtn)
+        {
+            damageVignetteImage = vignetteImg;
+            contextPromptGroup = ctxGroup;
+            contextPromptText = ctxText;
+            radarContainerRect = radarRect;
+            radarPlayerChevron = playerChevron;
+            radarSquadDots = squadDots;
+            radarEnemyDots = enemyDots;
+            radarObjectiveDots = objectiveDots;
+            radarUavStatusText = uavStatusText;
+            squadMemberNames = sqNames;
+            squadMemberBars = sqBars;
+            squadMemberStatusTexts = sqStatuses;
+            squadOrderButtons = orderBtns;
+            squadOrderBgs = orderBgs;
+            fragCountText = fragTxt;
+            strikeStatusText = strikeTxt;
+            streakText = streakTxt;
+            fragButton = fragBtn;
+            strikeButton = strikeBtn;
+
+            if (damageVignetteImage != null)
+            {
+                if (damageVignetteImage.sprite == null)
+                {
+                    damageVignetteImage.sprite = UISpriteFactory.GetDamageVignetteSprite();
+                }
+                damageVignetteImage.raycastTarget = false;
+                damageVignetteImage.color = Palette.WithAlpha(Palette.DamageBloodRed, 0f);
+            }
+            if (radarPlayerChevron != null)
+            {
+                var chevImg = radarPlayerChevron.GetComponent<Image>();
+                if (chevImg != null && chevImg.sprite == null)
+                {
+                    chevImg.sprite = UISpriteFactory.GetChevronIcon();
+                }
+            }
+            if (contextPromptGroup != null)
+            {
+                contextPromptGroup.alpha = 0f;
+                contextPromptGroup.blocksRaycasts = false;
+            }
+            UpdateSquadOrderUI(SquadOrder.Follow);
+        }
+
+        public void BindMw4HudWidgets(
+            CanvasGroup hmGroup,
+            Image[] hmTicks,
+            TextMeshProUGUI killFeedTxt,
+            TextMeshProUGUI ammoTxt,
+            Image reloadFill,
+            CanvasGroup nvgGroup,
+            TextMeshProUGUI nvgTxt,
+            Button nvgBtn)
+        {
+            hitmarkerGroup = hmGroup;
+            hitmarkerTicks = hmTicks;
+            killFeedText = killFeedTxt;
+            ammoHudText = ammoTxt;
+            reloadProgressFill = reloadFill;
+            nvgOverlayGroup = nvgGroup;
+            nvgStatusText = nvgTxt;
+            nvgToggleButton = nvgBtn;
+
+            if (hitmarkerGroup != null)
+            {
+                hitmarkerGroup.alpha = 0f;
+                hitmarkerGroup.blocksRaycasts = false;
+            }
+            if (nvgOverlayGroup != null)
+            {
+                nvgOverlayGroup.alpha = 0f;
+                nvgOverlayGroup.blocksRaycasts = false;
+            }
+            if (killFeedText != null) killFeedText.text = string.Empty;
+            UpdateAmmoHud(30, 30, false, 1f);
+            SetNvgActive(false);
+        }
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -362,7 +515,7 @@ namespace TopDownShooter.UI
 
         private void EnsureBarSprites()
         {
-            Sprite rectSprite = UISpriteFactory.GetRoundedRectSprite();
+            var rectSprite = UISpriteFactory.GetRoundedRectSprite();
             if (hpFillImage != null && hpFillImage.sprite == null) hpFillImage.sprite = rectSprite;
             if (xpFillImage != null && xpFillImage.sprite == null) xpFillImage.sprite = rectSprite;
             if (dashFillImage != null && dashFillImage.sprite == null) dashFillImage.sprite = rectSprite;
@@ -421,6 +574,11 @@ namespace TopDownShooter.UI
                 endedTitleButton.onClick.RemoveAllListeners();
                 endedTitleButton.onClick.AddListener(() => GameManager.Instance?.ReturnToTitle());
             }
+            if (nvgToggleButton != null)
+            {
+                nvgToggleButton.onClick.RemoveAllListeners();
+                nvgToggleButton.onClick.AddListener(() => PlayerController.Instance?.ToggleNightVision());
+            }
             if (titleIntelButton != null)
             {
                 titleIntelButton.onClick.RemoveAllListeners();
@@ -435,25 +593,48 @@ namespace TopDownShooter.UI
             if (touchDashButton != null)
             {
                 touchDashButton.onClick.RemoveAllListeners();
-                touchDashButton.onClick.AddListener(() => touchDashQueued = true);
+                touchDashButton.onClick.AddListener(() => _touchDashQueued = true);
             }
 
             if (weaponSlotButtons != null)
             {
-                for (int i = 0; i < weaponSlotButtons.Length; i++)
+                for (var i = 0; i < weaponSlotButtons.Length; i++)
                 {
-                    int idx = i;
+                    var idx = i;
                     if (weaponSlotButtons[i] == null) continue;
                     weaponSlotButtons[i].onClick.RemoveAllListeners();
                     weaponSlotButtons[i].onClick.AddListener(() => PlayerController.Instance?.TrySwitchWeapon(idx));
                 }
             }
 
+            if (squadOrderButtons != null)
+            {
+                for (var i = 0; i < squadOrderButtons.Length; i++)
+                {
+                    var ord = (SquadOrder)i;
+                    if (squadOrderButtons[i] == null) continue;
+                    squadOrderButtons[i].onClick.RemoveAllListeners();
+                    squadOrderButtons[i].onClick.AddListener(() => SquadDirector.Instance?.SetOrder(ord));
+                }
+            }
+
+            if (fragButton != null)
+            {
+                fragButton.onClick.RemoveAllListeners();
+                fragButton.onClick.AddListener(() => PlayerController.Instance?.TryThrowFragGrenade());
+            }
+
+            if (strikeButton != null)
+            {
+                strikeButton.onClick.RemoveAllListeners();
+                strikeButton.onClick.AddListener(() => PlayerController.Instance?.TryCallMortarStrike());
+            }
+
             if (upgradeButtons != null)
             {
-                for (int i = 0; i < upgradeButtons.Length; i++)
+                for (var i = 0; i < upgradeButtons.Length; i++)
                 {
-                    int idx = i;
+                    var idx = i;
                     if (upgradeButtons[i] == null) continue;
                     upgradeButtons[i].onClick.RemoveAllListeners();
                     upgradeButtons[i].onClick.AddListener(() => OnUpgradeClicked(idx));
@@ -462,9 +643,9 @@ namespace TopDownShooter.UI
 
             if (shopWeaponButtons != null)
             {
-                for (int i = 0; i < shopWeaponButtons.Length; i++)
+                for (var i = 0; i < shopWeaponButtons.Length; i++)
                 {
-                    int idx = i;
+                    var idx = i;
                     if (shopWeaponButtons[i] == null) continue;
                     shopWeaponButtons[i].onClick.RemoveAllListeners();
                     shopWeaponButtons[i].onClick.AddListener(() => OnShopWeaponClicked(idx));
@@ -473,9 +654,9 @@ namespace TopDownShooter.UI
 
             if (shopSkinButtons != null)
             {
-                for (int i = 0; i < shopSkinButtons.Length; i++)
+                for (var i = 0; i < shopSkinButtons.Length; i++)
                 {
-                    int idx = i;
+                    var idx = i;
                     if (shopSkinButtons[i] == null) continue;
                     shopSkinButtons[i].onClick.RemoveAllListeners();
                     shopSkinButtons[i].onClick.AddListener(() => OnShopSkinClicked(idx));
@@ -484,9 +665,9 @@ namespace TopDownShooter.UI
 
             if (draftCardButtons != null)
             {
-                for (int i = 0; i < draftCardButtons.Length; i++)
+                for (var i = 0; i < draftCardButtons.Length; i++)
                 {
-                    int idx = i;
+                    var idx = i;
                     if (draftCardButtons[i] == null) continue;
                     draftCardButtons[i].onClick.RemoveAllListeners();
                     draftCardButtons[i].onClick.AddListener(() => OnDraftCardClicked(idx));
@@ -504,13 +685,13 @@ namespace TopDownShooter.UI
                 });
             }
 
-            if (sfxSlider != null)
+            if (sfxSlider == null) return;
             {
                 sfxSlider.onValueChanged.RemoveAllListeners();
-                if (AudioManager.Instance != null) sfxSlider.SetValueWithoutNotify(AudioManager.Instance.SFXVol);
+                if (AudioManager.Instance != null) sfxSlider.SetValueWithoutNotify(AudioManager.Instance.SfxVol);
                 sfxSlider.onValueChanged.AddListener(v =>
                 {
-                    AudioManager.Instance?.SetSFXVolume(v);
+                    AudioManager.Instance?.SetSfxVolume(v);
                     RefreshVolumeLabels();
                 });
             }
@@ -519,48 +700,42 @@ namespace TopDownShooter.UI
         private void OnUpgradeClicked(int index)
         {
             if (index < 0 || index >= UpgradeKeys.Length) return;
-            SaveManager save = SaveManager.EnsureInstance();
-            if (save.TryUpgradeStat(UpgradeKeys[index]))
-            {
-                AudioManager.Instance?.PlayPickupBlip();
-                RefreshArmoryUI();
-            }
+            var save = SaveManager.EnsureInstance();
+            if (!save.TryUpgradeStat(UpgradeKeys[index])) return;
+            AudioManager.Instance?.PlayPickupBlip();
+            RefreshArmoryUI();
         }
 
         private void OnShopWeaponClicked(int index)
         {
             if (index < 0 || index >= WeaponCosts.Length) return;
-            SaveManager save = SaveManager.EnsureInstance();
-            if (save.TryUnlockOrEquipWeapon(index, WeaponCosts[index]))
-            {
-                AudioManager.Instance?.PlayUIClick();
-                RefreshArmoryUI();
-                RefreshWeaponBar();
-            }
+            var save = SaveManager.EnsureInstance();
+            if (!save.TryUnlockOrEquipWeapon(index, WeaponCosts[index])) return;
+            AudioManager.Instance?.PlayUIClick();
+            RefreshArmoryUI();
+            RefreshWeaponBar();
         }
 
         private void OnShopSkinClicked(int index)
         {
             if (index < 0 || index >= SkinCosts.Length) return;
-            SaveManager save = SaveManager.EnsureInstance();
-            if (save.TryUnlockOrEquipSkin(index, SkinCosts[index]))
-            {
-                AudioManager.Instance?.PlayUIClick();
-                PlayerController.Instance?.ApplySaveLoadout();
-                RefreshArmoryUI();
-            }
+            var save = SaveManager.EnsureInstance();
+            if (!save.TryUnlockOrEquipSkin(index, SkinCosts[index])) return;
+            AudioManager.Instance?.PlayUIClick();
+            PlayerController.Instance?.ApplySaveLoadout();
+            RefreshArmoryUI();
         }
 
         private void OnDraftCardClicked(int index)
         {
-            if (index < 0 || index >= currentDraftOptions.Count) return;
-            GameManager.Instance?.SelectDraftSkill(currentDraftOptions[index].Id);
+            if (index < 0 || index >= _currentDraftOptions.Count) return;
+            GameManager.Instance?.SelectDraftSkill(_currentDraftOptions[index].Id);
         }
 
         public bool ConsumeTouchDashPressed()
         {
-            bool pressed = touchDashQueued;
-            touchDashQueued = false;
+            var pressed = _touchDashQueued;
+            _touchDashQueued = false;
             return pressed;
         }
 
@@ -578,9 +753,10 @@ namespace TopDownShooter.UI
 
         private void Update()
         {
+            var unscaledDt = Time.unscaledDeltaTime;
             if (crosshairRect != null)
             {
-                bool showCrosshair = !ShouldShowMobileControls() && hudGroup != null && hudGroup.alpha > 0.5f && Mouse.current != null;
+                var showCrosshair = !ShouldShowMobileControls() && hudGroup != null && hudGroup.alpha > 0.5f && Mouse.current != null;
                 if (crosshairRect.gameObject.activeSelf != showCrosshair)
                 {
                     crosshairRect.gameObject.SetActive(showCrosshair);
@@ -590,15 +766,39 @@ namespace TopDownShooter.UI
                     crosshairRect.position = Mouse.current.position.ReadValue();
                 }
             }
+
+            if (_hitmarkerTimer > 0f && hitmarkerGroup != null)
+            {
+                _hitmarkerTimer = Mathf.Max(0f, _hitmarkerTimer - unscaledDt);
+                var t = _hitmarkerDuration > 0.01f ? _hitmarkerTimer / _hitmarkerDuration : 0f;
+                hitmarkerGroup.alpha = t;
+                if (crosshairRect != null && crosshairRect.gameObject.activeSelf)
+                {
+                    hitmarkerGroup.transform.position = crosshairRect.position;
+                }
+            }
+
+            if (_killFeedClearTimer > 0f)
+            {
+                _killFeedClearTimer -= unscaledDt;
+                if (_killFeedClearTimer <= 0f)
+                {
+                    ClearKillFeed();
+                }
+            }
+
+            if (hudGroup == null || !(hudGroup.alpha > 0.1f)) return;
+            UpdateSquadRosterHud();
+            UpdateTacticalRadar();
         }
 
         public void ApplyImmediateState(GameState state)
         {
             RefreshPlatformControls();
-            if (transitionTween != null)
+            if (_transitionTween != null)
             {
-                StopCoroutine(transitionTween);
-                transitionTween = null;
+                StopCoroutine(_transitionTween);
+                _transitionTween = null;
             }
             SetGroupState(titleGroup, state == GameState.Title ? 1f : 0f);
             SetGroupState(hudGroup, state == GameState.Playing ? 1f : 0f);
@@ -614,6 +814,9 @@ namespace TopDownShooter.UI
             if (state != GameState.Playing)
             {
                 HideRadioCommsImmediate();
+                UpdateDamageVignette(0f);
+                UpdateContextPrompt(string.Empty);
+                RadarEnemyActiveCount = 0;
             }
             if (state != GameState.Cutscene)
             {
@@ -626,28 +829,28 @@ namespace TopDownShooter.UI
         {
             SetGroupState(intelGroup, 0f);
             RefreshPlatformControls();
-            if (transitionTween != null)
+            if (_transitionTween != null)
             {
-                StopCoroutine(transitionTween);
+                StopCoroutine(_transitionTween);
             }
-            transitionTween = StartCoroutine(TransitionRoutine(state));
+            _transitionTween = StartCoroutine(TransitionRoutine(state));
         }
 
         private IEnumerator TransitionRoutine(GameState target)
         {
-            float sTitle = titleGroup != null ? titleGroup.alpha : 0f;
-            float sHud = hudGroup != null ? hudGroup.alpha : 0f;
-            float sPause = pauseGroup != null ? pauseGroup.alpha : 0f;
-            float sEnded = endedGroup != null ? endedGroup.alpha : 0f;
-            float sArmory = armoryGroup != null ? armoryGroup.alpha : 0f;
-            float sDraft = draftGroup != null ? draftGroup.alpha : 0f;
+            var sTitle = titleGroup != null ? titleGroup.alpha : 0f;
+            var sHud = hudGroup != null ? hudGroup.alpha : 0f;
+            var sPause = pauseGroup != null ? pauseGroup.alpha : 0f;
+            var sEnded = endedGroup != null ? endedGroup.alpha : 0f;
+            var sArmory = armoryGroup != null ? armoryGroup.alpha : 0f;
+            var sDraft = draftGroup != null ? draftGroup.alpha : 0f;
 
-            float eTitle = target == GameState.Title ? 1f : 0f;
-            float eHud = target == GameState.Playing ? 1f : 0f;
-            float ePause = target == GameState.Paused ? 1f : 0f;
-            float eEnded = target == GameState.Ended ? 1f : 0f;
-            float eArmory = target == GameState.Armory ? 1f : 0f;
-            float eDraft = target == GameState.LevelUpDraft ? 1f : 0f;
+            var eTitle = target == GameState.Title ? 1f : 0f;
+            var eHud = target == GameState.Playing ? 1f : 0f;
+            var ePause = target == GameState.Paused ? 1f : 0f;
+            var eEnded = target == GameState.Ended ? 1f : 0f;
+            var eArmory = target == GameState.Armory ? 1f : 0f;
+            var eDraft = target == GameState.LevelUpDraft ? 1f : 0f;
 
             SetGroupInteractable(titleGroup, eTitle > 0.5f);
             SetGroupInteractable(hudGroup, eHud > 0.5f);
@@ -658,7 +861,7 @@ namespace TopDownShooter.UI
 
             yield return Ease.Tween(0.25f, t =>
             {
-                float e = Ease.OutCubic(t);
+                var e = Ease.OutCubic(t);
                 if (titleGroup != null) titleGroup.alpha = Mathf.Lerp(sTitle, eTitle, e);
                 if (hudGroup != null) hudGroup.alpha = Mathf.Lerp(sHud, eHud, e);
                 if (pauseGroup != null) pauseGroup.alpha = Mathf.Lerp(sPause, ePause, e);
@@ -673,14 +876,14 @@ namespace TopDownShooter.UI
             SetGroupState(endedGroup, eEnded);
             SetGroupState(armoryGroup, eArmory);
             SetGroupState(draftGroup, eDraft);
-            transitionTween = null;
+            _transitionTween = null;
         }
 
         private static void SetGroupState(CanvasGroup cg, float alpha)
         {
             if (cg == null) return;
             cg.alpha = alpha;
-            bool active = alpha > 0.5f;
+            var active = alpha > 0.5f;
             cg.interactable = active;
             cg.blocksRaycasts = active;
         }
@@ -694,32 +897,30 @@ namespace TopDownShooter.UI
 
         public void UpdateHealth(float current, float max)
         {
-            float targetFill = max > 0f ? Mathf.Clamp01(current / max) : 0f;
+            var targetFill = max > 0f ? Mathf.Clamp01(current / max) : 0f;
             if (hpValueText != null)
             {
                 hpValueText.text = Mathf.CeilToInt(current) + " / " + Mathf.RoundToInt(max);
             }
-            if (hpFillImage != null)
-            {
-                if (hpTween != null) StopCoroutine(hpTween);
-                float start = hpFillImage.fillAmount;
-                hpTween = StartCoroutine(TweenImageFill(hpFillImage, start, targetFill, 0.30f));
-            }
+
+            if (hpFillImage == null) return;
+            if (_hpTween != null) StopCoroutine(_hpTween);
+            var start = hpFillImage.fillAmount;
+            _hpTween = StartCoroutine(TweenImageFill(hpFillImage, start, targetFill, 0.30f));
         }
 
         public void UpdateXp(int current, int max, int level)
         {
-            float targetFill = max > 0 ? Mathf.Clamp01((float)current / max) : 0f;
+            var targetFill = max > 0 ? Mathf.Clamp01((float)current / max) : 0f;
             if (levelText != null)
             {
                 levelText.text = "RANK " + level.ToString("00");
             }
-            if (xpFillImage != null)
-            {
-                if (xpTween != null) StopCoroutine(xpTween);
-                float start = xpFillImage.fillAmount;
-                xpTween = StartCoroutine(TweenImageFill(xpFillImage, start, targetFill, 0.30f));
-            }
+
+            if (xpFillImage == null) return;
+            if (_xpTween != null) StopCoroutine(_xpTween);
+            var start = xpFillImage.fillAmount;
+            _xpTween = StartCoroutine(TweenImageFill(xpFillImage, start, targetFill, 0.30f));
         }
 
         public void UpdateDashCooldown(float readyNormalized)
@@ -730,14 +931,320 @@ namespace TopDownShooter.UI
             }
         }
 
-        public void UpdateWave(int wave, int enemiesRemaining)
+        public void UpdateMissionStatus(string actTitle, int activeHostiles, string objectiveText)
         {
-            if (waveText != null) waveText.text = "WAVE " + wave.ToString("00");
-            if (enemiesText != null) enemiesText.text = enemiesRemaining + " HOSTILES";
-            UpdateObjective(StoryDirector.GetSectorObjective(wave));
+            if (waveText != null) waveText.text = actTitle;
+            if (enemiesText != null)
+            {
+                enemiesText.text = activeHostiles > 0
+                    ? (activeHostiles + " HOSTILES IN SECTOR")
+                    : "SECTOR CLEAR // ADVANCE";
+                enemiesText.color = activeHostiles > 0 ? Palette.EnemySecondary : Palette.HealthGreen;
+            }
+            UpdateObjective(objectiveText);
         }
 
-        public void UpdateObjective(string objectiveText)
+        public void UpdateWave(int wave, int enemiesRemaining)
+        {
+            UpdateMissionStatus(
+                StoryDirector.GetActLabel(wave),
+                enemiesRemaining,
+                StoryDirector.GetSectorObjective(wave));
+        }
+
+        public void UpdateContextPrompt(string text)
+        {
+            if (contextPromptGroup == null) return;
+            var visible = !string.IsNullOrEmpty(text);
+            contextPromptGroup.alpha = visible ? 1f : 0f;
+            if (visible && contextPromptText != null)
+            {
+                contextPromptText.text = text;
+            }
+        }
+
+        public void UpdateEquipmentHud(int fragCount, int mortarCharges, int streak, bool uavOnline, bool isRegen)
+        {
+            if (fragCountText != null)
+            {
+                fragCountText.text = "[G] FRAG x" + fragCount;
+                fragCountText.color = fragCount > 0 ? Palette.Accent : Palette.MutedText;
+            }
+            if (strikeStatusText != null)
+            {
+                strikeStatusText.text = mortarCharges > 0
+                    ? ("[F] MORTAR x" + mortarCharges + " RDY")
+                    : ("[F] MORTAR (" + Mathf.Min(streak, 5) + "/5)");
+                strikeStatusText.color = mortarCharges > 0 ? Palette.HealthGreen : Palette.MutedText;
+            }
+            if (streakText != null)
+            {
+                streakText.text = uavOnline
+                    ? ("STREAK " + streak + " // UAV LIVE")
+                    : ("STREAK " + streak + " // UAV 3K");
+                streakText.color = uavOnline ? Palette.RadarGreen : Palette.CharacterSecondary;
+            }
+            if (levelText != null)
+            {
+                levelText.text = uavOnline
+                    ? ("UAV RECON // " + streak + " KILLS")
+                    : (mortarCharges > 0 ? ("STRIKE READY // " + streak + " KILLS") : ("KILLSTREAK // " + streak + " KILLS"));
+                levelText.color = mortarCharges > 0 ? Palette.HealthGreen : (uavOnline ? Palette.RadarGreen : Palette.Accent);
+            }
+            if (xpFillImage != null)
+            {
+                if (_xpTween != null)
+                {
+                    StopCoroutine(_xpTween);
+                    _xpTween = null;
+                }
+                xpFillImage.fillAmount = Mathf.Clamp01(streak / 5f);
+                xpFillImage.color = uavOnline ? Palette.RadarGreen : Palette.Accent;
+            }
+            if (radarUavStatusText != null)
+            {
+                radarUavStatusText.text = uavOnline ? "UAV SWEEP // LIVE" : "TAC-RADAR // HAJIN DMZ";
+                radarUavStatusText.color = uavOnline ? Palette.RadarGreen : Palette.MutedText;
+            }
+            if (hpFillImage != null && isRegen)
+            {
+                hpFillImage.color = Palette.HealthGreen;
+            }
+        }
+
+        public void FlashHitmarker(bool isKill)
+        {
+            HitmarkerFlashCount++;
+            _hitmarkerDuration = isKill ? 0.19f : 0.12f;
+            _hitmarkerTimer = _hitmarkerDuration;
+            if (hitmarkerGroup != null)
+            {
+                hitmarkerGroup.alpha = 1f;
+                if (crosshairRect != null && crosshairRect.gameObject.activeSelf)
+                {
+                    hitmarkerGroup.transform.position = crosshairRect.position;
+                }
+                else
+                {
+                    ((RectTransform)hitmarkerGroup.transform).anchoredPosition = Vector2.zero;
+                }
+            }
+
+            if (hitmarkerTicks == null) return;
+            var col = isKill ? Palette.HitmarkerCrimson : Palette.HitmarkerWhite;
+            foreach (var t in hitmarkerTicks)
+            {
+                if (t != null) t.color = col;
+            }
+        }
+
+        public void PushKillFeed(string killerCallsign, string victimLabel, string weaponTag)
+        {
+            KillFeedCount++;
+            var entry = $"[{weaponTag}]  {killerCallsign}  >>  {victimLabel}";
+            LastKillFeedLine = entry;
+            _killFeedLines[_killFeedCursor % _killFeedLines.Length] = entry;
+            _killFeedCursor++;
+            _killFeedClearTimer = 4.2f;
+
+            if (killFeedText == null) return;
+            var l0 = _killFeedLines[(_killFeedCursor - 1 + 3) % 3];
+            var l1 = _killFeedLines[(_killFeedCursor - 2 + 3) % 3];
+            var l2 = _killFeedLines[(_killFeedCursor - 3 + 3) % 3];
+            killFeedText.text = string.IsNullOrEmpty(l1)
+                ? l0
+                : (string.IsNullOrEmpty(l2) ? (l1 + "\n" + l0) : (l2 + "\n" + l1 + "\n" + l0));
+        }
+
+        private void ClearKillFeed()
+        {
+            for (var i = 0; i < _killFeedLines.Length; i++)
+            {
+                _killFeedLines[i] = string.Empty;
+            }
+            if (killFeedText != null) killFeedText.text = string.Empty;
+        }
+
+        public void UpdateAmmoHud(int currentMag, int magCapacity, bool isReloading, float reloadProgress)
+        {
+            CurrentAmmoText = isReloading ? "RELOADING..." : (currentMag + " // INF");
+            if (ammoHudText != null)
+            {
+                ammoHudText.text = isReloading ? ("RELOADING  " + Mathf.RoundToInt(reloadProgress * 100f) + "%") : (currentMag + " / " + magCapacity + "  [R]");
+                ammoHudText.color = isReloading ? Palette.C4Amber : (currentMag <= Mathf.Max(2, magCapacity / 5) ? Palette.EnemySecondary : Palette.CharacterSecondary);
+            }
+
+            if (reloadProgressFill == null) return;
+            reloadProgressFill.fillAmount = isReloading ? reloadProgress : (magCapacity > 0 ? (float)currentMag / magCapacity : 1f);
+            reloadProgressFill.color = isReloading ? Palette.C4Amber : Palette.Accent;
+        }
+
+        public void SetNvgActive(bool active)
+        {
+            IsNvgHudActive = active;
+            if (nvgOverlayGroup != null)
+            {
+                nvgOverlayGroup.alpha = active ? 0.85f : 0f;
+            }
+
+            if (nvgStatusText == null) return;
+            nvgStatusText.text = active ? "[N] NVG: ON" : "[N] NVG: OFF";
+            nvgStatusText.color = active ? Palette.NvgPhosphor : Palette.MutedText;
+        }
+
+        public void UpdateSquadOrderUI(SquadOrder order)
+        {
+            CurrentOrderDisplayed = order;
+            if (squadOrderBgs == null) return;
+            for (var i = 0; i < squadOrderBgs.Length; i++)
+            {
+                if (squadOrderBgs[i] == null) continue;
+                var active = i == (int)order;
+                squadOrderBgs[i].color = active
+                    ? (order == SquadOrder.Breach ? Palette.C4Amber : Palette.SquadBlue)
+                    : Palette.SecondaryButtonBg;
+            }
+        }
+
+        public void UpdateDamageVignette(float alpha)
+        {
+            if (damageVignetteImage == null) return;
+            if (damageVignetteImage.sprite == null)
+            {
+                damageVignetteImage.sprite = UISpriteFactory.GetDamageVignetteSprite();
+            }
+            damageVignetteImage.color = Palette.WithAlpha(Palette.DamageBloodRed, Mathf.Clamp01(alpha));
+        }
+
+        private void UpdateSquadRosterHud()
+        {
+            var squad = SquadDirector.Instance;
+            if (squad == null || squadMemberBars == null) return;
+            var members = squad.Members;
+            for (var i = 0; i < squadMemberBars.Length; i++)
+            {
+                var hasMember = members != null && i < members.Count && members[i] != null;
+                if (!hasMember) continue;
+
+                var m = members[i];
+                if (squadMemberNames != null && i < squadMemberNames.Length && squadMemberNames[i] != null)
+                {
+                    squadMemberNames[i].text = m.Callsign;
+                    squadMemberNames[i].color = m.IsDowned ? Palette.C4Amber : Palette.CharacterSecondary;
+                }
+                if (squadMemberBars[i] != null)
+                {
+                    squadMemberBars[i].fillAmount = m.MaxHp > 0f ? Mathf.Clamp01(m.CurrentHp / m.MaxHp) : 0f;
+                    squadMemberBars[i].color = m.IsDowned ? Palette.C4Amber : Palette.SquadBlue;
+                }
+
+                if (squadMemberStatusTexts == null || i >= squadMemberStatusTexts.Length ||
+                    squadMemberStatusTexts[i] == null) continue;
+                squadMemberStatusTexts[i].text = m.IsDowned
+                    ? "DOWN"
+                    : (Mathf.RoundToInt(100f * m.CurrentHp / Mathf.Max(1f, m.MaxHp)) + "%");
+                squadMemberStatusTexts[i].color = m.IsDowned ? Palette.C4Amber : Palette.SquadBlue;
+            }
+        }
+
+        private void UpdateTacticalRadar()
+        {
+            if (radarContainerRect == null || PlayerController.Instance == null) return;
+
+            var player = PlayerController.Instance;
+            var playerPos = player.transform.position;
+            var radiusPx = Mathf.Min(radarContainerRect.rect.width, radarContainerRect.rect.height) * 0.5f - 10f;
+            if (radiusPx < 24f) radiusPx = 56f;
+            const float radarWorldRange = 36f;
+
+            if (radarPlayerChevron != null)
+            {
+                radarPlayerChevron.anchoredPosition = Vector2.zero;
+                radarPlayerChevron.localRotation = Quaternion.Euler(0f, 0f, -player.transform.eulerAngles.y);
+            }
+
+            if (radarSquadDots != null)
+            {
+                var members = SquadDirector.Instance != null ? SquadDirector.Instance.Members : null;
+                for (var i = 0; i < radarSquadDots.Length; i++)
+                {
+                    var dot = radarSquadDots[i];
+                    if (dot == null) continue;
+                    var show = members != null && i < members.Count && members[i] != null && members[i].gameObject.activeInHierarchy;
+                    dot.gameObject.SetActive(show);
+                    if (!show) continue;
+
+                    var pos = MapWorldToRadar(members[i].transform.position, playerPos, radarWorldRange, radiusPx, true);
+                    dot.rectTransform.anchoredPosition = pos;
+                    dot.color = members[i].IsDowned ? Palette.C4Amber : Palette.SquadBlue;
+                }
+            }
+
+            if (radarObjectiveDots != null)
+            {
+                var nodes = EnemySpawner.Instance != null ? EnemySpawner.Instance.ObjectiveNodes : null;
+                for (var i = 0; i < radarObjectiveDots.Length; i++)
+                {
+                    var dot = radarObjectiveDots[i];
+                    if (dot == null) continue;
+                    var show = nodes != null && i < nodes.Count && nodes[i] != null && nodes[i].IsUnlocked && !nodes[i].IsCompleted;
+                    dot.gameObject.SetActive(show);
+                    if (!show) continue;
+
+                    var pos = MapWorldToRadar(nodes[i].transform.position, playerPos, radarWorldRange, radiusPx, true);
+                    dot.rectTransform.anchoredPosition = pos;
+                    dot.color = nodes[i].Kind == ObjectiveNodeKind.HelipadEvacLZ ? Palette.RadarGreen : Palette.C4Amber;
+                }
+            }
+
+            var activeEnemyBlips = 0;
+            if (radarEnemyDots != null)
+            {
+                var enemies = EnemySpawner.Instance != null ? EnemySpawner.Instance.ActiveEnemies : null;
+                var uavOnline = player.IsUavReconActive;
+                var enemyIdx = 0;
+
+                foreach (var dot in radarEnemyDots)
+                {
+                    if (dot == null) continue;
+
+                    EnemyController target = null;
+                    var mappedPos = Vector2.zero;
+                    while (enemies != null && enemyIdx < enemies.Count)
+                    {
+                        var candidate = enemies[enemyIdx++];
+                        if (candidate == null || !candidate.gameObject.activeInHierarchy || candidate.IsDead) continue;
+                        var p = MapWorldToRadar(candidate.transform.position, playerPos, radarWorldRange, radiusPx, uavOnline);
+                        if (float.IsNaN(p.x)) continue;
+                        target = candidate;
+                        mappedPos = p;
+                        break;
+                    }
+
+                    var show = target != null;
+                    dot.gameObject.SetActive(show);
+                    if (!show) continue;
+                    activeEnemyBlips++;
+                    dot.rectTransform.anchoredPosition = mappedPos;
+                    var isBoss = target.Archetype == EnemyArchetype.Boss;
+                    dot.color = isBoss ? Palette.BossPurple : Palette.EnemySecondary;
+                    dot.rectTransform.localScale = isBoss ? new Vector3(1.45f, 1.45f, 1f) : Vector3.one;
+                }
+            }
+            RadarEnemyActiveCount = activeEnemyBlips;
+        }
+
+        private static Vector2 MapWorldToRadar(Vector3 worldPos, Vector3 origin, float worldRange, float radiusPx, bool clampToRim)
+        {
+            var delta = new Vector2(worldPos.x - origin.x, worldPos.z - origin.z) * (radiusPx / worldRange);
+            var mag = delta.magnitude;
+            if (!(mag > radiusPx)) return delta;
+            if (!clampToRim) return new Vector2(float.NaN, float.NaN);
+            delta *= (radiusPx / mag);
+            return delta;
+        }
+
+        private void UpdateObjective(string objectiveText)
         {
             if (objectiveBannerText != null)
             {
@@ -802,13 +1309,13 @@ namespace TopDownShooter.UI
         public void RefreshWeaponBar()
         {
             if (weaponSlotButtons == null) return;
-            SaveManager save = SaveManager.EnsureInstance();
-            int selected = save.Data.selectedWeapon;
+            var save = SaveManager.EnsureInstance();
+            var selected = save.Data.selectedWeapon;
 
-            for (int i = 0; i < weaponSlotButtons.Length && i < WeaponNames.Length; i++)
+            for (var i = 0; i < weaponSlotButtons.Length && i < WeaponNames.Length; i++)
             {
-                bool unlocked = save.IsWeaponUnlocked(i);
-                bool active = i == selected;
+                var unlocked = save.IsWeaponUnlocked(i);
+                var active = i == selected;
                 if (weaponSlotBgs != null && i < weaponSlotBgs.Length && weaponSlotBgs[i] != null)
                 {
                     weaponSlotBgs[i].color = active ? Palette.Accent : (unlocked ? Palette.SecondaryButtonBg : Palette.Shadow);
@@ -827,18 +1334,18 @@ namespace TopDownShooter.UI
 
         public void RefreshArmoryUI()
         {
-            SaveManager save = SaveManager.EnsureInstance();
-            GameSaveData d = save.Data;
+            var save = SaveManager.EnsureInstance();
+            var d = save.Data;
 
             if (armoryCreditsText != null) armoryCreditsText.text = d.credits.ToString("N0") + " CR";
             if (titleCreditsText != null) titleCreditsText.text = "FUNDS // " + d.credits.ToString("N0") + " CR";
 
             if (upgradeButtons != null)
             {
-                for (int i = 0; i < upgradeButtons.Length && i < UpgradeKeys.Length; i++)
+                for (var i = 0; i < upgradeButtons.Length && i < UpgradeKeys.Length; i++)
                 {
-                    int rank = save.GetUpgradeRank(UpgradeKeys[i]);
-                    int cost = save.GetUpgradeCost(rank);
+                    var rank = save.GetUpgradeRank(UpgradeKeys[i]);
+                    var cost = SaveManager.GetUpgradeCost(rank);
                     if (upgradeRankLabels != null && i < upgradeRankLabels.Length && upgradeRankLabels[i] != null)
                     {
                         upgradeRankLabels[i].text = $"{UpgradeTitles[i]}   [LV {rank}/{SaveManager.MaxUpgradeRank}]";
@@ -856,76 +1363,74 @@ namespace TopDownShooter.UI
 
             if (shopWeaponButtons != null)
             {
-                for (int i = 0; i < shopWeaponButtons.Length && i < WeaponNames.Length; i++)
+                for (var i = 0; i < shopWeaponButtons.Length && i < WeaponNames.Length; i++)
                 {
-                    bool unlocked = save.IsWeaponUnlocked(i);
-                    bool equipped = d.selectedWeapon == i;
+                    var unlocked = save.IsWeaponUnlocked(i);
+                    var equipped = d.selectedWeapon == i;
                     if (shopWeaponLabels != null && i < shopWeaponLabels.Length && shopWeaponLabels[i] != null)
                     {
-                        string tag = i < WeaponShortTags.Length ? WeaponShortTags[i] : string.Empty;
-                        string status = equipped ? "[EQUIPPED]" : (unlocked ? "[EQUIP]" : $"[{WeaponCosts[i]} CR]");
+                        var tag = i < WeaponShortTags.Length ? WeaponShortTags[i] : string.Empty;
+                        var status = equipped ? "[EQUIPPED]" : (unlocked ? "[EQUIP]" : $"[{WeaponCosts[i]} CR]");
                         shopWeaponLabels[i].text = string.IsNullOrEmpty(tag)
                             ? $"{WeaponNames[i]}\n{status}"
                             : $"{WeaponNames[i]}\n{tag} · {status}";
                     }
-                    if (shopWeaponButtons[i] != null)
+
+                    if (shopWeaponButtons[i] == null) continue;
+                    var bg = shopWeaponButtons[i].GetComponent<Image>();
+                    if (bg != null)
                     {
-                        Image bg = shopWeaponButtons[i].GetComponent<Image>();
-                        if (bg != null)
-                        {
-                            bg.color = equipped ? Palette.Accent : (unlocked ? Palette.SecondaryButtonBg : Palette.Shadow);
-                        }
-                        if (shopWeaponLabels != null && i < shopWeaponLabels.Length && shopWeaponLabels[i] != null)
-                        {
-                            shopWeaponLabels[i].color = equipped ? Palette.Shadow : Palette.CharacterSecondary;
-                        }
-                        shopWeaponButtons[i].interactable = unlocked || d.credits >= WeaponCosts[i];
+                        bg.color = equipped ? Palette.Accent : (unlocked ? Palette.SecondaryButtonBg : Palette.Shadow);
                     }
+                    if (shopWeaponLabels != null && i < shopWeaponLabels.Length && shopWeaponLabels[i] != null)
+                    {
+                        shopWeaponLabels[i].color = equipped ? Palette.Shadow : Palette.CharacterSecondary;
+                    }
+                    shopWeaponButtons[i].interactable = unlocked || d.credits >= WeaponCosts[i];
                 }
             }
 
-            if (shopSkinButtons != null)
+            if (shopSkinButtons == null) return;
             {
-                for (int i = 0; i < shopSkinButtons.Length && i < SkinNames.Length; i++)
+                for (var i = 0; i < shopSkinButtons.Length && i < SkinNames.Length; i++)
                 {
-                    bool unlocked = save.IsSkinUnlocked(i);
-                    bool equipped = d.selectedSkin == i;
+                    var unlocked = save.IsSkinUnlocked(i);
+                    var equipped = d.selectedSkin == i;
                     if (shopSkinLabels != null && i < shopSkinLabels.Length && shopSkinLabels[i] != null)
                     {
                         shopSkinLabels[i].text = equipped
                             ? $"{SkinNames[i]}\n[EQUIPPED]"
                             : (unlocked ? $"{SkinNames[i]}\n[EQUIP]" : $"{SkinNames[i]}\n[{SkinCosts[i]} CR]");
                     }
-                    if (shopSkinButtons[i] != null)
+
+                    if (shopSkinButtons[i] == null) continue;
+                    var bg = shopSkinButtons[i].GetComponent<Image>();
+                    if (bg != null)
                     {
-                        Image bg = shopSkinButtons[i].GetComponent<Image>();
-                        if (bg != null)
-                        {
-                            bg.color = equipped ? Palette.Accent : (unlocked ? Palette.SecondaryButtonBg : Palette.Shadow);
-                        }
-                        if (shopSkinLabels != null && i < shopSkinLabels.Length && shopSkinLabels[i] != null)
-                        {
-                            shopSkinLabels[i].color = equipped ? Palette.Shadow : Palette.CharacterSecondary;
-                        }
-                        shopSkinButtons[i].interactable = unlocked || d.credits >= SkinCosts[i];
+                        bg.color = equipped ? Palette.Accent : (unlocked ? Palette.SecondaryButtonBg : Palette.Shadow);
                     }
+                    if (shopSkinLabels != null && i < shopSkinLabels.Length && shopSkinLabels[i] != null)
+                    {
+                        shopSkinLabels[i].color = equipped ? Palette.Shadow : Palette.CharacterSecondary;
+                    }
+                    shopSkinButtons[i].interactable = unlocked || d.credits >= SkinCosts[i];
                 }
             }
         }
 
         public void PresentDraftOptions(List<RogueliteSkillInfo> options, PlayerController player)
         {
-            currentDraftOptions = options ?? new List<RogueliteSkillInfo>();
+            _currentDraftOptions = options ?? new List<RogueliteSkillInfo>();
             if (draftCardButtons == null) return;
 
-            for (int i = 0; i < draftCardButtons.Length; i++)
+            for (var i = 0; i < draftCardButtons.Length; i++)
             {
-                bool valid = i < currentDraftOptions.Count;
+                var valid = i < _currentDraftOptions.Count;
                 if (draftCardButtons[i] != null) draftCardButtons[i].gameObject.SetActive(valid);
                 if (!valid) continue;
 
-                RogueliteSkillInfo info = currentDraftOptions[i];
-                int currentRank = player != null ? player.GetSkillRank(info.Id) : 0;
+                var info = _currentDraftOptions[i];
+                var currentRank = player != null ? player.GetSkillRank(info.Id) : 0;
 
                 if (draftTitles != null && i < draftTitles.Length && draftTitles[i] != null)
                 {
@@ -955,23 +1460,23 @@ namespace TopDownShooter.UI
             }
             if (endedScoreText != null) endedScoreText.text = score.ToString("N0") + " PTS";
             if (endedBestText != null) endedBestText.text = isNewRecord ? "NEW RECORD // " + highScore.ToString("N0") : "BEST // " + highScore.ToString("N0");
-            if (endedStatsText != null) endedStatsText.text = "ELIMINATIONS: " + kills + "   |   WAVE REACHED: " + wave;
+            if (endedStatsText != null) endedStatsText.text = "ELIMINATIONS: " + kills + "   |   STAGE REACHED: " + wave + " / " + StoryDirector.FinalCampaignStage;
             if (endedNarrativeText != null) endedNarrativeText.text = StoryDirector.GetEndedDebrief(victory, wave, kills);
         }
 
-        public void OpenIntel()
+        private void OpenIntel()
         {
             AudioManager.Instance?.PlayUIClick();
             if (intelBodyText != null)
             {
-                int bestWave = SaveManager.EnsureInstance().Data.highestWave;
+                var bestWave = SaveManager.EnsureInstance().Data.highestWave;
                 intelBodyText.text = StoryDirector.BuildIntelDossierText(bestWave);
             }
             SetGroupState(titleGroup, 0f);
             SetGroupState(intelGroup, 1f);
         }
 
-        public void CloseIntel()
+        private void CloseIntel()
         {
             AudioManager.Instance?.PlayUIClick();
             SetGroupState(intelGroup, 0f);
@@ -983,17 +1488,16 @@ namespace TopDownShooter.UI
 
         public void HideRadioCommsImmediate()
         {
-            if (radioRoutine != null)
+            if (_radioRoutine != null)
             {
-                StopCoroutine(radioRoutine);
-                radioRoutine = null;
+                StopCoroutine(_radioRoutine);
+                _radioRoutine = null;
             }
-            if (radioCommsGroup != null)
-            {
-                radioCommsGroup.alpha = 0f;
-                radioCommsGroup.interactable = false;
-                radioCommsGroup.blocksRaycasts = false;
-            }
+
+            if (radioCommsGroup == null) return;
+            radioCommsGroup.alpha = 0f;
+            radioCommsGroup.interactable = false;
+            radioCommsGroup.blocksRaycasts = false;
         }
 
         private void HandleRadioTransmission(string callsign, string channel, string body)
@@ -1009,20 +1513,20 @@ namespace TopDownShooter.UI
                 radioAccentStripe.color = callsign.Contains("VOLKOV") ? Palette.EnemySecondary : Palette.Accent;
             }
 
-            if (radioRoutine != null) StopCoroutine(radioRoutine);
-            radioRoutine = StartCoroutine(RadioCommsRoutine());
+            if (_radioRoutine != null) StopCoroutine(_radioRoutine);
+            _radioRoutine = StartCoroutine(RadioCommsRoutine());
         }
 
         private IEnumerator RadioCommsRoutine()
         {
             AudioManager.Instance?.PlayRadioChirp();
-            float startAlpha = radioCommsGroup != null ? radioCommsGroup.alpha : 0f;
+            var startAlpha = radioCommsGroup != null ? radioCommsGroup.alpha : 0f;
             yield return Ease.Tween(0.18f, t =>
             {
                 if (radioCommsGroup != null) radioCommsGroup.alpha = Mathf.Lerp(startAlpha, 1f, Ease.OutCubic(t));
             }, Ease.Linear, unscaled: false);
 
-            yield return new WaitForSeconds(5.2f);
+            yield return Ease.GetWait(5.2f);
 
             yield return Ease.Tween(0.35f, t =>
             {
@@ -1030,14 +1534,14 @@ namespace TopDownShooter.UI
             }, Ease.Linear, unscaled: false);
 
             if (radioCommsGroup != null) radioCommsGroup.alpha = 0f;
-            radioRoutine = null;
+            _radioRoutine = null;
         }
 
         public void ShowMilestoneBanner(string message)
         {
             if (milestoneBannerGroup == null || milestoneBannerText == null) return;
-            if (milestoneRoutine != null) StopCoroutine(milestoneRoutine);
-            milestoneRoutine = StartCoroutine(MilestoneBannerRoutine(message));
+            if (_milestoneRoutine != null) StopCoroutine(_milestoneRoutine);
+            _milestoneRoutine = StartCoroutine(MilestoneBannerRoutine(message));
         }
 
         private IEnumerator MilestoneBannerRoutine(string message)
@@ -1048,14 +1552,12 @@ namespace TopDownShooter.UI
 
             yield return Ease.Tween(0.22f, t =>
             {
-                if (milestoneBannerRect != null)
-                {
-                    float s = Ease.OutBack(t);
-                    milestoneBannerRect.localScale = new Vector3(s, s, 1f);
-                }
+                if (milestoneBannerRect == null) return;
+                var s = Ease.OutBack(t);
+                milestoneBannerRect.localScale = new Vector3(s, s, 1f);
             }, Ease.Linear, unscaled: true);
 
-            yield return new WaitForSecondsRealtime(1.15f);
+            yield return Ease.GetWaitRealtime(1.15f);
 
             yield return Ease.Tween(0.24f, t =>
             {
@@ -1063,7 +1565,7 @@ namespace TopDownShooter.UI
             }, Ease.Linear, unscaled: true);
 
             milestoneBannerGroup.alpha = 0f;
-            milestoneRoutine = null;
+            _milestoneRoutine = null;
         }
 
         private static IEnumerator TweenImageFill(Image img, float start, float target, float duration)

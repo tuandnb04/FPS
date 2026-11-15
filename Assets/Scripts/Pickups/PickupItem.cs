@@ -1,11 +1,11 @@
 using System;
+using Character;
+using Core;
+using Feel;
 using UnityEngine;
 using UnityEngine.Pool;
-using TopDownShooter.Character;
-using TopDownShooter.Core;
-using TopDownShooter.Feel;
 
-namespace TopDownShooter.Pickups
+namespace Pickups
 {
     public enum PickupKind
     {
@@ -20,36 +20,27 @@ namespace TopDownShooter.Pickups
     /// </summary>
     public sealed class PickupItem : MonoBehaviour
     {
-        private ObjectPool<PickupItem> ownerPool;
-        private PickupKind kind;
-        private int xpValue;
-        private float healValue;
-        private int creditValue;
-        private float spinAngle;
-        private Vector3 baseLocalVisualPos;
-        private Transform visualTransform;
-        private MeshRenderer visualRenderer;
-        private GameObject xpVisual;
-        private GameObject medkitVisual;
-        private GameObject creditVisual;
-        private MeshRenderer xpRenderer;
-        private MeshRenderer medkitRenderer;
-        private MeshRenderer creditRenderer;
-        private MaterialPropertyBlock mpb;
-        private Action<PickupItem> onReleasedCallback;
-        private bool collected;
+        private static readonly int BaseColor = Shader.PropertyToID("_BaseColor");
+        private static readonly int EmissionColor = Shader.PropertyToID("_EmissionColor");
+        private ObjectPool<PickupItem> _ownerPool;
+        private int _xpValue;
+        private float _healValue;
+        private int _creditValue;
+        private float _spinAngle;
+        private Vector3 _baseLocalVisualPos;
+        private Transform _visualTransform;
+        private MeshRenderer _visualRenderer;
+        private GameObject _xpVisual;
+        private GameObject _medkitVisual;
+        private GameObject _creditVisual;
+        private MeshRenderer _xpRenderer;
+        private MeshRenderer _medkitRenderer;
+        private MeshRenderer _creditRenderer;
+        private MaterialPropertyBlock _mpb;
+        private Action<PickupItem> _onReleasedCallback;
+        private bool _collected;
 
-        public PickupKind Kind => kind;
-
-        public void ConfigureVisual(Transform visual, MeshRenderer rendererComp)
-        {
-            visualTransform = visual;
-            visualRenderer = rendererComp;
-            if (visualTransform != null)
-            {
-                baseLocalVisualPos = visualTransform.localPosition;
-            }
-        }
+        public PickupKind Kind { get; private set; }
 
         public void ConfigureMultiVisuals(
             Transform visualRoot,
@@ -57,16 +48,16 @@ namespace TopDownShooter.Pickups
             GameObject medObj, MeshRenderer medMr,
             GameObject credObj, MeshRenderer credMr)
         {
-            visualTransform = visualRoot;
-            xpVisual = xpObj;
-            xpRenderer = xpMr;
-            medkitVisual = medObj;
-            medkitRenderer = medMr;
-            creditVisual = credObj;
-            creditRenderer = credMr;
-            if (visualTransform != null)
+            _visualTransform = visualRoot;
+            _xpVisual = xpObj;
+            _xpRenderer = xpMr;
+            _medkitVisual = medObj;
+            _medkitRenderer = medMr;
+            _creditVisual = credObj;
+            _creditRenderer = credMr;
+            if (_visualTransform != null)
             {
-                baseLocalVisualPos = visualTransform.localPosition;
+                _baseLocalVisualPos = _visualTransform.localPosition;
             }
         }
 
@@ -79,79 +70,77 @@ namespace TopDownShooter.Pickups
             Action<PickupItem> onReleased,
             int creditAmount = 15)
         {
-            ownerPool = pool;
-            kind = pickupKind;
-            xpValue = xpAmount;
-            healValue = healAmount;
-            creditValue = creditAmount;
-            onReleasedCallback = onReleased;
-            collected = false;
+            _ownerPool = pool;
+            Kind = pickupKind;
+            _xpValue = xpAmount;
+            _healValue = healAmount;
+            _creditValue = creditAmount;
+            _onReleasedCallback = onReleased;
+            _collected = false;
 
-            transform.position = new Vector3(worldPos.x, 0.55f, worldPos.z);
-            spinAngle = UnityEngine.Random.Range(0f, 360f);
+            transform.position = new Vector3(worldPos.x, 0.24f, worldPos.z);
+            _spinAngle = UnityEngine.Random.Range(0f, 360f);
 
-            Color col = kind == PickupKind.Medkit
-                ? Palette.HealthGreen
-                : (kind == PickupKind.CreditCoin ? Palette.CreditGold : Palette.Accent);
-
-            if (xpVisual != null) xpVisual.SetActive(kind == PickupKind.XpShard);
-            if (medkitVisual != null) medkitVisual.SetActive(kind == PickupKind.Medkit);
-            if (creditVisual != null) creditVisual.SetActive(kind == PickupKind.CreditCoin);
-
-            MeshRenderer activeMr = kind == PickupKind.Medkit
-                ? (medkitRenderer != null ? medkitRenderer : visualRenderer)
-                : (kind == PickupKind.CreditCoin ? (creditRenderer != null ? creditRenderer : visualRenderer) : (xpRenderer != null ? xpRenderer : visualRenderer));
-
-            if (activeMr != null)
+            var col = Kind switch
             {
-                if (mpb == null) mpb = new MaterialPropertyBlock();
-                activeMr.GetPropertyBlock(mpb);
-                mpb.SetColor("_BaseColor", col);
-                mpb.SetColor("_EmissionColor", col * 2.4f);
-                activeMr.SetPropertyBlock(mpb);
-            }
+                PickupKind.Medkit => Palette.HealthGreen,
+                PickupKind.CreditCoin => Palette.CreditGold,
+                _ => Palette.Accent
+            };
+
+            if (_xpVisual != null) _xpVisual.SetActive(Kind == PickupKind.XpShard);
+            if (_medkitVisual != null) _medkitVisual.SetActive(Kind == PickupKind.Medkit);
+            if (_creditVisual != null) _creditVisual.SetActive(Kind == PickupKind.CreditCoin);
+
+            var activeMr = Kind == PickupKind.Medkit
+                ? (_medkitRenderer != null ? _medkitRenderer : _visualRenderer)
+                : (Kind == PickupKind.CreditCoin ? (_creditRenderer != null ? _creditRenderer : _visualRenderer) : (_xpRenderer != null ? _xpRenderer : _visualRenderer));
+
+            if (activeMr == null) return;
+            _mpb ??= new MaterialPropertyBlock();
+            activeMr.GetPropertyBlock(_mpb);
+            _mpb.SetColor(BaseColor, col);
+            _mpb.SetColor(EmissionColor, col * 0.45f);
+            activeMr.SetPropertyBlock(_mpb);
         }
 
         private void Update()
         {
-            if (collected) return;
+            if (_collected) return;
 
-            float dt = Time.deltaTime;
+            var dt = Time.deltaTime;
             if (dt <= 0f) return;
 
-            spinAngle += 120f * dt;
-            if (visualTransform != null)
+            _spinAngle += 32f * dt;
+            if (_visualTransform != null)
             {
-                float bob = Mathf.Sin(Time.time * 4f + spinAngle * 0.02f) * 0.12f;
-                visualTransform.localPosition = baseLocalVisualPos + new Vector3(0f, bob, 0f);
-                visualTransform.localRotation = Quaternion.Euler(kind == PickupKind.CreditCoin ? 75f : 24f, spinAngle, kind == PickupKind.CreditCoin ? 0f : 28f);
+                _visualTransform.localPosition = _baseLocalVisualPos;
+                _visualTransform.localRotation = Quaternion.Euler(0f, _spinAngle, 0f);
             }
 
-            PlayerController player = PlayerController.Instance;
-            if (player != null && !player.IsDead)
+            var player = PlayerController.Instance;
+            if (player == null || player.IsDead) return;
+            var toPlayer = player.transform.position - transform.position;
+            toPlayer.y = 0f;
+            var dist = toPlayer.magnitude;
+            var pullRadius = 3.6f + player.PickupMagnetBonus;
+
+            if (dist < pullRadius && dist > 0.01f)
             {
-                Vector3 toPlayer = player.transform.position - transform.position;
-                toPlayer.y = 0f;
-                float dist = toPlayer.magnitude;
-                float pullRadius = 3.6f + player.PickupMagnetBonus;
+                var pullSpeed = Mathf.Lerp(15f, 5f, dist / pullRadius);
+                transform.position += toPlayer.normalized * (pullSpeed * dt);
+            }
 
-                if (dist < pullRadius && dist > 0.01f)
-                {
-                    float pullSpeed = Mathf.Lerp(15f, 5f, dist / pullRadius);
-                    transform.position += toPlayer.normalized * (pullSpeed * dt);
-                }
-
-                if (dist <= 0.95f)
-                {
-                    Collect(player);
-                }
+            if (dist <= 0.95f)
+            {
+                Collect(player);
             }
         }
 
         private void OnTriggerEnter(Collider other)
         {
-            if (collected) return;
-            PlayerController player = other.GetComponentInParent<PlayerController>();
+            if (_collected) return;
+            var player = other.GetComponentInParent<PlayerController>();
             if (player != null && !player.IsDead)
             {
                 Collect(player);
@@ -160,24 +149,28 @@ namespace TopDownShooter.Pickups
 
         private void Collect(PlayerController player)
         {
-            if (collected) return;
-            collected = true;
+            if (_collected) return;
+            _collected = true;
 
-            if (kind == PickupKind.Medkit)
+            switch (Kind)
             {
-                player.Heal(healValue);
-                FeelManager.Instance?.OnPickupCollected(transform.position, 0, isHealth: true);
-            }
-            else if (kind == PickupKind.CreditCoin)
-            {
-                int gained = Mathf.Max(1, Mathf.RoundToInt(creditValue * player.CreditMultiplier));
-                GameManager.Instance?.AddRunCredits(gained);
-                FeelManager.Instance?.OnCreditCollected(transform.position, gained);
-            }
-            else
-            {
-                player.AddXp(xpValue);
-                FeelManager.Instance?.OnPickupCollected(transform.position, xpValue, isHealth: false);
+                case PickupKind.Medkit:
+                    player.Heal(_healValue);
+                    player.AddFragGrenades(1);
+                    FeelManager.Instance?.OnPickupCollected(transform.position, 0, isHealth: true);
+                    break;
+                case PickupKind.CreditCoin:
+                {
+                    var gained = Mathf.Max(1, Mathf.RoundToInt(_creditValue * player.CreditMultiplier));
+                    GameManager.Instance?.AddRunCredits(gained);
+                    FeelManager.Instance?.OnCreditCollected(transform.position, gained);
+                    break;
+                }
+                case PickupKind.XpShard:
+                default:
+                    player.AddXp(_xpValue);
+                    FeelManager.Instance?.OnPickupCollected(transform.position, _xpValue, isHealth: false);
+                    break;
             }
 
             ForceReturnToPool();
@@ -185,15 +178,15 @@ namespace TopDownShooter.Pickups
 
         public void ForceReturnToPool()
         {
-            if (!gameObject.activeSelf && collected)
+            if (!gameObject.activeSelf && _collected)
             {
                 return;
             }
-            collected = true;
-            onReleasedCallback?.Invoke(this);
-            if (ownerPool != null)
+            _collected = true;
+            _onReleasedCallback?.Invoke(this);
+            if (_ownerPool != null)
             {
-                ownerPool.Release(this);
+                _ownerPool.Release(this);
             }
             else
             {

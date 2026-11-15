@@ -4,26 +4,26 @@ using System.IO;
 using System.Text;
 using UnityEngine;
 
-namespace TopDownShooter.Core
+namespace Core
 {
     [Serializable]
     public sealed class GameSaveData
     {
         public int credits = 200;
-        public int highScore = 0;
+        public int highScore;
         public int highestWave = 1;
-        public int totalKills = 0;
+        public int totalKills;
 
-        public int armorRank = 0;
-        public int firepowerRank = 0;
-        public int thrusterRank = 0;
-        public int greedRank = 0;
+        public int armorRank;
+        public int firepowerRank;
+        public int thrusterRank;
+        public int greedRank;
 
-        public int selectedWeapon = 0;
-        public int selectedSkin = 0;
+        public int selectedWeapon;
+        public int selectedSkin;
 
-        public List<int> unlockedWeapons = new List<int> { 0 };
-        public List<int> unlockedSkins = new List<int> { 0 };
+        public List<int> unlockedWeapons = new() { 0 };
+        public List<int> unlockedSkins = new() { 0 };
 
         public string checksum = string.Empty;
     }
@@ -34,33 +34,33 @@ namespace TopDownShooter.Core
     /// </summary>
     public sealed class SaveManager : MonoBehaviour
     {
-        public static SaveManager Instance { get; private set; }
+        private static SaveManager Instance { get; set; }
 
         public const int MaxUpgradeRank = 5;
         public const int WeaponCount = 6;
         private const string SaveFileName = "vanguard_save.dat";
         private const string EncryptionKey = "VANGUARD_NEON_STORE_2026_KEY!";
 
-        private GameSaveData data = new GameSaveData();
-        private bool isLoaded;
+        private GameSaveData _data = new();
+        private bool _isLoaded;
 
         public GameSaveData Data
         {
             get
             {
-                if (!isLoaded) Load();
-                return data;
+                if (!_isLoaded) Load();
+                return _data;
             }
         }
 
-        public static string SaveFilePath => Path.Combine(Application.persistentDataPath, SaveFileName);
+        private static string SaveFilePath => Path.Combine(Application.persistentDataPath, SaveFileName);
 
         public static SaveManager EnsureInstance()
         {
             if (Instance != null) return Instance;
-            GameObject go = GameObject.Find("GameSystems");
+            var go = GameObject.Find("GameSystems");
             if (go == null) go = new GameObject("GameSystems");
-            SaveManager mgr = go.GetComponent<SaveManager>();
+            var mgr = go.GetComponent<SaveManager>();
             if (mgr == null) mgr = go.AddComponent<SaveManager>();
             return mgr;
         }
@@ -84,44 +84,44 @@ namespace TopDownShooter.Core
             }
         }
 
-        public void Load()
+        private void Load()
         {
-            string mainPath = SaveFilePath;
-            string bakPath = mainPath + ".bak";
+            var mainPath = SaveFilePath;
+            var bakPath = mainPath + ".bak";
 
-            if (TryReadValidatedFile(mainPath, out GameSaveData loaded))
+            if (TryReadValidatedFile(mainPath, out var loaded))
             {
-                data = loaded;
+                _data = loaded;
             }
-            else if (TryReadValidatedFile(bakPath, out GameSaveData backupLoaded))
+            else if (TryReadValidatedFile(bakPath, out var backupLoaded))
             {
-                data = backupLoaded;
+                _data = backupLoaded;
             }
             else
             {
-                data = CreateFreshData();
+                _data = CreateFreshData();
             }
 
-            NormalizeLists(data);
-            isLoaded = true;
+            NormalizeLists(_data);
+            _isLoaded = true;
         }
 
         public void Save()
         {
-            if (!isLoaded && data == null) data = CreateFreshData();
-            NormalizeLists(data);
-            data.checksum = ComputeChecksum(data);
+            if (!_isLoaded && _data == null) _data = CreateFreshData();
+            NormalizeLists(_data);
+            _data.checksum = ComputeChecksum(_data);
 
-            string json = JsonUtility.ToJson(data, false);
-            byte[] plainBytes = Encoding.UTF8.GetBytes(json);
-            byte[] cipherBytes = XorBytes(plainBytes, EncryptionKey);
-            string encodedPayload = Convert.ToBase64String(cipherBytes);
+            var json = JsonUtility.ToJson(_data, false);
+            var plainBytes = Encoding.UTF8.GetBytes(json);
+            var cipherBytes = XorBytes(plainBytes, EncryptionKey);
+            var encodedPayload = Convert.ToBase64String(cipherBytes);
 
-            string mainPath = SaveFilePath;
-            string tmpPath = mainPath + ".tmp";
-            string bakPath = mainPath + ".bak";
+            var mainPath = SaveFilePath;
+            var tmpPath = mainPath + ".tmp";
+            var bakPath = mainPath + ".bak";
 
-            string dir = Path.GetDirectoryName(mainPath);
+            var dir = Path.GetDirectoryName(mainPath);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             {
                 Directory.CreateDirectory(dir);
@@ -138,7 +138,7 @@ namespace TopDownShooter.Core
                 File.Move(mainPath, bakPath);
             }
             File.Move(tmpPath, mainPath);
-            PlayerPrefs.SetInt("Vanguard_HighScore", data.highScore);
+            PlayerPrefs.SetInt("Vanguard_HighScore", _data.highScore);
             PlayerPrefs.Save();
         }
 
@@ -149,15 +149,7 @@ namespace TopDownShooter.Core
             Save();
         }
 
-        public bool TrySpendCredits(int cost)
-        {
-            if (cost < 0 || Data.credits < cost) return false;
-            Data.credits -= cost;
-            Save();
-            return true;
-        }
-
-        public int GetUpgradeCost(int currentRank)
+        public static int GetUpgradeCost(int currentRank)
         {
             if (currentRank >= MaxUpgradeRank) return 0;
             return 100 + currentRank * 75;
@@ -165,33 +157,33 @@ namespace TopDownShooter.Core
 
         public int GetUpgradeRank(string statKey)
         {
-            GameSaveData d = Data;
-            switch (statKey)
+            var d = Data;
+            return statKey switch
             {
-                case "armor": return d.armorRank;
-                case "firepower": return d.firepowerRank;
-                case "thruster": return d.thrusterRank;
-                case "greed": return d.greedRank;
-                default: return 0;
-            }
+                "armor" => d.armorRank,
+                "firepower" => d.firepowerRank,
+                "thruster" => d.thrusterRank,
+                "greed" => d.greedRank,
+                _ => 0
+            };
         }
 
         public bool TryUpgradeStat(string statKey)
         {
-            int rank = GetUpgradeRank(statKey);
+            var rank = GetUpgradeRank(statKey);
             if (rank >= MaxUpgradeRank) return false;
-            int cost = GetUpgradeCost(rank);
+            var cost = GetUpgradeCost(rank);
             if (Data.credits < cost) return false;
 
-            data.credits -= cost;
+            _data.credits -= cost;
             switch (statKey)
             {
-                case "armor": data.armorRank++; break;
-                case "firepower": data.firepowerRank++; break;
-                case "thruster": data.thrusterRank++; break;
-                case "greed": data.greedRank++; break;
+                case "armor": _data.armorRank++; break;
+                case "firepower": _data.firepowerRank++; break;
+                case "thruster": _data.thrusterRank++; break;
+                case "greed": _data.greedRank++; break;
                 default:
-                    data.credits += cost;
+                    _data.credits += cost;
                     return false;
             }
             Save();
@@ -205,7 +197,7 @@ namespace TopDownShooter.Core
 
         public bool TryUnlockOrEquipWeapon(int id, int cost)
         {
-            if (id < 0 || id >= WeaponCount) return false;
+            if (id is < 0 or >= WeaponCount) return false;
             if (IsWeaponUnlocked(id))
             {
                 Data.selectedWeapon = id;
@@ -227,7 +219,7 @@ namespace TopDownShooter.Core
 
         public bool TryUnlockOrEquipSkin(int id, int cost)
         {
-            if (id < 0 || id > 2) return false;
+            if (id is < 0 or > 2) return false;
             if (IsSkinUnlocked(id))
             {
                 Data.selectedSkin = id;
@@ -244,17 +236,10 @@ namespace TopDownShooter.Core
 
         public void RecordRunResult(int runScore, int runKills, int waveReached)
         {
-            GameSaveData d = Data;
+            var d = Data;
             if (runScore > d.highScore) d.highScore = runScore;
             if (waveReached > d.highestWave) d.highestWave = waveReached;
             d.totalKills += Mathf.Max(0, runKills);
-            Save();
-        }
-
-        public void ResetForTesting()
-        {
-            data = CreateFreshData();
-            isLoaded = true;
             Save();
         }
 
@@ -279,9 +264,9 @@ namespace TopDownShooter.Core
 
         private static void NormalizeLists(GameSaveData d)
         {
-            if (d.unlockedWeapons == null) d.unlockedWeapons = new List<int>();
+            d.unlockedWeapons ??= new List<int>();
             if (!d.unlockedWeapons.Contains(0)) d.unlockedWeapons.Add(0);
-            if (d.unlockedSkins == null) d.unlockedSkins = new List<int>();
+            d.unlockedSkins ??= new List<int>();
             if (!d.unlockedSkins.Contains(0)) d.unlockedSkins.Add(0);
             if (!d.unlockedWeapons.Contains(d.selectedWeapon)) d.selectedWeapon = 0;
             if (!d.unlockedSkins.Contains(d.selectedSkin)) d.selectedSkin = 0;
@@ -294,15 +279,15 @@ namespace TopDownShooter.Core
 
             try
             {
-                string encoded = File.ReadAllText(path, Encoding.UTF8);
+                var encoded = File.ReadAllText(path, Encoding.UTF8);
                 if (string.IsNullOrEmpty(encoded)) return false;
-                byte[] cipherBytes = Convert.FromBase64String(encoded);
-                byte[] plainBytes = XorBytes(cipherBytes, EncryptionKey);
-                string json = Encoding.UTF8.GetString(plainBytes);
-                GameSaveData parsed = JsonUtility.FromJson<GameSaveData>(json);
+                var cipherBytes = Convert.FromBase64String(encoded);
+                var plainBytes = XorBytes(cipherBytes, EncryptionKey);
+                var json = Encoding.UTF8.GetString(plainBytes);
+                var parsed = JsonUtility.FromJson<GameSaveData>(json);
                 if (parsed == null) return false;
 
-                string expected = ComputeChecksum(parsed);
+                var expected = ComputeChecksum(parsed);
                 if (!string.Equals(parsed.checksum, expected, StringComparison.Ordinal))
                 {
                     return false;
@@ -319,7 +304,7 @@ namespace TopDownShooter.Core
 
         private static string ComputeChecksum(GameSaveData d)
         {
-            StringBuilder sb = new StringBuilder();
+            var sb = new StringBuilder();
             sb.Append(d.credits).Append('|')
               .Append(d.highScore).Append('|')
               .Append(d.highestWave).Append('|')
@@ -333,19 +318,21 @@ namespace TopDownShooter.Core
 
             if (d.unlockedWeapons != null)
             {
-                for (int i = 0; i < d.unlockedWeapons.Count; i++) sb.Append(d.unlockedWeapons[i]).Append(',');
+                foreach (var t in d.unlockedWeapons)
+                    sb.Append(t).Append(',');
             }
             sb.Append('|');
             if (d.unlockedSkins != null)
             {
-                for (int i = 0; i < d.unlockedSkins.Count; i++) sb.Append(d.unlockedSkins[i]).Append(',');
+                foreach (var t in d.unlockedSkins)
+                    sb.Append(t).Append(',');
             }
 
-            uint hash = 2166136261u;
-            string raw = sb.ToString();
-            for (int i = 0; i < raw.Length; i++)
+            var hash = 2166136261u;
+            var raw = sb.ToString();
+            foreach (var t in raw)
             {
-                hash ^= raw[i];
+                hash ^= t;
                 hash *= 16777619u;
             }
             return hash.ToString("X8");
@@ -353,9 +340,9 @@ namespace TopDownShooter.Core
 
         private static byte[] XorBytes(byte[] input, string key)
         {
-            byte[] keyBytes = Encoding.UTF8.GetBytes(key);
-            byte[] result = new byte[input.Length];
-            for (int i = 0; i < input.Length; i++)
+            var keyBytes = Encoding.UTF8.GetBytes(key);
+            var result = new byte[input.Length];
+            for (var i = 0; i < input.Length; i++)
             {
                 result[i] = (byte)(input[i] ^ keyBytes[i % keyBytes.Length]);
             }

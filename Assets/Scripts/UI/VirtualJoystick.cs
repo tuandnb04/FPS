@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
 
-namespace TopDownShooter.UI
+namespace UI
 {
     /// <summary>
     /// Mobile twin-stick touch joystick supporting drag clamping, deadzone filtering,
@@ -14,15 +14,15 @@ namespace TopDownShooter.UI
         [SerializeField] private float handleRange = 52f;
         [SerializeField] private float deadZone = 0.12f;
 
-        private Vector2 liveInput;
-        private bool pointerActive;
+        private Vector2 _liveInput;
+        private bool _pointerActive;
 
-        private bool hasSimulation;
-        private Vector2 simulatedInput;
-        private bool simulatedHeld;
+        private bool _hasSimulation;
+        private Vector2 _simulatedInput;
+        private bool _simulatedHeld;
 
-        public Vector2 Value => hasSimulation ? simulatedInput : liveInput;
-        public bool IsHeld => hasSimulation ? simulatedHeld : pointerActive;
+        public Vector2 Value => _hasSimulation ? _simulatedInput : _liveInput;
+        public bool IsHeld => _hasSimulation ? _simulatedHeld : _pointerActive;
 
         public void BindRects(RectTransform bg, RectTransform handle, float range = 52f)
         {
@@ -33,33 +33,33 @@ namespace TopDownShooter.UI
 
         public void SetSimulatedVector(Vector2 value, bool held)
         {
-            hasSimulation = true;
-            simulatedInput = Vector2.ClampMagnitude(value, 1f);
-            simulatedHeld = held;
+            _hasSimulation = true;
+            _simulatedInput = Vector2.ClampMagnitude(value, 1f);
+            _simulatedHeld = held;
             if (handleRect != null)
             {
-                handleRect.anchoredPosition = simulatedInput * handleRange;
+                handleRect.anchoredPosition = _simulatedInput * handleRange;
             }
         }
 
         public void ClearSimulation()
         {
-            hasSimulation = false;
-            simulatedInput = Vector2.zero;
-            simulatedHeld = false;
+            _hasSimulation = false;
+            _simulatedInput = Vector2.zero;
+            _simulatedHeld = false;
             ResetHandleVisual();
         }
 
         private void OnDisable()
         {
-            pointerActive = false;
-            liveInput = Vector2.zero;
+            _pointerActive = false;
+            _liveInput = Vector2.zero;
             ResetHandleVisual();
         }
 
         public void OnPointerDown(PointerEventData eventData)
         {
-            pointerActive = true;
+            _pointerActive = true;
             OnDrag(eventData);
         }
 
@@ -71,17 +71,17 @@ namespace TopDownShooter.UI
                 backgroundRect,
                 eventData.position,
                 eventData.pressEventCamera,
-                out Vector2 localPos))
+                out var localPos))
             {
-                Vector2 halfSize = backgroundRect.sizeDelta * 0.5f;
-                float radius = Mathf.Max(20f, Mathf.Min(halfSize.x, halfSize.y));
-                Vector2 normalized = localPos / radius;
+                var halfSize = backgroundRect.sizeDelta * 0.5f;
+                var radius = Mathf.Max(20f, Mathf.Min(halfSize.x, halfSize.y));
+                var normalized = localPos / radius;
                 if (normalized.magnitude > 1f)
                 {
                     normalized.Normalize();
                 }
 
-                liveInput = normalized.magnitude < deadZone ? Vector2.zero : normalized;
+                _liveInput = normalized.magnitude < deadZone ? Vector2.zero : normalized;
                 if (handleRect != null)
                 {
                     handleRect.anchoredPosition = normalized * handleRange;
@@ -91,8 +91,8 @@ namespace TopDownShooter.UI
 
         public void OnPointerUp(PointerEventData eventData)
         {
-            pointerActive = false;
-            liveInput = Vector2.zero;
+            _pointerActive = false;
+            _liveInput = Vector2.zero;
             ResetHandleVisual();
         }
 

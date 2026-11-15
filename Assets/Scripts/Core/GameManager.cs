@@ -1,13 +1,14 @@
+using System;
+using Audio;
+using Camera;
+using Character;
+using Enemies;
+using Feel;
+using UI;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using TopDownShooter.Audio;
-using TopDownShooter.CameraRig;
-using TopDownShooter.Character;
-using TopDownShooter.Enemies;
-using TopDownShooter.Feel;
-using TopDownShooter.UI;
 
-namespace TopDownShooter.Core
+namespace Core
 {
     /// <summary>
     /// Authoritative game state coordinator driving Title <-> Armory, Playing <-> LevelUpDraft,
@@ -19,17 +20,15 @@ namespace TopDownShooter.Core
 
         private const string PrefHighScore = "Vanguard_HighScore";
 
-        private GameState currentState = GameState.Title;
-        private int score;
-        private int kills;
-        private int runCreditsEarned;
-        private int highScore;
+        public GameState CurrentState { get; private set; } = GameState.Title;
 
-        public GameState CurrentState => currentState;
-        public int Score => score;
-        public int Kills => kills;
-        public int RunCreditsEarned => runCreditsEarned;
-        public int HighScore => highScore;
+        private int Score { get; set; }
+
+        private int Kills { get; set; }
+
+        private int RunCreditsEarned { get; set; }
+
+        private int HighScore { get; set; }
 
         private void Awake()
         {
@@ -40,8 +39,8 @@ namespace TopDownShooter.Core
             }
             Instance = this;
 
-            SaveManager save = SaveManager.EnsureInstance();
-            highScore = Mathf.Max(save.Data.highScore, PlayerPrefs.GetInt(PrefHighScore, 0));
+            var save = SaveManager.EnsureInstance();
+            HighScore = Mathf.Max(save.Data.highScore, PlayerPrefs.GetInt(PrefHighScore, 0));
         }
 
         private void OnDestroy()
@@ -54,13 +53,13 @@ namespace TopDownShooter.Core
 
         private void Start()
         {
-            SaveManager save = SaveManager.EnsureInstance();
-            highScore = Mathf.Max(highScore, save.Data.highScore);
+            var save = SaveManager.EnsureInstance();
+            HighScore = Mathf.Max(HighScore, save.Data.highScore);
 
             Time.timeScale = 1f;
-            currentState = GameState.Title;
+            CurrentState = GameState.Title;
             TopDownCameraRig.Instance?.SetTitleMode(true);
-            UIManager.Instance?.UpdateScore(0, highScore);
+            UIManager.Instance?.UpdateScore(0, HighScore);
             UIManager.Instance?.UpdateCredits(save.Data.credits, 0);
             UIManager.Instance?.RefreshArmoryUI();
             UIManager.Instance?.ApplyImmediateState(GameState.Title);
@@ -68,46 +67,49 @@ namespace TopDownShooter.Core
 
         private void Update()
         {
-            if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
+            if (Keyboard.current == null || !Keyboard.current.escapeKey.wasPressedThisFrame) return;
+            switch (CurrentState)
             {
-                if (currentState == GameState.Playing)
-                {
+                case GameState.Playing:
                     SetPaused(true);
-                }
-                else if (currentState == GameState.Paused)
-                {
+                    break;
+                case GameState.Paused:
                     SetPaused(false);
-                }
-                else if (currentState == GameState.Armory)
-                {
+                    break;
+                case GameState.Armory:
                     CloseArmory();
-                }
-                else if (currentState == GameState.Cutscene)
-                {
+                    break;
+                case GameState.Cutscene:
                     CutsceneDirector.Instance?.SkipCurrentCutscene();
-                }
+                    break;
+                case GameState.Title:
+                case GameState.Ended:
+                case GameState.LevelUpDraft:
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
             }
         }
 
         public void OpenArmory()
         {
-            if (currentState != GameState.Title && currentState != GameState.Ended) return;
+            if (CurrentState != GameState.Title && CurrentState != GameState.Ended) return;
             AudioManager.Instance?.PlayUIClick();
             Time.timeScale = 1f;
-            currentState = GameState.Armory;
+            CurrentState = GameState.Armory;
             UIManager.Instance?.RefreshArmoryUI();
             UIManager.Instance?.TransitionToState(GameState.Armory);
         }
 
         public void CloseArmory()
         {
-            if (currentState != GameState.Armory) return;
+            if (CurrentState != GameState.Armory) return;
             AudioManager.Instance?.PlayUIClick();
             PlayerController.Instance?.ApplySaveLoadout();
-            SaveManager save = SaveManager.EnsureInstance();
-            UIManager.Instance?.UpdateScore(0, highScore);
+            var save = SaveManager.EnsureInstance();
+            UIManager.Instance?.UpdateScore(0, HighScore);
             UIManager.Instance?.UpdateCredits(save.Data.credits, 0);
-            currentState = GameState.Title;
+            CurrentState = GameState.Title;
             UIManager.Instance?.TransitionToState(GameState.Title);
         }
 
@@ -118,7 +120,7 @@ namespace TopDownShooter.Core
 
             if (CutsceneDirector.Instance != null)
             {
-                currentState = GameState.Cutscene;
+                CurrentState = GameState.Cutscene;
                 TopDownCameraRig.Instance?.SetTitleMode(false);
                 UIManager.Instance?.ApplyImmediateState(GameState.Cutscene);
                 CutsceneDirector.Instance.PlayCutscene(CutsceneType.IntroInfil, EnterCombatWaveOneAfterIntro);
@@ -144,32 +146,33 @@ namespace TopDownShooter.Core
             CutsceneDirector.Instance?.ResetCampaignProps();
             EnemySpawner.Instance?.ResetAndClearAll();
             PlayerController.Instance?.ResetPlayer();
+            SquadDirector.Instance?.ResetSquadForMission();
             StoryDirector.ResetCampaignRun();
             UIManager.Instance?.HideRadioCommsImmediate();
 
-            score = 0;
-            kills = 0;
-            runCreditsEarned = 0;
+            Score = 0;
+            Kills = 0;
+            RunCreditsEarned = 0;
             Time.timeScale = 1f;
 
-            SaveManager save = SaveManager.EnsureInstance();
-            UIManager.Instance?.UpdateScore(score, highScore);
+            var save = SaveManager.EnsureInstance();
+            UIManager.Instance?.UpdateScore(Score, HighScore);
             UIManager.Instance?.UpdateCredits(save.Data.credits, 0);
             UIManager.Instance?.RefreshWeaponBar();
         }
 
         private void EnterCombatWaveOneAfterIntro()
         {
-            currentState = GameState.Playing;
+            CurrentState = GameState.Playing;
             TopDownCameraRig.Instance?.SetTitleMode(false);
             UIManager.Instance?.TransitionToState(GameState.Playing);
             StoryDirector.NotifyMissionDeployed();
             EnemySpawner.Instance?.BeginWave(1);
         }
 
-        public void TriggerCutscene(CutsceneType cutsceneType, System.Action onComplete = null)
+        public void TriggerCutscene(CutsceneType cutsceneType, Action onComplete = null)
         {
-            if (currentState == GameState.Ended) return;
+            if (CurrentState == GameState.Ended) return;
             if (CutsceneDirector.Instance == null)
             {
                 onComplete?.Invoke();
@@ -177,88 +180,75 @@ namespace TopDownShooter.Core
             }
 
             FeelManager.Instance?.CancelHitStop();
-            currentState = GameState.Cutscene;
+            CurrentState = GameState.Cutscene;
             UIManager.Instance?.ApplyImmediateState(GameState.Cutscene);
             CutsceneDirector.Instance.PlayCutscene(cutsceneType, () =>
             {
-                if (currentState != GameState.Ended)
+                if (CurrentState != GameState.Ended)
                 {
-                    currentState = GameState.Playing;
+                    CurrentState = GameState.Playing;
                     UIManager.Instance?.TransitionToState(GameState.Playing);
                 }
                 onComplete?.Invoke();
             });
         }
 
-        public void OpenLevelUpDraft()
-        {
-            if (currentState != GameState.Playing) return;
-            PlayerController player = PlayerController.Instance;
-            if (player == null) return;
-
-            var options = player.RollDraftOptions(3);
-            if (options.Count == 0) return;
-
-            AudioManager.Instance?.SetPausedDucking(true);
-            FeelManager.Instance?.CancelHitStop();
-            Time.timeScale = 0f;
-            currentState = GameState.LevelUpDraft;
-            UIManager.Instance?.PresentDraftOptions(options, player);
-            UIManager.Instance?.TransitionToState(GameState.LevelUpDraft);
-        }
-
         public void SelectDraftSkill(RogueliteSkillId skill)
         {
-            if (currentState != GameState.LevelUpDraft) return;
+            if (CurrentState != GameState.LevelUpDraft) return;
             AudioManager.Instance?.PlayUIClick();
             AudioManager.Instance?.SetPausedDucking(false);
 
             PlayerController.Instance?.ApplyRogueliteSkill(skill);
             Time.timeScale = 1f;
-            currentState = GameState.Playing;
+            CurrentState = GameState.Playing;
             UIManager.Instance?.TransitionToState(GameState.Playing);
         }
 
         public void SetPaused(bool paused)
         {
-            if (paused && currentState != GameState.Playing) return;
-            if (!paused && currentState != GameState.Paused) return;
+            switch (paused)
+            {
+                case true when CurrentState != GameState.Playing:
+                case false when CurrentState != GameState.Paused:
+                    return;
+            }
 
             AudioManager.Instance?.PlayUIClick();
             AudioManager.Instance?.SetPausedDucking(paused);
 
             FeelManager.Instance?.CancelHitStop();
             Time.timeScale = paused ? 0f : 1f;
-            currentState = paused ? GameState.Paused : GameState.Playing;
-            UIManager.Instance?.TransitionToState(currentState);
+            CurrentState = paused ? GameState.Paused : GameState.Playing;
+            UIManager.Instance?.TransitionToState(CurrentState);
         }
 
         public void EndMission(bool victory)
         {
-            if (currentState == GameState.Ended) return;
+            if (CurrentState == GameState.Ended) return;
 
             AudioManager.Instance?.SetPausedDucking(true);
             FeelManager.Instance?.CancelHitStop();
 
-            bool isNewRecord = score > highScore;
+            var isNewRecord = Score > HighScore;
             if (isNewRecord)
             {
-                highScore = score;
-                PlayerPrefs.SetInt(PrefHighScore, highScore);
+                HighScore = Score;
+                PlayerPrefs.SetInt(PrefHighScore, HighScore);
                 PlayerPrefs.Save();
             }
 
-            int waveReached = EnemySpawner.Instance != null ? EnemySpawner.Instance.CurrentWave : 1;
-            SaveManager save = SaveManager.EnsureInstance();
-            save.RecordRunResult(score, kills, waveReached);
-            highScore = Mathf.Max(highScore, save.Data.highScore);
+            var waveReached = EnemySpawner.Instance != null ? EnemySpawner.Instance.CurrentWave : 1;
+            var save = SaveManager.EnsureInstance();
+            save.RecordRunResult(Score, Kills, waveReached);
+            HighScore = Mathf.Max(HighScore, save.Data.highScore);
 
             Time.timeScale = 0f;
-            currentState = GameState.Ended;
+            CurrentState = GameState.Ended;
 
-            UIManager.Instance?.UpdateScore(score, highScore);
-            UIManager.Instance?.UpdateCredits(save.Data.credits, runCreditsEarned);
-            UIManager.Instance?.PopulateEndedSummary(victory, score, highScore, kills, waveReached, isNewRecord);
+            UIManager.Instance?.UpdateScore(Score, HighScore);
+            UIManager.Instance?.UpdateCredits(save.Data.credits, RunCreditsEarned);
+            UIManager.Instance?.PopulateEndedSummary(victory, Score, HighScore, Kills, waveReached, isNewRecord);
             UIManager.Instance?.TransitionToState(GameState.Ended);
             if (victory)
             {
@@ -268,10 +258,10 @@ namespace TopDownShooter.Core
 
         public void CompleteCampaignVictory()
         {
-            if (currentState == GameState.Ended) return;
+            if (CurrentState == GameState.Ended) return;
             if (CutsceneDirector.Instance != null)
             {
-                currentState = GameState.Cutscene;
+                CurrentState = GameState.Cutscene;
                 UIManager.Instance?.ApplyImmediateState(GameState.Cutscene);
                 CutsceneDirector.Instance.PlayCutscene(CutsceneType.VictoryEvac, FinishCampaignVictoryImmediate);
             }
@@ -281,9 +271,9 @@ namespace TopDownShooter.Core
             }
         }
 
-        public void FinishCampaignVictoryImmediate()
+        private void FinishCampaignVictoryImmediate()
         {
-            if (currentState == GameState.Ended) return;
+            if (CurrentState == GameState.Ended) return;
             AddRunCredits(StoryDirector.CampaignVictoryBonusCredits);
             EndMission(true);
         }
@@ -303,18 +293,19 @@ namespace TopDownShooter.Core
             CutsceneDirector.Instance?.ResetCampaignProps();
             EnemySpawner.Instance?.ResetAndClearAll();
             PlayerController.Instance?.ResetPlayer();
+            SquadDirector.Instance?.ResetSquadForMission();
             StoryDirector.ResetCampaignRun();
             UIManager.Instance?.HideRadioCommsImmediate();
 
-            score = 0;
-            kills = 0;
-            runCreditsEarned = 0;
+            Score = 0;
+            Kills = 0;
+            RunCreditsEarned = 0;
             Time.timeScale = 1f;
-            currentState = GameState.Title;
+            CurrentState = GameState.Title;
 
-            SaveManager save = SaveManager.EnsureInstance();
+            var save = SaveManager.EnsureInstance();
             TopDownCameraRig.Instance?.SetTitleMode(true);
-            UIManager.Instance?.UpdateScore(0, highScore);
+            UIManager.Instance?.UpdateScore(0, HighScore);
             UIManager.Instance?.UpdateCredits(save.Data.credits, 0);
             UIManager.Instance?.RefreshArmoryUI();
             UIManager.Instance?.TransitionToState(GameState.Title);
@@ -322,24 +313,24 @@ namespace TopDownShooter.Core
 
         public void AddScoreAndKill(int points)
         {
-            score += Mathf.Max(0, points);
-            kills++;
-            StoryDirector.NotifyKillCount(kills);
-            if (score > highScore)
+            Score += Mathf.Max(0, points);
+            Kills++;
+            StoryDirector.NotifyKillCount(Kills);
+            if (Score > HighScore)
             {
-                highScore = score;
-                PlayerPrefs.SetInt(PrefHighScore, highScore);
+                HighScore = Score;
+                PlayerPrefs.SetInt(PrefHighScore, HighScore);
             }
-            UIManager.Instance?.UpdateScore(score, highScore);
+            UIManager.Instance?.UpdateScore(Score, HighScore);
         }
 
         public void AddRunCredits(int amount)
         {
             if (amount <= 0) return;
-            runCreditsEarned += amount;
-            SaveManager save = SaveManager.EnsureInstance();
+            RunCreditsEarned += amount;
+            var save = SaveManager.EnsureInstance();
             save.AddCredits(amount);
-            UIManager.Instance?.UpdateCredits(save.Data.credits, runCreditsEarned);
+            UIManager.Instance?.UpdateCredits(save.Data.credits, RunCreditsEarned);
         }
     }
 }

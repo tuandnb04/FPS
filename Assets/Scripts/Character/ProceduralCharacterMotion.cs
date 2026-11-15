@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TopDownShooter.Character
+namespace Character
 {
     /// <summary>
     /// Procedural character animation driving gait bob, limb swing, acceleration/turn lean,
@@ -36,32 +36,32 @@ namespace TopDownShooter.Character
         [SerializeField] private float idleBreathAmplitude = 0.025f;
         [SerializeField] private float settleBlendDuration = 0.18f;
 
-        private Vector3 baseVisualLocalPos;
-        private Vector3 baseSecondaryLocalPos;
-        private Vector3 baseWeaponAnchorLocalPos;
-        private Vector3 currentWeaponRecoil;
-        private float gaitPhase;
-        private float idlePhase;
-        private float moveBlend;
-        private float smoothedBobOffset;
-        private float smoothedForwardLean;
-        private float smoothedBankRoll;
-        private float currentLegSwingAngle;
-        private float currentIdleOffset;
+        private Vector3 _baseVisualLocalPos;
+        private Vector3 _baseSecondaryLocalPos;
+        private Vector3 _baseWeaponAnchorLocalPos;
+        private Vector3 _currentWeaponRecoil;
+        private float _gaitPhase;
+        private float _idlePhase;
+        private float _moveBlend;
+        private float _smoothedBankRoll;
 
-        private Vector3 currentSquashScale = Vector3.one;
-        private float squashTimer;
-        private float squashDuration = 0.14f;
-        private Vector3 squashStartScale = Vector3.one;
+        private Vector3 _currentSquashScale = Vector3.one;
+        private float _squashTimer;
+        private float _squashDuration = 0.14f;
+        private Vector3 _squashStartScale = Vector3.one;
 
-        private Vector3 smoothedSecondaryLag;
-        private Vector3 prevVelocity;
+        private Vector3 _smoothedSecondaryLag;
+        private Vector3 _prevVelocity;
 
-        public float CurrentBobOffset => smoothedBobOffset;
-        public float CurrentLeanAngle => smoothedForwardLean;
-        public float CurrentLegAngle => currentLegSwingAngle;
-        public float CurrentIdleOffset => currentIdleOffset;
-        public bool IsSettledIdle => moveBlend < 0.08f;
+        public float CurrentBobOffset { get; private set; }
+
+        public float CurrentLeanAngle { get; private set; }
+
+        public float CurrentLegAngle { get; private set; }
+
+        public float CurrentIdleOffset { get; private set; }
+
+        public bool IsSettledIdle => _moveBlend < 0.08f;
 
         public void BindPivots(
             Transform root,
@@ -117,14 +117,14 @@ namespace TopDownShooter.Character
             forearmLength = Mathf.Max(0.15f, foreLen);
             if (weaponAnchor != null)
             {
-                baseWeaponAnchorLocalPos = weaponAnchor.localPosition;
+                _baseWeaponAnchorLocalPos = weaponAnchor.localPosition;
             }
             SolveWeaponArmIkImmediate();
         }
 
         public void TriggerWeaponRecoil(Vector3 kickLocal)
         {
-            currentWeaponRecoil = Vector3.ClampMagnitude(currentWeaponRecoil + kickLocal, 0.11f);
+            _currentWeaponRecoil = Vector3.ClampMagnitude(_currentWeaponRecoil + kickLocal, 0.11f);
         }
 
         private void Awake()
@@ -136,23 +136,23 @@ namespace TopDownShooter.Character
         {
             if (visualRoot != null)
             {
-                baseVisualLocalPos = visualRoot.localPosition;
+                _baseVisualLocalPos = visualRoot.localPosition;
             }
             if (secondaryPivot != null)
             {
-                baseSecondaryLocalPos = secondaryPivot.localPosition;
+                _baseSecondaryLocalPos = secondaryPivot.localPosition;
             }
             if (weaponAnchor != null)
             {
-                baseWeaponAnchorLocalPos = weaponAnchor.localPosition;
+                _baseWeaponAnchorLocalPos = weaponAnchor.localPosition;
             }
         }
 
         public void TriggerSquash(Vector3 impactScale, float duration = 0.14f)
         {
-            squashStartScale = impactScale;
-            squashDuration = Mathf.Max(0.05f, duration);
-            squashTimer = squashDuration;
+            _squashStartScale = impactScale;
+            _squashDuration = Mathf.Max(0.05f, duration);
+            _squashTimer = _squashDuration;
         }
 
         /// <summary>
@@ -160,20 +160,20 @@ namespace TopDownShooter.Character
         /// </summary>
         public void ResetMotionState()
         {
-            moveBlend = 0f;
-            smoothedBobOffset = 0f;
-            smoothedForwardLean = 0f;
-            smoothedBankRoll = 0f;
-            currentLegSwingAngle = 0f;
-            currentIdleOffset = 0f;
-            prevVelocity = Vector3.zero;
-            smoothedSecondaryLag = Vector3.zero;
-            currentWeaponRecoil = Vector3.zero;
-            squashTimer = 0f;
-            currentSquashScale = Vector3.one;
+            _moveBlend = 0f;
+            CurrentBobOffset = 0f;
+            CurrentLeanAngle = 0f;
+            _smoothedBankRoll = 0f;
+            CurrentLegAngle = 0f;
+            CurrentIdleOffset = 0f;
+            _prevVelocity = Vector3.zero;
+            _smoothedSecondaryLag = Vector3.zero;
+            _currentWeaponRecoil = Vector3.zero;
+            _squashTimer = 0f;
+            _currentSquashScale = Vector3.one;
             if (weaponAnchor != null)
             {
-                weaponAnchor.localPosition = baseWeaponAnchorLocalPos;
+                weaponAnchor.localPosition = _baseWeaponAnchorLocalPos;
             }
             if (visualRoot != null)
             {
@@ -188,124 +188,124 @@ namespace TopDownShooter.Character
         /// </summary>
         public void StepMotion(Vector3 worldVelocity, float yawVelocityDegPerSec, bool isAimingWeapon)
         {
-            float dt = Time.deltaTime;
+            var dt = Time.deltaTime;
             if (dt <= 0f)
             {
                 return;
             }
 
-            Vector3 flatVel = new Vector3(worldVelocity.x, 0f, worldVelocity.z);
-            float speed = flatVel.magnitude;
-            float speedRatio = Mathf.Clamp01(speed / 6.5f);
-            bool moving = speed > 0.12f;
+            var flatVel = new Vector3(worldVelocity.x, 0f, worldVelocity.z);
+            var speed = flatVel.magnitude;
+            var speedRatio = Mathf.Clamp01(speed / 6.5f);
+            var moving = speed > 0.12f;
 
-            float blendStep = dt / Mathf.Max(0.05f, settleBlendDuration);
-            moveBlend = Mathf.MoveTowards(moveBlend, moving ? speedRatio : 0f, blendStep);
+            var blendStep = dt / Mathf.Max(0.05f, settleBlendDuration);
+            _moveBlend = Mathf.MoveTowards(_moveBlend, moving ? speedRatio : 0f, blendStep);
 
             if (moving)
             {
-                float stepRate = gaitFrequency * Mathf.Lerp(0.75f, 1.15f, speedRatio);
-                gaitPhase += dt * stepRate * Mathf.PI * 2f;
+                var stepRate = gaitFrequency * Mathf.Lerp(0.75f, 1.15f, speedRatio);
+                _gaitPhase += dt * stepRate * Mathf.PI * 2f;
             }
             else
             {
-                idlePhase += dt * idleBreathFrequency * Mathf.PI * 2f;
+                _idlePhase += dt * idleBreathFrequency * Mathf.PI * 2f;
             }
 
             // Gait bounce vs idle breathing settle
-            float activeBob = Mathf.Abs(Mathf.Sin(gaitPhase)) * bobAmplitude * moveBlend;
-            currentIdleOffset = Mathf.Sin(idlePhase) * idleBreathAmplitude * (1f - moveBlend);
-            smoothedBobOffset = activeBob + currentIdleOffset;
+            var activeBob = Mathf.Abs(Mathf.Sin(_gaitPhase)) * bobAmplitude * _moveBlend;
+            CurrentIdleOffset = Mathf.Sin(_idlePhase) * idleBreathAmplitude * (1f - _moveBlend);
+            CurrentBobOffset = activeBob + CurrentIdleOffset;
 
             // Velocity-driven lean and turn banking
-            Vector3 localVel = transform.InverseTransformDirection(flatVel);
-            float forwardRatio = Mathf.Clamp(localVel.z / 7.0f, -1f, 1f);
-            float strafeRatio = Mathf.Clamp(localVel.x / 7.0f, -1f, 1f);
+            var localVel = transform.InverseTransformDirection(flatVel);
+            var forwardRatio = Mathf.Clamp(localVel.z / 7.0f, -1f, 1f);
+            var strafeRatio = Mathf.Clamp(localVel.x / 7.0f, -1f, 1f);
 
-            float targetPitch = forwardRatio * forwardLeanDegrees * moveBlend;
-            float turnBank = Mathf.Clamp(-yawVelocityDegPerSec / 180f, -1f, 1f) * bankRollDegrees;
-            float targetRoll = Mathf.Clamp(turnBank - strafeRatio * (bankRollDegrees * 0.6f), -bankRollDegrees, bankRollDegrees) * moveBlend;
+            var targetPitch = forwardRatio * forwardLeanDegrees * _moveBlend;
+            var turnBank = Mathf.Clamp(-yawVelocityDegPerSec / 180f, -1f, 1f) * bankRollDegrees;
+            var targetRoll = Mathf.Clamp(turnBank - strafeRatio * (bankRollDegrees * 0.6f), -bankRollDegrees, bankRollDegrees) * _moveBlend;
 
-            smoothedForwardLean = Mathf.Lerp(smoothedForwardLean, targetPitch, 1f - Mathf.Exp(-14f * dt));
-            smoothedBankRoll = Mathf.Lerp(smoothedBankRoll, targetRoll, 1f - Mathf.Exp(-14f * dt));
+            CurrentLeanAngle = Mathf.Lerp(CurrentLeanAngle, targetPitch, 1f - Mathf.Exp(-14f * dt));
+            _smoothedBankRoll = Mathf.Lerp(_smoothedBankRoll, targetRoll, 1f - Mathf.Exp(-14f * dt));
 
             // Limb oscillation (opposite phase pi radians)
-            float swingSin = Mathf.Sin(gaitPhase) * moveBlend;
-            currentLegSwingAngle = swingSin * limbSwingDegrees;
+            var swingSin = Mathf.Sin(_gaitPhase) * _moveBlend;
+            CurrentLegAngle = swingSin * limbSwingDegrees;
 
             if (leftLegPivot != null)
             {
-                leftLegPivot.localRotation = Quaternion.Euler(currentLegSwingAngle, 0f, 0f);
+                leftLegPivot.localRotation = Quaternion.Euler(CurrentLegAngle, 0f, 0f);
             }
             if (rightLegPivot != null)
             {
-                rightLegPivot.localRotation = Quaternion.Euler(-currentLegSwingAngle, 0f, 0f);
+                rightLegPivot.localRotation = Quaternion.Euler(-CurrentLegAngle, 0f, 0f);
             }
 
-            bool useWeaponIk = isAimingWeapon && leftElbowPivot != null && rightElbowPivot != null
-                && leftHandTarget != null && rightHandTarget != null;
+            var useWeaponIk = isAimingWeapon && leftElbowPivot != null && rightElbowPivot != null
+                              && leftHandTarget != null && rightHandTarget != null;
 
             if (!useWeaponIk)
             {
-                float armFactor = isAimingWeapon ? 0.35f : 0.72f;
+                var armFactor = isAimingWeapon ? 0.35f : 0.72f;
                 if (leftArmPivot != null)
                 {
-                    float pitch = isAimingWeapon ? -42f : -currentLegSwingAngle * armFactor;
+                    var pitch = isAimingWeapon ? -42f : -CurrentLegAngle * armFactor;
                     leftArmPivot.localRotation = Quaternion.Euler(pitch, 0f, -4f);
                 }
                 if (rightArmPivot != null)
                 {
-                    float pitch = isAimingWeapon ? -55f : currentLegSwingAngle * armFactor;
+                    var pitch = isAimingWeapon ? -55f : CurrentLegAngle * armFactor;
                     rightArmPivot.localRotation = Quaternion.Euler(pitch, 0f, 4f);
                 }
             }
 
             if (weaponAnchor != null && isAimingWeapon)
             {
-                currentWeaponRecoil = Vector3.Lerp(currentWeaponRecoil, Vector3.zero, 1f - Mathf.Exp(-18f * dt));
-                float weaponBobY = -Mathf.Abs(Mathf.Sin(gaitPhase)) * 0.018f * moveBlend + currentIdleOffset * 0.45f;
-                float weaponSwayX = Mathf.Cos(gaitPhase) * 0.010f * moveBlend;
-                weaponAnchor.localPosition = baseWeaponAnchorLocalPos + currentWeaponRecoil + new Vector3(weaponSwayX, weaponBobY, 0f);
+                _currentWeaponRecoil = Vector3.Lerp(_currentWeaponRecoil, Vector3.zero, 1f - Mathf.Exp(-18f * dt));
+                var weaponBobY = -Mathf.Abs(Mathf.Sin(_gaitPhase)) * 0.018f * _moveBlend + CurrentIdleOffset * 0.45f;
+                var weaponSwayX = Mathf.Cos(_gaitPhase) * 0.010f * _moveBlend;
+                weaponAnchor.localPosition = _baseWeaponAnchorLocalPos + _currentWeaponRecoil + new Vector3(weaponSwayX, weaponBobY, 0f);
             }
 
             // Head subtle breathing counter-sway when settled idle
             if (headPivot != null)
             {
-                float headPitch = Mathf.Sin(idlePhase * 0.5f) * 2.0f * (1f - moveBlend) - smoothedForwardLean * 0.35f;
-                float headYaw = Mathf.Cos(idlePhase * 0.5f) * 3.0f * (1f - moveBlend);
+                var headPitch = Mathf.Sin(_idlePhase * 0.5f) * 2.0f * (1f - _moveBlend) - CurrentLeanAngle * 0.35f;
+                var headYaw = Mathf.Cos(_idlePhase * 0.5f) * 3.0f * (1f - _moveBlend);
                 headPivot.localRotation = Quaternion.Euler(headPitch, headYaw, 0f);
             }
 
             // Secondary motion (0.07s lag on field rucksack)
             if (secondaryPivot != null)
             {
-                Vector3 accel = (flatVel - prevVelocity) / Mathf.Max(0.005f, dt);
-                Vector3 localAccel = transform.InverseTransformDirection(Vector3.ClampMagnitude(accel, 25f));
-                Vector3 targetLag = new Vector3(-localVel.x * 0.015f, -smoothedBobOffset * 0.3f, -localVel.z * 0.018f)
-                                    - localAccel * 0.002f;
-                smoothedSecondaryLag = Vector3.Lerp(smoothedSecondaryLag, Vector3.ClampMagnitude(targetLag, 0.12f), 1f - Mathf.Exp(-12f * dt));
-                secondaryPivot.localPosition = baseSecondaryLocalPos + smoothedSecondaryLag;
-                secondaryPivot.localRotation = Quaternion.Euler(14f * moveBlend + localVel.z * 1.4f, 0f, -smoothedBankRoll * 1.4f);
+                var accel = (flatVel - _prevVelocity) / Mathf.Max(0.005f, dt);
+                var localAccel = transform.InverseTransformDirection(Vector3.ClampMagnitude(accel, 25f));
+                var targetLag = new Vector3(-localVel.x * 0.015f, -CurrentBobOffset * 0.3f, -localVel.z * 0.018f)
+                                - localAccel * 0.002f;
+                _smoothedSecondaryLag = Vector3.Lerp(_smoothedSecondaryLag, Vector3.ClampMagnitude(targetLag, 0.12f), 1f - Mathf.Exp(-12f * dt));
+                secondaryPivot.localPosition = _baseSecondaryLocalPos + _smoothedSecondaryLag;
+                secondaryPivot.localRotation = Quaternion.Euler(14f * _moveBlend + localVel.z * 1.4f, 0f, -_smoothedBankRoll * 1.4f);
             }
-            prevVelocity = flatVel;
+            _prevVelocity = flatVel;
 
             // Squash & stretch recovery toward Vector3.one baseline
-            if (squashTimer > 0f)
+            if (_squashTimer > 0f)
             {
-                squashTimer = Mathf.Max(0f, squashTimer - dt);
-                float normalized = 1f - (squashTimer / squashDuration);
-                currentSquashScale = Vector3.Lerp(squashStartScale, Vector3.one, normalized);
+                _squashTimer = Mathf.Max(0f, _squashTimer - dt);
+                var normalized = 1f - (_squashTimer / _squashDuration);
+                _currentSquashScale = Vector3.Lerp(_squashStartScale, Vector3.one, normalized);
             }
             else
             {
-                currentSquashScale = Vector3.one;
+                _currentSquashScale = Vector3.one;
             }
 
             if (visualRoot != null)
             {
-                visualRoot.localPosition = baseVisualLocalPos + new Vector3(0f, smoothedBobOffset, 0f);
-                visualRoot.localRotation = Quaternion.Euler(smoothedForwardLean, 0f, smoothedBankRoll);
-                visualRoot.localScale = currentSquashScale;
+                visualRoot.localPosition = _baseVisualLocalPos + new Vector3(0f, CurrentBobOffset, 0f);
+                visualRoot.localRotation = Quaternion.Euler(CurrentLeanAngle, 0f, _smoothedBankRoll);
+                visualRoot.localScale = _currentSquashScale;
             }
 
             if (useWeaponIk)
@@ -351,22 +351,22 @@ namespace TopDownShooter.Character
             float upperLen,
             float foreLen)
         {
-            Vector3 s = visualRoot.InverseTransformPoint(shoulderPivot.position);
-            Vector3 w = visualRoot.InverseTransformPoint(handTarget.position);
-            Vector3 toTarget = w - s;
-            float dist = toTarget.magnitude;
+            var s = visualRoot.InverseTransformPoint(shoulderPivot.position);
+            var w = visualRoot.InverseTransformPoint(handTarget.position);
+            var toTarget = w - s;
+            var dist = toTarget.magnitude;
             if (dist < 0.04f) return;
 
-            float maxReach = Mathf.Max(0.08f, upperLen + foreLen - 0.006f);
-            float minReach = Mathf.Max(0.06f, Mathf.Abs(upperLen - foreLen) + 0.02f);
-            float c = Mathf.Clamp(dist, minReach, maxReach);
-            Vector3 dir = toTarget / dist;
+            var maxReach = Mathf.Max(0.08f, upperLen + foreLen - 0.006f);
+            var minReach = Mathf.Max(0.06f, Mathf.Abs(upperLen - foreLen) + 0.02f);
+            var c = Mathf.Clamp(dist, minReach, maxReach);
+            var dir = toTarget / dist;
 
-            float cosAngle = Mathf.Clamp((upperLen * upperLen + c * c - foreLen * foreLen) / (2f * upperLen * c), -0.998f, 0.998f);
-            float adj = upperLen * cosAngle;
-            float perp = Mathf.Sqrt(Mathf.Max(0f, upperLen * upperLen - adj * adj));
+            var cosAngle = Mathf.Clamp((upperLen * upperLen + c * c - foreLen * foreLen) / (2f * upperLen * c), -0.998f, 0.998f);
+            var adj = upperLen * cosAngle;
+            var perp = Mathf.Sqrt(Mathf.Max(0f, upperLen * upperLen - adj * adj));
 
-            Vector3 adjustedHint = elbowHintLocal;
+            var adjustedHint = elbowHintLocal;
             if (w.y > 1.24f)
             {
                 // Keep elbow angled cleanly downward/outward under over-the-shoulder launchers (RPG-7)
@@ -375,26 +375,26 @@ namespace TopDownShooter.Character
                 adjustedHint.z += 0.12f;
             }
 
-            Vector3 bendDir = Vector3.ProjectOnPlane(adjustedHint - s, dir);
+            var bendDir = Vector3.ProjectOnPlane(adjustedHint - s, dir);
             if (bendDir.sqrMagnitude < 1e-4f)
             {
                 bendDir = Vector3.ProjectOnPlane(Vector3.down + Vector3.back, dir);
             }
             bendDir.Normalize();
 
-            Vector3 elbowPos = s + dir * adj + bendDir * perp;
-            Vector3 uSE = (elbowPos - s).normalized;
-            Vector3 uEW = (w - elbowPos).normalized;
+            var elbowPos = s + dir * adj + bendDir * perp;
+            var uSe = (elbowPos - s).normalized;
+            var uEw = (w - elbowPos).normalized;
 
-            Vector3 upperFwd = Vector3.ProjectOnPlane(-bendDir, -uSE);
-            if (upperFwd.sqrMagnitude < 1e-4f) upperFwd = Vector3.ProjectOnPlane(Vector3.forward, -uSE);
-            Quaternion upperRotLocal = Quaternion.LookRotation(upperFwd.normalized, -uSE);
+            var upperFwd = Vector3.ProjectOnPlane(-bendDir, -uSe);
+            if (upperFwd.sqrMagnitude < 1e-4f) upperFwd = Vector3.ProjectOnPlane(Vector3.forward, -uSe);
+            var upperRotLocal = Quaternion.LookRotation(upperFwd.normalized, -uSe);
             shoulderPivot.localRotation = upperRotLocal;
 
             elbowPivot.localPosition = new Vector3(0f, -upperLen, 0f);
-            Vector3 foreFwd = Vector3.ProjectOnPlane(-bendDir, -uEW);
-            if (foreFwd.sqrMagnitude < 1e-4f) foreFwd = Vector3.ProjectOnPlane(Vector3.forward, -uEW);
-            Quaternion foreRotInVisualRoot = Quaternion.LookRotation(foreFwd.normalized, -uEW);
+            var foreFwd = Vector3.ProjectOnPlane(-bendDir, -uEw);
+            if (foreFwd.sqrMagnitude < 1e-4f) foreFwd = Vector3.ProjectOnPlane(Vector3.forward, -uEw);
+            var foreRotInVisualRoot = Quaternion.LookRotation(foreFwd.normalized, -uEw);
             elbowPivot.localRotation = Quaternion.Inverse(upperRotLocal) * foreRotInVisualRoot;
         }
     }
