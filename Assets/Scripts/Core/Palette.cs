@@ -3,47 +3,54 @@ using UnityEngine;
 namespace TopDownShooter.Core
 {
     /// <summary>
-    /// Single source of truth for all colors and palette-derived materials in VANGUARD // NEON ARENA.
-    /// Every material, light, fog, particle, and UI color reads exclusively from here.
+    /// Single source of truth for all colors and palette-derived materials in TASK FORCE // ZERO.
+    /// Grounded modern military tactical palette (no sci-fi neon emissions).
     /// </summary>
     public static class Palette
     {
-        // Core Art Bible Palette
-        public static readonly Color Floor = FromHex("#2A313E");              // Deep Tactical Slate
-        public static readonly Color Walls = FromHex("#384152");              // Reinforced Steel
-        public static readonly Color CharacterPrimary = FromHex("#2AD4E8");   // Electric Tactical Cyan
-        public static readonly Color CharacterSecondary = FromHex("#E8EEF5"); // Ceramic White
-        public static readonly Color EnemyPrimary = FromHex("#E84855");       // Hostile Crimson-Coral
-        public static readonly Color EnemySecondary = FromHex("#FF8A93");     // Highlight Coral
-        public static readonly Color Props = FromHex("#526075");              // Industrial Cover Crate / Trim
-        public static readonly Color Shadow = FromHex("#12161F");             // Abyss Navy-Slate
-        public static readonly Color Accent = FromHex("#FFB830");             // Signal Amber
-        public static readonly Color HealthGreen = FromHex("#3CE882");        // Vitality Mint
+        // Core Modern Military Art Palette
+        public static readonly Color Floor = FromHex("#52554D");              // Weathered Combat Asphalt
+        public static readonly Color Walls = FromHex("#6E6B61");              // Reinforced Concrete Perimeter Wall
+        public static readonly Color CharacterPrimary = FromHex("#4E603D");   // Ranger Olive Drab Combat Suit
+        public static readonly Color CharacterSecondary = FromHex("#EBEAE2"); // Bone-White HUD Text & Chalk Stencil
+        public static readonly Color EnemyPrimary = FromHex("#6E332D");       // Hostile Mercenary Russet-Brown
+        public static readonly Color EnemySecondary = FromHex("#E05A47");     // Hostile Tracer / Breacher Red
+        public static readonly Color Props = FromHex("#7A7569");              // Concrete Jersey Barrier / Crate
+        public static readonly Color Shadow = FromHex("#161A1D");             // Matte Gunmetal Charcoal
+        public static readonly Color Accent = FromHex("#E5A024");             // Tactical Field Amber
+        public static readonly Color HealthGreen = FromHex("#49C96E");        // Medkit Trauma Green
 
-        // Lighting & Atmosphere
-        public static readonly Color KeyLightWarm = FromHex("#FFEAD0");
-        public static readonly Color AmbientSky = FromHex("#3A4F6B");
-        public static readonly Color AmbientEquator = FromHex("#232832");
-        public static readonly Color AmbientGround = FromHex("#181E2B");
-        public static readonly Color SkyboxTop = FromHex("#18202E");
-        public static readonly Color SkyboxHorizon = FromHex("#2B3548");
+        // Extended Grounded Military Surfaces & Camos
+        public static readonly Color CoyoteTan = FromHex("#A6926F");          // Coyote Tan Vest & BDUs
+        public static readonly Color Gunmetal = FromHex("#2C3135");           // Parkerized Steel Weapon / Frame
+        public static readonly Color GuardTowerDark = FromHex("#3A3D38");     // Painted Structural Steel
+        public static readonly Color HazardYellow = FromHex("#CFA236");       // Matte Warning Stencil Yellow
+        public static readonly Color NvgGreen = FromHex("#2B5C38");           // Grounded Optical NVG Lens Green
 
-        // Derived UI & VFX tones
-        public static readonly Color CyanGlow = FromHex("#4DF0FF");
+        // Daylight Tactical Compound Lighting & Atmosphere
+        public static readonly Color KeyLightWarm = FromHex("#FFE8C6");       // Warm Afternoon Sun
+        public static readonly Color AmbientSky = FromHex("#6F8396");         // Dusty Overcast Daylight Sky
+        public static readonly Color AmbientEquator = FromHex("#555852");     // Concrete Courtyard Bounce
+        public static readonly Color AmbientGround = FromHex("#3A3B35");      // Tarmac Bounce
+        public static readonly Color SkyboxTop = FromHex("#516880");          // Clear Tactical Blue-Slate
+        public static readonly Color SkyboxHorizon = FromHex("#B4A792");      // Warm Dusty Horizon Haze
+
+        // Derived UI & Ballistic VFX tones
+        public static readonly Color CyanGlow = FromHex("#C49438");           // Brass-Amber Trim (replaces legacy cyan)
         public static readonly Color MutedText = WithAlpha(CharacterSecondary, 0.72f);
         public static readonly Color ScrimDark = WithAlpha(Shadow, 0.80f);
-        public static readonly Color PanelSurface = WithAlpha(FromHex("#1A202B"), 0.90f);
-        public static readonly Color PanelBorder = WithAlpha(Props, 0.85f);
+        public static readonly Color PanelSurface = WithAlpha(FromHex("#15191C"), 0.93f);
+        public static readonly Color PanelBorder = WithAlpha(Props, 0.88f);
         public static readonly Color ButtonTintIdle = FromHex("#FFFFFF");
-        public static readonly Color ButtonTintHover = FromHex("#FFF3D6");
-        public static readonly Color SecondaryButtonBg = FromHex("#263042");
-        public static readonly Color CreditGold = FromHex("#FFD147");
-        public static readonly Color BossPurple = FromHex("#D442FF");
-        public static readonly Color RailgunCyan = FromHex("#00F5FF");
-        public static readonly Color RocketOrange = FromHex("#FF6B2B");
-        public static readonly Color SkinGoldPrimary = FromHex("#F5A623");
-        public static readonly Color SkinCrimsonPrimary = FromHex("#E03448");
-        public static readonly Color CardRareBorder = FromHex("#38BDF8");
+        public static readonly Color ButtonTintHover = FromHex("#FFF0CF");
+        public static readonly Color SecondaryButtonBg = FromHex("#272D2B");
+        public static readonly Color CreditGold = FromHex("#E3B448");
+        public static readonly Color BossPurple = FromHex("#D6453A");         // Artillery Danger Red (replaces sci-fi purple)
+        public static readonly Color RailgunCyan = FromHex("#FFE18A");        // Supersonic AP Tracer Brass
+        public static readonly Color RocketOrange = FromHex("#E86A28");       // RPG Exhaust Flame Orange
+        public static readonly Color SkinGoldPrimary = FromHex("#B59867");    // Desert Sandstorm Camo
+        public static readonly Color SkinCrimsonPrimary = FromHex("#2B3034"); // Night Ops Spec-Ops Black
+        public static readonly Color CardRareBorder = FromHex("#E5A024");
         public static readonly Color Transparent = new Color(0f, 0f, 0f, 0f);
 
         public static Color FromHex(string hex)
@@ -156,11 +163,11 @@ namespace TopDownShooter.Core
             }
 
             Material mat = new Material(shader) { name = matName };
-            if (mat.HasProperty("_SunSize")) mat.SetFloat("_SunSize", 0.02f);
-            if (mat.HasProperty("_AtmosphereThickness")) mat.SetFloat("_AtmosphereThickness", 0.45f);
+            if (mat.HasProperty("_SunSize")) mat.SetFloat("_SunSize", 0.035f);
+            if (mat.HasProperty("_AtmosphereThickness")) mat.SetFloat("_AtmosphereThickness", 0.72f);
             if (mat.HasProperty("_SkyTint")) mat.SetColor("_SkyTint", SkyboxTop);
-            if (mat.HasProperty("_GroundColor")) mat.SetColor("_GroundColor", Shadow);
-            if (mat.HasProperty("_Exposure")) mat.SetFloat("_Exposure", 0.65f);
+            if (mat.HasProperty("_GroundColor")) mat.SetColor("_GroundColor", AmbientGround);
+            if (mat.HasProperty("_Exposure")) mat.SetFloat("_Exposure", 0.92f);
             return mat;
         }
     }

@@ -260,7 +260,7 @@ namespace TopDownShooter.Feel
 
             // t = 0.10s: HUD milestone banner pop
             yield return new WaitForSecondsRealtime(0.05f);
-            UIManager.Instance?.ShowMilestoneBanner("LEVEL " + newLevel + " // OVERDRIVE");
+            UIManager.Instance?.ShowMilestoneBanner("RANK " + newLevel + " // SUPPLY DROP");
         }
 
         public void ClearAllFloatingText()

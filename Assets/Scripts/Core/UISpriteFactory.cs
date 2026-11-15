@@ -295,17 +295,24 @@ namespace TopDownShooter.Core
                 wrapMode = TextureWrapMode.Repeat
             };
 
-            Color baseTone = new Color(0.88f, 0.90f, 0.94f, 1f);
-            Color gridLine = new Color(1.00f, 1.00f, 1.00f, 1f);
-            Color subTick = new Color(0.95f, 0.97f, 1.00f, 1f);
+            Color baseTone = new Color(0.86f, 0.86f, 0.82f, 1f);
+            Color jointLine = new Color(0.62f, 0.63f, 0.59f, 1f);
+            Color subtleWear = new Color(0.79f, 0.79f, 0.75f, 1f);
 
             for (int y = 0; y < s; y++)
             {
                 for (int x = 0; x < s; x++)
                 {
                     bool mainBorder = x < 2 || y < 2;
-                    bool centerCross = (x == 32 && y % 4 < 2) || (y == 32 && x % 4 < 2);
-                    Color c = mainBorder ? gridLine : (centerCross ? subTick : baseTone);
+                    bool quarterSeam = (x == 32 && y % 6 < 3) || (y == 32 && x % 6 < 3);
+                    uint hash = (uint)(x * 73856093 ^ y * 19349663);
+                    float grain = ((hash & 31u) / 31f - 0.5f) * 0.05f;
+                    Color c = mainBorder ? jointLine : (quarterSeam ? subtleWear : baseTone);
+                    c = new Color(
+                        Mathf.Clamp01(c.r + grain),
+                        Mathf.Clamp01(c.g + grain),
+                        Mathf.Clamp01(c.b + grain),
+                        1f);
                     _floorGridTex.SetPixel(x, y, c);
                 }
             }

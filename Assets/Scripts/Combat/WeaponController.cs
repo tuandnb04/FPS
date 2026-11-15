@@ -71,7 +71,7 @@ namespace TopDownShooter.Combat
                 projectilePoolRoot = rootGo.transform;
             }
 
-            boltMaterial = Palette.CreateLitMaterial("Mat_ProjectileBoltRuntime", Palette.Accent, 0.1f, 0.1f, true, 3.2f);
+            boltMaterial = Palette.CreateLitMaterial("Mat_ProjectileBoltRuntime", Palette.Accent, 0.1f, 0.25f, true, 1.45f);
             projectilePool = new ObjectPool<Projectile>(
                 createFunc: CreateProjectileInstance,
                 actionOnGet: p => p.gameObject.SetActive(true),
@@ -185,7 +185,7 @@ namespace TopDownShooter.Combat
                         float t = pellets == 1 ? 0.5f : (float)i / (pellets - 1);
                         float yaw = Mathf.Lerp(-totalArc * 0.5f, totalArc * 0.5f, t);
                         Quaternion rot = Quaternion.LookRotation(Quaternion.Euler(0f, yaw, 0f) * dir, Vector3.up);
-                        SpawnBolt(spawnPos, rot, 26f, pelletDmg, 0.72f, 0, 0f, Palette.Accent, new Vector3(0.11f, 0.22f, 0.11f), isCrit);
+                        SpawnBolt(spawnPos, rot, 32f, pelletDmg, 0.65f, 0, 0f, Palette.Accent, new Vector3(0.055f, 0.26f, 0.055f), isCrit);
                     }
                     VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.Accent);
                     FeelManager.Instance?.TriggerCameraShake(0.16f);
@@ -201,7 +201,7 @@ namespace TopDownShooter.Combat
                     {
                         float yaw = shots == 1 ? 0f : (i == 0 ? -3f : 3f);
                         Quaternion rot = Quaternion.LookRotation(Quaternion.Euler(0f, yaw, 0f) * dir, Vector3.up);
-                        SpawnBolt(spawnPos, rot, 52f, slugDmg, 1.15f, 3, 0f, Palette.RailgunCyan, new Vector3(0.12f, 0.72f, 0.12f), isCrit);
+                        SpawnBolt(spawnPos, rot, 58f, slugDmg, 1.15f, 3, 0f, Palette.RailgunCyan, new Vector3(0.065f, 0.82f, 0.065f), isCrit);
                     }
                     VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.RailgunCyan);
                     FeelManager.Instance?.TriggerCameraShake(0.20f);
@@ -217,26 +217,26 @@ namespace TopDownShooter.Combat
                     {
                         float yaw = rockets == 1 ? 0f : (i == 0 ? -5f : 5f);
                         Quaternion rot = Quaternion.LookRotation(Quaternion.Euler(0f, yaw, 0f) * dir, Vector3.up);
-                        SpawnBolt(spawnPos, rot, 22f, rocketDmg, 1.7f, 0, 2.85f, Palette.RocketOrange, new Vector3(0.24f, 0.36f, 0.24f), isCrit);
+                        SpawnBolt(spawnPos, rot, 24f, rocketDmg, 1.7f, 0, 2.85f, Palette.RocketOrange, new Vector3(0.15f, 0.36f, 0.15f), isCrit);
                     }
                     VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.RocketOrange);
                     FeelManager.Instance?.TriggerCameraShake(0.22f);
                     characterMotion?.TriggerSquash(new Vector3(1.18f, 0.86f, 0.86f), 0.16f);
                     break;
                 }
-                default: // PulseRifle
+                default: // M4A1 Carbine
                 {
                     float tierInterval = Mathf.Max(0.08f, baseFireInterval - (weaponTier - 1) * 0.008f);
                     fireCooldown = tierInterval / skillFireRateMult;
                     float boltDmg = baseDamage * dmgScale;
                     int extraVolley = (weaponTier >= 3 ? 2 : 0) + skillBonusProjectiles;
-                    SpawnBolt(spawnPos, Quaternion.LookRotation(dir, Vector3.up), projectileSpeed, boltDmg, 1.45f, 0, 0f, Palette.Accent, new Vector3(0.13f, 0.28f, 0.13f), isCrit);
+                    SpawnBolt(spawnPos, Quaternion.LookRotation(dir, Vector3.up), projectileSpeed * 1.15f, boltDmg, 1.45f, 0, 0f, Palette.Accent, new Vector3(0.055f, 0.40f, 0.055f), isCrit);
                     for (int i = 0; i < extraVolley; i++)
                     {
                         float sign = (i % 2 == 0) ? -1f : 1f;
                         float stepDeg = 5.5f * (1 + i / 2);
                         Quaternion rot = Quaternion.LookRotation(Quaternion.Euler(0f, sign * stepDeg, 0f) * dir, Vector3.up);
-                        SpawnBolt(spawnPos, rot, projectileSpeed, boltDmg * 0.72f, 1.35f, 0, 0f, Palette.CyanGlow, new Vector3(0.11f, 0.24f, 0.11f), isCrit);
+                        SpawnBolt(spawnPos, rot, projectileSpeed * 1.15f, boltDmg * 0.72f, 1.35f, 0, 0f, Palette.RailgunCyan, new Vector3(0.050f, 0.34f, 0.050f), isCrit);
                     }
                     VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.Accent);
                     FeelManager.Instance?.TriggerCameraShake(0.07f);

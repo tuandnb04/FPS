@@ -223,7 +223,7 @@ namespace TopDownShooter.Feel
             if (overrideColor.HasValue)
             {
                 var main = ps.main;
-                main.startColor = new ParticleSystem.MinMaxGradient(overrideColor.Value, Palette.Lerp(overrideColor.Value, Palette.CharacterPrimary, 0.3f));
+                main.startColor = new ParticleSystem.MinMaxGradient(overrideColor.Value, Palette.Lerp(overrideColor.Value, Palette.CharacterSecondary, 0.3f));
             }
             ps.Clear(true);
             ps.Play(true);

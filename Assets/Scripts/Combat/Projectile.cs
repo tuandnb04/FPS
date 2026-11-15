@@ -82,7 +82,7 @@ namespace TopDownShooter.Combat
             if (mpb == null) mpb = new MaterialPropertyBlock();
             visualRenderer.GetPropertyBlock(mpb);
             mpb.SetColor("_BaseColor", tint);
-            mpb.SetColor("_EmissionColor", tint * 3.0f);
+            mpb.SetColor("_EmissionColor", tint * 1.45f);
             visualRenderer.SetPropertyBlock(mpb);
         }
 

@@ -104,7 +104,7 @@ namespace TopDownShooter.Enemies
                 contactDamage = 28f;
                 scoreValue = 1500;
                 transform.localScale = Vector3.one * 1.15f;
-                UIManager.Instance?.UpdateBossHp(maxHp, maxHp, "DREADNOUGHT MK-IV");
+                UIManager.Instance?.UpdateBossHp(maxHp, maxHp, "ARMORED IFV // IRONCLAD");
             }
             else if (kind == EnemyArchetype.Heavy)
             {
@@ -282,7 +282,7 @@ namespace TopDownShooter.Enemies
 
             if (archetype == EnemyArchetype.Boss)
             {
-                UIManager.Instance?.UpdateBossHp(currentHp, maxHp, "DREADNOUGHT MK-IV");
+                UIManager.Instance?.UpdateBossHp(currentHp, maxHp, "ARMORED IFV // IRONCLAD");
             }
 
             if (currentHp <= 0f)

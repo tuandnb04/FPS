@@ -98,11 +98,11 @@ namespace TopDownShooter.Enemies
             hazardRoot = new GameObject("HazardTelegraphRoot").transform;
             hazardRoot.SetParent(transform, false);
 
-            enemyPrimaryMat = Palette.CreateLitMaterial("Mat_EnemyChassisRuntime", Palette.EnemyPrimary, 0.45f, 0.42f);
-            enemySecondaryMat = Palette.CreateLitMaterial("Mat_EnemyVisorRuntime", Palette.EnemySecondary, 0.25f, 0.25f, true, 2.2f);
-            bossArmorMat = Palette.CreateLitMaterial("Mat_BossChassisRuntime", Palette.Walls, 0.65f, 0.55f);
-            bossTrimMat = Palette.CreateLitMaterial("Mat_BossTrimRuntime", Palette.BossPurple, 0.2f, 0.2f, true, 2.8f);
-            pickupMat = Palette.CreateLitMaterial("Mat_PickupCoreRuntime", Palette.Accent, 0.2f, 0.2f, true, 2.5f);
+            enemyPrimaryMat = Palette.CreateLitMaterial("Mat_EnemyChassisRuntime", Palette.EnemyPrimary, 0.20f, 0.36f);
+            enemySecondaryMat = Palette.CreateLitMaterial("Mat_EnemyVisorRuntime", Palette.Props, 0.35f, 0.40f);
+            bossArmorMat = Palette.CreateLitMaterial("Mat_BossChassisRuntime", Palette.GuardTowerDark, 0.36f, 0.42f);
+            bossTrimMat = Palette.CreateLitMaterial("Mat_BossTrimRuntime", Palette.Gunmetal, 0.55f, 0.48f);
+            pickupMat = Palette.CreateLitMaterial("Mat_PickupCoreRuntime", Palette.Accent, 0.25f, 0.45f);
             hazardRingMat = Palette.CreateParticleMaterial("Mat_HazardRingRuntime", UISpriteFactory.GetTelegraphRingTexture());
 
             enemyPool = new ObjectPool<EnemyController>(
@@ -191,8 +191,8 @@ namespace TopDownShooter.Enemies
 
             GameObject reactorPivot = new GameObject("SecondaryPivot");
             reactorPivot.transform.SetParent(visualRoot.transform, false);
-            reactorPivot.transform.localPosition = new Vector3(0f, 1.05f, -0.32f);
-            CreatePartWithMesh("ReactorCore", null, PrimitiveType.Sphere, reactorPivot.transform, Vector3.zero, new Vector3(0.26f, 0.30f, 0.22f), enemySecondaryMat);
+            reactorPivot.transform.localPosition = new Vector3(0f, 1.05f, -0.30f);
+            CreatePartWithMesh("FieldPack", null, PrimitiveType.Cube, reactorPivot.transform, Vector3.zero, new Vector3(0.32f, 0.36f, 0.18f), enemySecondaryMat);
 
             // Chaser/Heavy group holders (only toggle non-shared heavy crown/boss hull)
             GameObject chaserToggle = new GameObject("ChaserMarker");
@@ -209,11 +209,11 @@ namespace TopDownShooter.Enemies
             chaserBody.transform.SetParent(chaserToggle.transform, true);
             chaserHeadObj.transform.SetParent(chaserToggle.transform, true);
 
-            // Dedicated Dreadnought Boss rig
+            // Dedicated Armored IFV Boss rig
             GameObject bossGroup = new GameObject("BossRigRoot");
             bossGroup.transform.SetParent(root.transform, false);
             CreatePartWithMesh("BossHull", bossTorsoMesh, PrimitiveType.Cube, bossGroup.transform, new Vector3(0f, 0.72f, 0f), bossTorsoMesh != null ? Vector3.one : new Vector3(1.5f, 0.75f, 1.4f), bossArmorMat);
-            CreatePartWithMesh("BossCoreGlow", null, PrimitiveType.Sphere, bossGroup.transform, new Vector3(0f, 0.85f, 0.38f), new Vector3(0.45f, 0.30f, 0.35f), bossTrimMat);
+            CreatePartWithMesh("DriverPeriscope", null, PrimitiveType.Cube, bossGroup.transform, new Vector3(0.26f, 1.05f, 0.64f), new Vector3(0.24f, 0.14f, 0.22f), bossTrimMat);
             GameObject turretPivot = new GameObject("BossTurretPivot");
             turretPivot.transform.SetParent(bossGroup.transform, false);
             turretPivot.transform.localPosition = new Vector3(0f, 1.25f, 0f);
@@ -295,7 +295,7 @@ namespace TopDownShooter.Enemies
             if (currentWave % 3 == 0)
             {
                 SpawnBossAt(PickSafeSpawnPosition());
-                UIManager.Instance?.ShowMilestoneBanner("WARNING // DREADNOUGHT MK-IV");
+                UIManager.Instance?.ShowMilestoneBanner("INCOMING // ARMORED IFV IRONCLAD");
             }
 
             UIManager.Instance?.UpdateWave(currentWave, remainingToSpawnInWave + activeEnemies.Count);

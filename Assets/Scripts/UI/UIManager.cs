@@ -28,12 +28,12 @@ namespace TopDownShooter.UI
     {
         public static UIManager Instance { get; private set; }
 
-        private static readonly string[] WeaponNames = { "PULSE RIFLE", "SHOTGUN", "RAILGUN", "ROCKET" };
+        private static readonly string[] WeaponNames = { "M4A1 CARBINE", "M870 SHOTGUN", "MK14 SNIPER", "RPG-7 LAUNCHER" };
         private static readonly int[] WeaponCosts = { 0, 150, 300, 450 };
-        private static readonly string[] SkinNames = { "CYBER CYAN", "SOLAR GOLD", "CRIMSON OPS" };
+        private static readonly string[] SkinNames = { "RANGER OLIVE", "DESERT TAN", "NIGHT OPS" };
         private static readonly int[] SkinCosts = { 0, 180, 280 };
         private static readonly string[] UpgradeKeys = { "armor", "firepower", "thruster", "greed" };
-        private static readonly string[] UpgradeTitles = { "HULL ARMOR (+20 HP)", "WEAPON CORE (+12% DMG)", "THRUSTER DRIVE (+SPD)", "SCAVENGER (+18% CR)" };
+        private static readonly string[] UpgradeTitles = { "KEVLAR VEST (+20 HP)", "FMJ AMMO (+12% DMG)", "MARATHON PRO (+SPD)", "SCAVENGER (+18% CR)" };
 
         [Header("Screen Groups")]
         [SerializeField] private CanvasGroup titleGroup;
@@ -566,7 +566,7 @@ namespace TopDownShooter.UI
             float targetFill = max > 0 ? Mathf.Clamp01((float)current / max) : 0f;
             if (levelText != null)
             {
-                levelText.text = "LVL " + level.ToString("00");
+                levelText.text = "RANK " + level.ToString("00");
             }
             if (xpFillImage != null)
             {
@@ -598,10 +598,10 @@ namespace TopDownShooter.UI
 
         public void UpdateCredits(int totalCredits, int runEarned)
         {
-            if (titleCreditsText != null) titleCreditsText.text = "CREDITS // " + totalCredits.ToString("N0") + " CR";
+            if (titleCreditsText != null) titleCreditsText.text = "FUNDS // " + totalCredits.ToString("N0") + " CR";
             if (armoryCreditsText != null) armoryCreditsText.text = totalCredits.ToString("N0") + " CR";
             if (hudCreditsText != null) hudCreditsText.text = totalCredits.ToString("N0") + " CR";
-            if (endedCreditsText != null) endedCreditsText.text = "EARNED +" + runEarned + " CR   |   BANK: " + totalCredits.ToString("N0") + " CR";
+            if (endedCreditsText != null) endedCreditsText.text = "EARNED +" + runEarned + " CR   |   FUNDS: " + totalCredits.ToString("N0") + " CR";
         }
 
         public void UpdateBossHp(float current, float max, string label)
@@ -650,7 +650,7 @@ namespace TopDownShooter.UI
             GameSaveData d = save.Data;
 
             if (armoryCreditsText != null) armoryCreditsText.text = d.credits.ToString("N0") + " CR";
-            if (titleCreditsText != null) titleCreditsText.text = "CREDITS // " + d.credits.ToString("N0") + " CR";
+            if (titleCreditsText != null) titleCreditsText.text = "FUNDS // " + d.credits.ToString("N0") + " CR";
 
             if (upgradeButtons != null)
             {
@@ -710,15 +710,15 @@ namespace TopDownShooter.UI
                     if (shopSkinLabels != null && i < shopSkinLabels.Length && shopSkinLabels[i] != null)
                     {
                         shopSkinLabels[i].text = equipped
-                            ? $"{SkinNames[i]} [ON]"
-                            : (unlocked ? $"{SkinNames[i]} [USE]" : $"{SkinNames[i]} [{SkinCosts[i]} CR]");
+                            ? $"{SkinNames[i]}\n[EQUIPPED]"
+                            : (unlocked ? $"{SkinNames[i]}\n[EQUIP]" : $"{SkinNames[i]}\n[{SkinCosts[i]} CR]");
                     }
                     if (shopSkinButtons[i] != null)
                     {
                         Image bg = shopSkinButtons[i].GetComponent<Image>();
                         if (bg != null)
                         {
-                            bg.color = equipped ? Palette.CyanGlow : (unlocked ? Palette.SecondaryButtonBg : Palette.Shadow);
+                            bg.color = equipped ? Palette.Accent : (unlocked ? Palette.SecondaryButtonBg : Palette.Shadow);
                         }
                         if (shopSkinLabels != null && i < shopSkinLabels.Length && shopSkinLabels[i] != null)
                         {
@@ -750,7 +750,7 @@ namespace TopDownShooter.UI
                 }
                 if (draftRanks != null && i < draftRanks.Length && draftRanks[i] != null)
                 {
-                    draftRanks[i].text = $"MODULE LV {currentRank + 1}";
+                    draftRanks[i].text = $"PERK TIER {currentRank + 1}";
                 }
                 if (draftDescs != null && i < draftDescs.Length && draftDescs[i] != null)
                 {
@@ -761,7 +761,7 @@ namespace TopDownShooter.UI
 
         public void PopulateEndedSummary(bool victory, int score, int highScore, int kills, int wave, bool isNewRecord)
         {
-            if (endedTitleText != null) endedTitleText.text = victory ? "ARENA SECURED" : "SIGNAL LOST";
+            if (endedTitleText != null) endedTitleText.text = victory ? "AO SECURED" : "K.I.A. // MISSION FAILED";
             if (endedScoreText != null) endedScoreText.text = score.ToString("N0") + " PTS";
             if (endedBestText != null) endedBestText.text = isNewRecord ? "NEW RECORD // " + highScore.ToString("N0") : "BEST // " + highScore.ToString("N0");
             if (endedStatsText != null) endedStatsText.text = "ELIMINATIONS: " + kills + "   |   WAVE REACHED: " + wave;

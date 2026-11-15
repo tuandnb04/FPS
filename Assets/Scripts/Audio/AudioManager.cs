@@ -126,14 +126,14 @@ namespace TopDownShooter.Audio
 
         private void GenerateClips()
         {
-            if (shootClip == null) shootClip = BuildSweepClip("SFX_Shoot", 0.085f, 720f, 210f, 0.28f, true);
-            if (hitClip == null) hitClip = BuildSweepClip("SFX_Hit", 0.095f, 210f, 65f, 0.34f, false);
-            if (explodeClip == null) explodeClip = BuildExplodeClip("SFX_Explode", 0.20f, 0.42f);
-            if (pickupBlipClip == null) pickupBlipClip = BuildSweepClip("SFX_PickupBlip", 0.09f, 880f, 1320f, 0.30f, false);
-            if (milestoneStingClip == null) milestoneStingClip = BuildTriadClip("SFX_Milestone", 523.25f, 659.25f, 783.99f, 0.36f, 0.32f);
-            if (uiClickClip == null) uiClickClip = BuildSweepClip("SFX_UIClick", 0.025f, 1180f, 620f, 0.24f, false);
-            if (dashClip == null) dashClip = BuildSweepClip("SFX_Dash", 0.14f, 340f, 920f, 0.25f, true);
-            if (ambientBedClip == null) ambientBedClip = BuildAmbientBed("BGM_AmbientBed", 6.0f, 0.14f);
+            if (shootClip == null) shootClip = BuildGunshotClip("SFX_Shoot", 0.11f, 0.36f);
+            if (hitClip == null) hitClip = BuildSweepClip("SFX_Hit", 0.085f, 195f, 52f, 0.38f, false);
+            if (explodeClip == null) explodeClip = BuildExplodeClip("SFX_Explode", 0.28f, 0.48f);
+            if (pickupBlipClip == null) pickupBlipClip = BuildSweepClip("SFX_PickupBlip", 0.075f, 340f, 640f, 0.26f, true);
+            if (milestoneStingClip == null) milestoneStingClip = BuildTriadClip("SFX_Milestone", 220.00f, 277.18f, 329.63f, 0.42f, 0.34f);
+            if (uiClickClip == null) uiClickClip = BuildSweepClip("SFX_UIClick", 0.024f, 920f, 440f, 0.22f, false);
+            if (dashClip == null) dashClip = BuildFoleyWhooshClip("SFX_Dash", 0.16f, 0.28f);
+            if (ambientBedClip == null) ambientBedClip = BuildAmbientBed("BGM_AmbientBed", 6.0f, 0.12f);
         }
 
         private void StartAmbientBed()
@@ -222,6 +222,55 @@ namespace TopDownShooter.Audio
             }
             sfxSource.pitch = pitch;
             sfxSource.PlayOneShot(clip, scale);
+        }
+
+        private static AudioClip BuildGunshotClip(string clipName, float duration, float amplitude)
+        {
+            int sampleCount = Mathf.Max(512, Mathf.RoundToInt(duration * SampleRate));
+            float[] data = new float[sampleCount];
+            double phase = 0.0;
+            int fadeSamples = Mathf.Min(sampleCount / 6, Mathf.RoundToInt(0.002f * SampleRate));
+            System.Random rng = new System.Random(7091);
+            float lpNoise = 0f;
+
+            for (int i = 0; i < sampleCount; i++)
+            {
+                float t = (float)i / (sampleCount - 1);
+                float thumpFreq = Mathf.Lerp(320f, 68f, Mathf.Pow(t, 0.35f));
+                phase += (2.0 * Math.PI * thumpFreq) / SampleRate;
+
+                float rawNoise = (float)(rng.NextDouble() * 2.0 - 1.0);
+                lpNoise = Mathf.Lerp(lpNoise, rawNoise, Mathf.Lerp(0.65f, 0.12f, t));
+                float transientCrack = rawNoise * Mathf.Exp(-t * 36f);
+                float bodyThump = (float)Math.Sin(phase) * Mathf.Exp(-t * 14f);
+
+                float mixed = 0.52f * lpNoise * Mathf.Exp(-t * 11f) + 0.34f * transientCrack + 0.38f * bodyThump;
+                float env = ComputeFadeEnvelope(i, sampleCount, fadeSamples);
+                data[i] = Mathf.Clamp(mixed * amplitude * env, -1f, 1f);
+            }
+
+            return CreateClipFromSamples(clipName, data);
+        }
+
+        private static AudioClip BuildFoleyWhooshClip(string clipName, float duration, float amplitude)
+        {
+            int sampleCount = Mathf.Max(512, Mathf.RoundToInt(duration * SampleRate));
+            float[] data = new float[sampleCount];
+            int fadeSamples = Mathf.Min(sampleCount / 4, Mathf.RoundToInt(0.008f * SampleRate));
+            System.Random rng = new System.Random(2048);
+            float lp = 0f;
+
+            for (int i = 0; i < sampleCount; i++)
+            {
+                float t = (float)i / (sampleCount - 1);
+                float white = (float)(rng.NextDouble() * 2.0 - 1.0);
+                lp = Mathf.Lerp(lp, white, Mathf.Lerp(0.08f, 0.24f, t));
+                float arch = Mathf.Sin(t * Mathf.PI);
+                float env = ComputeFadeEnvelope(i, sampleCount, fadeSamples) * arch;
+                data[i] = Mathf.Clamp(lp * amplitude * env * 1.4f, -1f, 1f);
+            }
+
+            return CreateClipFromSamples(clipName, data);
         }
 
         private static AudioClip BuildSweepClip(string clipName, float duration, float startHz, float endHz, float amplitude, bool addHarmonic)

@@ -48,14 +48,14 @@ namespace TopDownShooter.Character
 
         public static readonly RogueliteSkillInfo[] SkillCatalog =
         {
-            new RogueliteSkillInfo(RogueliteSkillId.DamageBoost, "OVERCLOCK CORE", "+18% All Weapon Damage"),
-            new RogueliteSkillInfo(RogueliteSkillId.FireRateBoost, "RAPID CYCLER", "+16% Weapon Fire Rate"),
-            new RogueliteSkillInfo(RogueliteSkillId.MultiShot, "SPLIT BARREL", "+1 Bonus Projectile Per Volley"),
-            new RogueliteSkillInfo(RogueliteSkillId.MaxHpUp, "TITANIUM PLATING", "+25 Max Integrity & Heal +25 HP"),
-            new RogueliteSkillInfo(RogueliteSkillId.MagnetSpeed, "FLUX THRUSTERS", "+0.45 Move Speed & +1.4m Pickup Magnet"),
-            new RogueliteSkillInfo(RogueliteSkillId.DashCool, "PHASE CAPACITOR", "-15% Thruster Dash Cooldown"),
-            new RogueliteSkillInfo(RogueliteSkillId.VampiricSiphon, "NANITE SIPHON", "Restore +4 Integrity On Every Kill"),
-            new RogueliteSkillInfo(RogueliteSkillId.CritPayload, "CRITICAL MATRIX", "+15% Chance For 1.65x Critical Hit")
+            new RogueliteSkillInfo(RogueliteSkillId.DamageBoost, "STOPPING POWER", "+18% All Ballistic Weapon Damage"),
+            new RogueliteSkillInfo(RogueliteSkillId.FireRateBoost, "DOUBLE TAP", "+16% Weapon Fire Rate"),
+            new RogueliteSkillInfo(RogueliteSkillId.MultiShot, "MULTI-BURST", "+1 Bonus Round Per Trigger Pull"),
+            new RogueliteSkillInfo(RogueliteSkillId.MaxHpUp, "JUGGERNAUT", "+25 Max Armor HP & Heal +25 HP"),
+            new RogueliteSkillInfo(RogueliteSkillId.MagnetSpeed, "LIGHTWEIGHT", "+0.45 Sprint Speed & +1.4m Pickup Radius"),
+            new RogueliteSkillInfo(RogueliteSkillId.DashCool, "SLEIGHT OF HAND", "-15% Tactical Sprint Cooldown"),
+            new RogueliteSkillInfo(RogueliteSkillId.VampiricSiphon, "QUICK FIX", "Restore +4 HP On Every Confirmed Kill"),
+            new RogueliteSkillInfo(RogueliteSkillId.CritPayload, "DEADSHOT", "+15% Chance For 1.65x Headshot Crit")
         };
 
         [Header("References")]
