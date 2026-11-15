@@ -10,6 +10,7 @@ namespace TopDownShooter.Core
     {
         private static Sprite _solidRect;
         private static Sprite _roundedRect;
+        private static Sprite _circleSprite;
         private static Sprite _ringSprite;
         private static Sprite _shieldIcon;
         private static Sprite _starIcon;
@@ -17,6 +18,7 @@ namespace TopDownShooter.Core
         private static Sprite _speakerIcon;
         private static Texture2D _softParticleTex;
         private static Texture2D _floorGridTex;
+        private static Texture2D _telegraphRingTex;
 
         public static Sprite GetSolidRectSprite()
         {
@@ -176,6 +178,33 @@ namespace TopDownShooter.Core
             return _ringSprite;
         }
 
+        public static Sprite GetCircleSprite()
+        {
+            if (_circleSprite != null) return _circleSprite;
+            const int s = 64;
+            Texture2D tex = CreateBlankTexture("UI_CircleTex", s);
+            float center = (s - 1) * 0.5f;
+            float maxR = s * 0.48f;
+            for (int y = 0; y < s; y++)
+            {
+                for (int x = 0; x < s; x++)
+                {
+                    float dx = x - center;
+                    float dy = y - center;
+                    float r = Mathf.Sqrt(dx * dx + dy * dy);
+                    if (r <= maxR)
+                    {
+                        float a = Mathf.Clamp01((maxR - r) / 1.5f);
+                        tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
+                    }
+                }
+            }
+            tex.Apply();
+            _circleSprite = Sprite.Create(tex, new Rect(0, 0, s, s), new Vector2(0.5f, 0.5f), 100f);
+            _circleSprite.name = "UI_CircleSprite";
+            return _circleSprite;
+        }
+
         public static Sprite GetSpeakerIcon()
         {
             if (_speakerIcon != null) return _speakerIcon;
@@ -223,6 +252,36 @@ namespace TopDownShooter.Core
             }
             _softParticleTex.Apply();
             return _softParticleTex;
+        }
+
+        public static Texture2D GetTelegraphRingTexture()
+        {
+            if (_telegraphRingTex != null) return _telegraphRingTex;
+            const int s = 128;
+            _telegraphRingTex = CreateBlankTexture("VFX_TelegraphRingTex", s);
+            float center = (s - 1) * 0.5f;
+            float maxR = s * 0.485f;
+
+            for (int y = 0; y < s; y++)
+            {
+                for (int x = 0; x < s; x++)
+                {
+                    float dx = x - center;
+                    float dy = y - center;
+                    float nr = Mathf.Sqrt(dx * dx + dy * dy) / maxR;
+                    if (nr > 1.0f) continue;
+
+                    float aaOuter = Mathf.Clamp01((1.0f - nr) * 32f);
+                    float outerRing = Mathf.Clamp01(1f - Mathf.Abs(nr - 0.92f) / 0.065f);
+                    float innerRing = Mathf.Clamp01(1f - Mathf.Abs(nr - 0.45f) / 0.03f);
+                    float fill = 0.14f + 0.08f * nr;
+                    float a = Mathf.Clamp01(Mathf.Max(fill, Mathf.Max(outerRing * 0.88f, innerRing * 0.36f))) * aaOuter;
+                    _telegraphRingTex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
+                }
+            }
+
+            _telegraphRingTex.Apply();
+            return _telegraphRingTex;
         }
 
         public static Texture2D GetArenaFloorGridTexture()

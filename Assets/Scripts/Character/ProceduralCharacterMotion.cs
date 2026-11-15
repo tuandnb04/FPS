@@ -25,7 +25,7 @@ namespace TopDownShooter.Character
         [SerializeField] private float bankRollDegrees = 5f;
         [SerializeField] private float idleBreathFrequency = 0.6f;
         [SerializeField] private float idleBreathAmplitude = 0.025f;
-        [SerializeField] private float settleBlendDuration = 0.30f;
+        [SerializeField] private float settleBlendDuration = 0.18f;
 
         private Vector3 baseVisualLocalPos;
         private Vector3 baseSecondaryLocalPos;
@@ -93,6 +93,27 @@ namespace TopDownShooter.Character
             squashStartScale = impactScale;
             squashDuration = Mathf.Max(0.05f, duration);
             squashTimer = squashDuration;
+        }
+
+        /// <summary>
+        /// Clears runtime locomotion blend, banking, secondary lag, and squash timers across mission resets.
+        /// </summary>
+        public void ResetMotionState()
+        {
+            moveBlend = 0f;
+            smoothedBobOffset = 0f;
+            smoothedForwardLean = 0f;
+            smoothedBankRoll = 0f;
+            currentLegSwingAngle = 0f;
+            currentIdleOffset = 0f;
+            prevVelocity = Vector3.zero;
+            smoothedSecondaryLag = Vector3.zero;
+            squashTimer = 0f;
+            currentSquashScale = Vector3.one;
+            if (visualRoot != null)
+            {
+                visualRoot.localScale = Vector3.one;
+            }
         }
 
         /// <summary>

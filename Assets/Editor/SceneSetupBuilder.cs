@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using TMPro;
 using Unity.Cinemachine;
@@ -23,27 +24,59 @@ namespace TopDownShooter.Editor
 {
     /// <summary>
     /// Deterministic idempotent builder creating materials, textures, URP lighting,
-    /// compound arena geometry, player rig, Cinemachine rig, audio/VFX/feel directors, and uGUI shell.
+    /// Blender hard-surface geometry, player rig, Cinemachine rig, audio/VFX/feel/save directors, and 6-state uGUI shell.
     /// </summary>
     public static class SceneSetupBuilder
     {
         private const string ScenePath = "Assets/Scenes/SampleScene.unity";
         private const string MaterialsDir = "Assets/Materials";
         private const string TexturesDir = "Assets/Textures";
+        private const string FbxAssetPath = "Assets/Models/SM_Vanguard_Assets.fbx";
         private const string VolumeProfilePath = "Assets/Settings/SampleSceneProfile.asset";
         private const string InputActionsPath = "Assets/InputSystem_Actions.inputactions";
+
+        private struct VanguardMeshPack
+        {
+            public Mesh PlayerTorso;
+            public Mesh PlayerChestRig;
+            public Mesh PlayerHelmet;
+            public Mesh PlayerVisor;
+            public Mesh PlayerLimb;
+            public Mesh PlayerJetpack;
+
+            public Mesh WeaponPulseRifle;
+            public Mesh WeaponShotgun;
+            public Mesh WeaponRailgun;
+            public Mesh WeaponRocket;
+
+            public Mesh ChaserTorso;
+            public Mesh ChaserHead;
+            public Mesh HeavyTorso;
+            public Mesh HeavyCrown;
+            public Mesh BossTorso;
+            public Mesh BossTurret;
+
+            public Mesh TacticalCrate;
+            public Mesh EnergyPylon;
+            public Mesh PickupXpCrystal;
+            public Mesh PickupMedkit;
+            public Mesh PickupCreditCoin;
+        }
 
         [MenuItem("Vanguard/Rebuild Top-Down Shooter Scene")]
         public static void BuildCompleteScene()
         {
             EnsureFolders();
 
-            // 1. Persisted Texture Assets
+            // 1. Persisted Texture Assets & Custom Blender FBX Meshes
             Texture2D floorTex = SaveTextureAsset(UISpriteFactory.GetArenaFloorGridTexture(), TexturesDir + "/Tex_ArenaFloorGrid.png", true);
             Sprite solidSprite = SaveSpriteAsset(UISpriteFactory.GetSolidRectSprite().texture, TexturesDir + "/Tex_SolidRect.png");
             Sprite roundedSprite = SaveSpriteAsset(UISpriteFactory.GetRoundedRectSprite().texture, TexturesDir + "/Tex_RoundedRect.png");
             Sprite shieldSprite = SaveSpriteAsset(UISpriteFactory.GetShieldIcon().texture, TexturesDir + "/Tex_ShieldIcon.png");
             Sprite crosshairSprite = SaveSpriteAsset(UISpriteFactory.GetCrosshairIcon().texture, TexturesDir + "/Tex_CrosshairIcon.png");
+            Sprite circleSprite = SaveSpriteAsset(UISpriteFactory.GetCircleSprite().texture, TexturesDir + "/Tex_Circle.png");
+
+            VanguardMeshPack meshes = LoadVanguardMeshes();
 
             // 2. Persisted Palette Materials & Skybox
             Material matFloor = SaveOrUpdateLitMaterial("Mat_Floor", Palette.Floor, 0.14f, 0.42f, false, 0f, floorTex, new Vector2(14f, 14f));
@@ -68,17 +101,17 @@ namespace TopDownShooter.Editor
             ConfigureEnvironmentLighting(matSkybox, profile);
             UnityEngine.Camera mainCam = ConfigureMainCamera();
 
-            // 6. Arena Environment
-            BuildArenaEnvironment(matFloor, matWalls, matProps, matTrim, matAccentEmissive, matCyanGlow);
+            // 6. Arena Environment (Blender crates & pylons + perimeter walls)
+            BuildArenaEnvironment(matFloor, matWalls, matProps, matTrim, matAccentEmissive, matCyanGlow, meshes);
 
-            // 7. Player Rig
+            // 7. Player Rig (Blender armor parts + 4 switchable weapons)
             InputActionAsset inputAsset = AssetDatabase.LoadAssetAtPath<InputActionAsset>(InputActionsPath);
-            PlayerController player = BuildPlayerRig(inputAsset, matPlayerPrimary, matPlayerSecondary, matAccentEmissive, matCyanGlow);
+            PlayerController player = BuildPlayerRig(inputAsset, matPlayerPrimary, matPlayerSecondary, matAccentEmissive, matCyanGlow, matHealthGlow, meshes);
 
             // 8. Cinemachine Top-Down Rig
             TopDownCameraRig cameraRig = BuildCameraRig(player.transform, mainCam);
 
-            // 9. GameSystems & UI Canvas
+            // 9. GameSystems & UI Canvas (SaveManager first before GameManager)
             GameObject systemsRoot = new GameObject("GameSystems");
             Transform projPoolRoot = new GameObject("ProjectilePoolRoot").transform;
             projPoolRoot.SetParent(systemsRoot.transform, false);
@@ -89,6 +122,7 @@ namespace TopDownShooter.Editor
             Transform textRoot = new GameObject("FloatingTextRoot").transform;
             textRoot.SetParent(systemsRoot.transform, false);
 
+            systemsRoot.AddComponent<SaveManager>();
             systemsRoot.AddComponent<AudioManager>();
             VFXManager vfx = systemsRoot.AddComponent<VFXManager>();
             vfx.BindPoolRoot(vfxPoolRoot);
@@ -97,11 +131,22 @@ namespace TopDownShooter.Editor
             FeelManager feel = systemsRoot.AddComponent<FeelManager>();
             feel.BindComponents(impulse, textRoot);
 
-            systemsRoot.AddComponent<EnemySpawner>();
-            UIManager ui = BuildGameCanvasAndUI(systemsRoot, solidSprite, roundedSprite, shieldSprite, crosshairSprite);
+            EnemySpawner spawner = systemsRoot.AddComponent<EnemySpawner>();
+            spawner.BindMeshes(
+                meshes.ChaserTorso,
+                meshes.ChaserHead,
+                meshes.HeavyTorso,
+                meshes.HeavyCrown,
+                meshes.BossTorso,
+                meshes.BossTurret,
+                meshes.PlayerLimb,
+                meshes.PickupXpCrystal,
+                meshes.PickupMedkit,
+                meshes.PickupCreditCoin);
+
+            UIManager ui = BuildGameCanvasAndUI(systemsRoot, solidSprite, roundedSprite, shieldSprite, crosshairSprite, circleSprite);
             systemsRoot.AddComponent<GameManager>();
 
-            // Unused local guard check
             if (cameraRig == null || ui == null || matHealthGlow == null)
             {
                 Debug.LogWarning("SceneSetupBuilder noticed a missing reference.");
@@ -111,7 +156,67 @@ namespace TopDownShooter.Editor
             AssetDatabase.SaveAssets();
             EditorSceneManager.SaveScene(scene, ScenePath);
             AssetDatabase.Refresh();
-            Debug.Log("[SceneSetupBuilder] Successfully rebuilt Top-Down Shooter SampleScene.");
+            Debug.Log("[SceneSetupBuilder] Successfully rebuilt Store Edition 2.0 SampleScene.");
+        }
+
+        private static VanguardMeshPack LoadVanguardMeshes()
+        {
+            VanguardMeshPack pack = new VanguardMeshPack();
+            if (!File.Exists(FbxAssetPath))
+            {
+                Debug.LogWarning("[SceneSetupBuilder] Custom FBX not found at " + FbxAssetPath + ". Falling back to primitives.");
+                return pack;
+            }
+
+            AssetDatabase.ImportAsset(FbxAssetPath, ImportAssetOptions.ForceSynchronousImport);
+            ModelImporter importer = AssetImporter.GetAtPath(FbxAssetPath) as ModelImporter;
+            if (importer != null && (importer.materialImportMode != ModelImporterMaterialImportMode.None || !importer.isReadable || Mathf.Abs(importer.globalScale - 1f) > 0.001f))
+            {
+                importer.materialImportMode = ModelImporterMaterialImportMode.None;
+                importer.globalScale = 1f;
+                importer.isReadable = true;
+                importer.SaveAndReimport();
+            }
+
+            Object[] assets = AssetDatabase.LoadAllAssetsAtPath(FbxAssetPath);
+            Dictionary<string, Mesh> byName = new Dictionary<string, Mesh>();
+            foreach (Object obj in assets)
+            {
+                if (obj is Mesh m)
+                {
+                    byName[m.name] = m;
+                }
+            }
+
+            Mesh Get(string key) => byName.TryGetValue(key, out Mesh m) ? m : null;
+
+            pack.PlayerTorso = Get("Mesh_PlayerTorso");
+            pack.PlayerChestRig = Get("Mesh_PlayerChestRig");
+            pack.PlayerHelmet = Get("Mesh_PlayerHelmet");
+            pack.PlayerVisor = Get("Mesh_PlayerVisor");
+            pack.PlayerLimb = Get("Mesh_PlayerLimb");
+            pack.PlayerJetpack = Get("Mesh_PlayerJetpack");
+
+            pack.WeaponPulseRifle = Get("Mesh_Weapon_PulseRifle");
+            pack.WeaponShotgun = Get("Mesh_Weapon_Shotgun");
+            pack.WeaponRailgun = Get("Mesh_Weapon_Railgun");
+            pack.WeaponRocket = Get("Mesh_Weapon_Rocket");
+
+            pack.ChaserTorso = Get("Mesh_ChaserTorso");
+            pack.ChaserHead = Get("Mesh_ChaserHead");
+            pack.HeavyTorso = Get("Mesh_HeavyTorso");
+            pack.HeavyCrown = Get("Mesh_HeavyCrown");
+            pack.BossTorso = Get("Mesh_BossTorso");
+            pack.BossTurret = Get("Mesh_BossTurret");
+
+            pack.TacticalCrate = Get("Mesh_TacticalCrate");
+            pack.EnergyPylon = Get("Mesh_EnergyPylon");
+            pack.PickupXpCrystal = Get("Mesh_Pickup_XpCrystal");
+            pack.PickupMedkit = Get("Mesh_Pickup_Medkit");
+            pack.PickupCreditCoin = Get("Mesh_Pickup_CreditCoin");
+
+            Debug.Log("[SceneSetupBuilder] Loaded " + byName.Count + " Blender FBX meshes from " + FbxAssetPath);
+            return pack;
         }
 
         private static void EnsureFolders()
@@ -213,6 +318,21 @@ namespace TopDownShooter.Editor
             return generated;
         }
 
+        private static T EnsureVolumeComponent<T>(VolumeProfile profile) where T : VolumeComponent
+        {
+            if (!profile.TryGet(out T comp) || comp == null)
+            {
+                comp = profile.Add<T>(true);
+            }
+            if (string.IsNullOrEmpty(AssetDatabase.GetAssetPath(comp)))
+            {
+                comp.hideFlags = HideFlags.HideInInspector | HideFlags.HideInHierarchy;
+                AssetDatabase.AddObjectToAsset(comp, profile);
+            }
+            EditorUtility.SetDirty(comp);
+            return comp;
+        }
+
         private static VolumeProfile ConfigureVolumeProfile()
         {
             VolumeProfile profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(VolumeProfilePath);
@@ -222,18 +342,14 @@ namespace TopDownShooter.Editor
                 AssetDatabase.CreateAsset(profile, VolumeProfilePath);
             }
 
-            if (!profile.TryGet(out Tonemapping tonemapping))
-            {
-                tonemapping = profile.Add<Tonemapping>(true);
-            }
+            profile.components.RemoveAll(c => c == null);
+
+            Tonemapping tonemapping = EnsureVolumeComponent<Tonemapping>(profile);
             tonemapping.active = true;
             tonemapping.mode.overrideState = true;
             tonemapping.mode.value = TonemappingMode.ACES;
 
-            if (!profile.TryGet(out Bloom bloom))
-            {
-                bloom = profile.Add<Bloom>(true);
-            }
+            Bloom bloom = EnsureVolumeComponent<Bloom>(profile);
             bloom.active = true;
             bloom.threshold.overrideState = true;
             bloom.threshold.value = 1.05f;
@@ -244,10 +360,7 @@ namespace TopDownShooter.Editor
             bloom.tint.overrideState = true;
             bloom.tint.value = Palette.KeyLightWarm;
 
-            if (!profile.TryGet(out Vignette vignette))
-            {
-                vignette = profile.Add<Vignette>(true);
-            }
+            Vignette vignette = EnsureVolumeComponent<Vignette>(profile);
             vignette.active = true;
             vignette.intensity.overrideState = true;
             vignette.intensity.value = 0.24f;
@@ -256,10 +369,7 @@ namespace TopDownShooter.Editor
             vignette.color.overrideState = true;
             vignette.color.value = Palette.Shadow;
 
-            if (!profile.TryGet(out ColorAdjustments colorAdj))
-            {
-                colorAdj = profile.Add<ColorAdjustments>(true);
-            }
+            ColorAdjustments colorAdj = EnsureVolumeComponent<ColorAdjustments>(profile);
             colorAdj.active = true;
             colorAdj.saturation.overrideState = true;
             colorAdj.saturation.value = 10f;
@@ -268,12 +378,14 @@ namespace TopDownShooter.Editor
             colorAdj.postExposure.overrideState = true;
             colorAdj.postExposure.value = 0.22f;
 
-            if (profile.TryGet(out MotionBlur motionBlur))
+            if (profile.TryGet(out MotionBlur motionBlur) && motionBlur != null)
             {
                 motionBlur.active = false;
+                EditorUtility.SetDirty(motionBlur);
             }
 
             EditorUtility.SetDirty(profile);
+            AssetDatabase.SaveAssets();
             return profile;
         }
 
@@ -386,7 +498,8 @@ namespace TopDownShooter.Editor
             Material matProps,
             Material matTrim,
             Material matAccent,
-            Material matCyan)
+            Material matCyan,
+            VanguardMeshPack meshes)
         {
             GameObject env = new GameObject("ArenaEnvironment");
 
@@ -420,22 +533,22 @@ namespace TopDownShooter.Editor
             BuildPerimeterWall(env.transform, "Wall_East", new Vector3(13.6f, 0f, 0f), new Vector3(1.0f, 1.8f, 26.2f), matWalls, matTrim, matCyan);
             BuildPerimeterWall(env.transform, "Wall_West", new Vector3(-13.6f, 0f, 0f), new Vector3(1.0f, 1.8f, 26.2f), matWalls, matTrim, matCyan);
 
-            // 8 Tactical Cover Blocks symmetrically placed inside arena
-            BuildTacticalCover(env.transform, "Cover_NW", new Vector3(-5.2f, 0f, 5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent);
-            BuildTacticalCover(env.transform, "Cover_NE", new Vector3(5.2f, 0f, 5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent);
-            BuildTacticalCover(env.transform, "Cover_SW", new Vector3(-5.2f, 0f, -5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent);
-            BuildTacticalCover(env.transform, "Cover_SE", new Vector3(5.2f, 0f, -5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent);
+            // 8 Tactical Cover Blocks (Blender SM_TacticalCrate + emissive trim)
+            BuildTacticalCover(env.transform, "Cover_NW", new Vector3(-5.2f, 0f, 5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
+            BuildTacticalCover(env.transform, "Cover_NE", new Vector3(5.2f, 0f, 5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
+            BuildTacticalCover(env.transform, "Cover_SW", new Vector3(-5.2f, 0f, -5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
+            BuildTacticalCover(env.transform, "Cover_SE", new Vector3(5.2f, 0f, -5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
 
-            BuildTacticalCover(env.transform, "Cover_North", new Vector3(0f, 0f, 8.2f), 0f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matCyan);
-            BuildTacticalCover(env.transform, "Cover_South", new Vector3(0f, 0f, -8.2f), 0f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matCyan);
-            BuildTacticalCover(env.transform, "Cover_East", new Vector3(8.2f, 0f, 0f), 90f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matCyan);
-            BuildTacticalCover(env.transform, "Cover_West", new Vector3(-8.2f, 0f, 0f), 90f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matCyan);
+            BuildTacticalCover(env.transform, "Cover_North", new Vector3(0f, 0f, 8.2f), 0f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matCyan, meshes.TacticalCrate);
+            BuildTacticalCover(env.transform, "Cover_South", new Vector3(0f, 0f, -8.2f), 0f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matCyan, meshes.TacticalCrate);
+            BuildTacticalCover(env.transform, "Cover_East", new Vector3(8.2f, 0f, 0f), 90f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matCyan, meshes.TacticalCrate);
+            BuildTacticalCover(env.transform, "Cover_West", new Vector3(-8.2f, 0f, 0f), 90f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matCyan, meshes.TacticalCrate);
 
-            // 4 Corner Tactical Pylons w/ local PointLights
-            BuildCornerPylon(env.transform, "Pylon_NW", new Vector3(-11.8f, 0f, 11.8f), matWalls, matTrim, matCyan, Palette.CyanGlow);
-            BuildCornerPylon(env.transform, "Pylon_NE", new Vector3(11.8f, 0f, 11.8f), matWalls, matTrim, matAccent, Palette.Accent);
-            BuildCornerPylon(env.transform, "Pylon_SW", new Vector3(-11.8f, 0f, -11.8f), matWalls, matTrim, matAccent, Palette.Accent);
-            BuildCornerPylon(env.transform, "Pylon_SE", new Vector3(11.8f, 0f, -11.8f), matWalls, matTrim, matCyan, Palette.CyanGlow);
+            // 4 Corner Tactical Pylons (Blender SM_EnergyPylon + PointLights)
+            BuildCornerPylon(env.transform, "Pylon_NW", new Vector3(-11.8f, 0f, 11.8f), matWalls, matTrim, matCyan, Palette.CyanGlow, meshes.EnergyPylon);
+            BuildCornerPylon(env.transform, "Pylon_NE", new Vector3(11.8f, 0f, 11.8f), matWalls, matTrim, matAccent, Palette.Accent, meshes.EnergyPylon);
+            BuildCornerPylon(env.transform, "Pylon_SW", new Vector3(-11.8f, 0f, -11.8f), matWalls, matTrim, matAccent, Palette.Accent, meshes.EnergyPylon);
+            BuildCornerPylon(env.transform, "Pylon_SE", new Vector3(11.8f, 0f, -11.8f), matWalls, matTrim, matCyan, Palette.CyanGlow, meshes.EnergyPylon);
         }
 
         private static void BuildPerimeterWall(Transform parent, string wallName, Vector3 pos, Vector3 size, Material matWall, Material matTrim, Material matGlow)
@@ -453,7 +566,7 @@ namespace TopDownShooter.Editor
             CreateVisualBox("NeonStrip", root.transform, new Vector3(0f, size.y * 0.72f, 0f), new Vector3(size.x + 0.06f, 0.10f, size.z + 0.06f), matGlow);
         }
 
-        private static void BuildTacticalCover(Transform parent, string coverName, Vector3 pos, float yawDeg, Vector3 size, Material matBody, Material matTrim, Material matGlow)
+        private static void BuildTacticalCover(Transform parent, string coverName, Vector3 pos, float yawDeg, Vector3 size, Material matBody, Material matTrim, Material matGlow, Mesh crateMesh)
         {
             GameObject root = new GameObject(coverName);
             root.transform.SetParent(parent, false);
@@ -463,17 +576,22 @@ namespace TopDownShooter.Editor
             col.size = size;
             col.center = new Vector3(0f, size.y * 0.5f, 0f);
 
-            // Base plinth
-            CreateVisualBox("BasePlinth", root.transform, new Vector3(0f, 0.14f, 0f), new Vector3(size.x + 0.18f, 0.28f, size.z + 0.18f), matTrim);
-            // Main armor block
-            CreateVisualBox("ArmorCore", root.transform, new Vector3(0f, size.y * 0.52f, 0f), new Vector3(size.x, size.y * 0.76f, size.z), matBody);
-            // Top bevel crest
-            CreateVisualBox("TopCap", root.transform, new Vector3(0f, size.y + 0.05f, 0f), new Vector3(size.x * 0.86f, 0.14f, size.z * 0.82f), matTrim);
-            // Recessed neon edge trim
-            CreateVisualBox("HazardBand", root.transform, new Vector3(0f, size.y * 0.78f, 0f), new Vector3(size.x + 0.05f, 0.08f, size.z + 0.05f), matGlow);
+            if (crateMesh != null)
+            {
+                CreateVisualMeshFit("TacticalCrateMesh", crateMesh, PrimitiveType.Cube, root.transform, new Vector3(0f, size.y * 0.5f, 0f), size, matBody);
+                CreateVisualBox("BasePlinth", root.transform, new Vector3(0f, 0.08f, 0f), new Vector3(size.x + 0.16f, 0.16f, size.z + 0.16f), matTrim);
+                CreateVisualBox("HazardBand", root.transform, new Vector3(0f, size.y * 0.80f, 0f), new Vector3(size.x * 0.94f, 0.07f, size.z * 0.94f), matGlow);
+            }
+            else
+            {
+                CreateVisualBox("BasePlinth", root.transform, new Vector3(0f, 0.14f, 0f), new Vector3(size.x + 0.18f, 0.28f, size.z + 0.18f), matTrim);
+                CreateVisualBox("ArmorCore", root.transform, new Vector3(0f, size.y * 0.52f, 0f), new Vector3(size.x, size.y * 0.76f, size.z), matBody);
+                CreateVisualBox("TopCap", root.transform, new Vector3(0f, size.y + 0.05f, 0f), new Vector3(size.x * 0.86f, 0.14f, size.z * 0.82f), matTrim);
+                CreateVisualBox("HazardBand", root.transform, new Vector3(0f, size.y * 0.78f, 0f), new Vector3(size.x + 0.05f, 0.08f, size.z + 0.05f), matGlow);
+            }
         }
 
-        private static void BuildCornerPylon(Transform parent, string pylonName, Vector3 pos, Material matBody, Material matTrim, Material matGlow, Color lightColor)
+        private static void BuildCornerPylon(Transform parent, string pylonName, Vector3 pos, Material matBody, Material matTrim, Material matGlow, Color lightColor, Mesh pylonMesh)
         {
             GameObject root = new GameObject(pylonName);
             root.transform.SetParent(parent, false);
@@ -483,10 +601,18 @@ namespace TopDownShooter.Editor
             col.size = new Vector3(1.1f, 3.2f, 1.1f);
             col.center = new Vector3(0f, 1.6f, 0f);
 
-            CreateVisualBox("Base", root.transform, new Vector3(0f, 0.2f, 0f), new Vector3(1.3f, 0.4f, 1.3f), matTrim);
-            CreateVisualBox("Shaft", root.transform, new Vector3(0f, 1.4f, 0f), new Vector3(0.85f, 2.2f, 0.85f), matBody);
-            CreateVisualBox("BeaconCore", root.transform, new Vector3(0f, 2.75f, 0f), new Vector3(0.95f, 0.45f, 0.95f), matGlow);
-            CreateVisualBox("Cap", root.transform, new Vector3(0f, 3.1f, 0f), new Vector3(1.1f, 0.22f, 1.1f), matTrim);
+            if (pylonMesh != null)
+            {
+                CreateVisualMeshFit("EnergyPylonMesh", pylonMesh, PrimitiveType.Cube, root.transform, new Vector3(0f, 1.6f, 0f), new Vector3(1.25f, 3.2f, 1.25f), matBody);
+                CreateVisualBox("BeaconCore", root.transform, new Vector3(0f, 2.72f, 0f), new Vector3(0.92f, 0.42f, 0.92f), matGlow);
+            }
+            else
+            {
+                CreateVisualBox("Base", root.transform, new Vector3(0f, 0.2f, 0f), new Vector3(1.3f, 0.4f, 1.3f), matTrim);
+                CreateVisualBox("Shaft", root.transform, new Vector3(0f, 1.4f, 0f), new Vector3(0.85f, 2.2f, 0.85f), matBody);
+                CreateVisualBox("BeaconCore", root.transform, new Vector3(0f, 2.75f, 0f), new Vector3(0.95f, 0.45f, 0.95f), matGlow);
+                CreateVisualBox("Cap", root.transform, new Vector3(0f, 3.1f, 0f), new Vector3(1.1f, 0.22f, 1.1f), matTrim);
+            }
 
             GameObject lightGo = new GameObject("PylonLight");
             lightGo.transform.SetParent(root.transform, false);
@@ -524,12 +650,59 @@ namespace TopDownShooter.Editor
             return go;
         }
 
+        private static GameObject CreateVisualMeshFit(
+            string name,
+            Mesh mesh,
+            PrimitiveType fallbackType,
+            Transform parent,
+            Vector3 localPos,
+            Vector3 targetSize,
+            Material mat,
+            bool uniformAspect = false)
+        {
+            if (mesh == null)
+            {
+                return CreateVisualPrimitive(name, fallbackType, parent, localPos, targetSize, mat);
+            }
+
+            GameObject go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+
+            MeshFilter mf = go.AddComponent<MeshFilter>();
+            mf.sharedMesh = mesh;
+            MeshRenderer mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = mat;
+
+            Vector3 bSize = mesh.bounds.size;
+            Vector3 fitScale;
+            if (uniformAspect)
+            {
+                float maxTarget = Mathf.Max(targetSize.x, Mathf.Max(targetSize.y, targetSize.z));
+                float maxMesh = Mathf.Max(0.01f, Mathf.Max(bSize.x, Mathf.Max(bSize.y, bSize.z)));
+                float s = maxTarget / maxMesh;
+                fitScale = new Vector3(s, s, s);
+            }
+            else
+            {
+                fitScale = new Vector3(
+                    targetSize.x / Mathf.Max(0.01f, bSize.x),
+                    targetSize.y / Mathf.Max(0.01f, bSize.y),
+                    targetSize.z / Mathf.Max(0.01f, bSize.z));
+            }
+
+            go.transform.localScale = fitScale;
+            go.transform.localPosition = localPos - Vector3.Scale(mesh.bounds.center, fitScale);
+            return go;
+        }
+
         private static PlayerController BuildPlayerRig(
             InputActionAsset inputAsset,
             Material matPrimary,
             Material matSecondary,
             Material matAccent,
-            Material matCyan)
+            Material matCyan,
+            Material matHealth,
+            VanguardMeshPack meshes)
         {
             GameObject root = new GameObject("Player");
             root.tag = "Player";
@@ -557,65 +730,104 @@ namespace TopDownShooter.Editor
             GameObject visualRoot = new GameObject("VisualRoot");
             visualRoot.transform.SetParent(root.transform, false);
 
-            // Armored Chest & Waist
-            CreateVisualPrimitive("Torso", PrimitiveType.Cube, visualRoot.transform, new Vector3(0f, 1.05f, 0f), new Vector3(0.56f, 0.56f, 0.36f), matPrimary);
-            CreateVisualPrimitive("ChestRig", PrimitiveType.Cube, visualRoot.transform, new Vector3(0f, 1.12f, 0.06f), new Vector3(0.62f, 0.34f, 0.38f), matSecondary);
-            CreateVisualPrimitive("ChestCore", PrimitiveType.Cube, visualRoot.transform, new Vector3(0f, 1.12f, 0.26f), new Vector3(0.18f, 0.18f, 0.05f), matCyan);
+            // Armored Chest & Waist (Blender custom meshes)
+            GameObject torsoGo = CreateVisualMeshFit("Torso", meshes.PlayerTorso, PrimitiveType.Cube, visualRoot.transform, new Vector3(0f, 1.05f, 0f), new Vector3(0.58f, 0.58f, 0.38f), matPrimary);
+            CreateVisualMeshFit("ChestRig", meshes.PlayerChestRig, PrimitiveType.Cube, visualRoot.transform, new Vector3(0f, 1.12f, 0.06f), new Vector3(0.64f, 0.36f, 0.40f), matSecondary);
+            CreateVisualPrimitive("ChestCore", PrimitiveType.Cube, visualRoot.transform, new Vector3(0f, 1.12f, 0.27f), new Vector3(0.18f, 0.18f, 0.05f), matCyan);
 
             // Head & Visor
             GameObject headPivot = new GameObject("HeadPivot");
             headPivot.transform.SetParent(visualRoot.transform, false);
             headPivot.transform.localPosition = new Vector3(0f, 1.48f, 0.02f);
-            CreateVisualPrimitive("Helmet", PrimitiveType.Cube, headPivot.transform, Vector3.zero, new Vector3(0.40f, 0.34f, 0.42f), matPrimary);
-            CreateVisualPrimitive("TacticalVisor", PrimitiveType.Cube, headPivot.transform, new Vector3(0f, 0.02f, 0.20f), new Vector3(0.36f, 0.12f, 0.08f), matCyan);
-            CreateVisualPrimitive("Antenna", PrimitiveType.Cylinder, headPivot.transform, new Vector3(0.18f, 0.22f, -0.08f), new Vector3(0.03f, 0.16f, 0.03f), matAccent);
+            GameObject helmetGo = CreateVisualMeshFit("Helmet", meshes.PlayerHelmet, PrimitiveType.Cube, headPivot.transform, Vector3.zero, new Vector3(0.42f, 0.36f, 0.44f), matPrimary);
+            CreateVisualMeshFit("TacticalVisor", meshes.PlayerVisor, PrimitiveType.Cube, headPivot.transform, new Vector3(0f, 0.02f, 0.20f), new Vector3(0.36f, 0.12f, 0.10f), matCyan);
+            CreateVisualPrimitive("Antenna", PrimitiveType.Cylinder, headPivot.transform, new Vector3(0.18f, 0.18f, -0.08f), new Vector3(0.03f, 0.07f, 0.03f), matAccent);
 
             // Left & Right Arms
             GameObject leftArmPivot = new GameObject("LeftArmPivot");
             leftArmPivot.transform.SetParent(visualRoot.transform, false);
             leftArmPivot.transform.localPosition = new Vector3(-0.38f, 1.24f, 0f);
             CreateVisualPrimitive("LeftShoulder", PrimitiveType.Cube, leftArmPivot.transform, new Vector3(-0.02f, -0.02f, 0f), new Vector3(0.22f, 0.20f, 0.24f), matSecondary);
-            CreateVisualPrimitive("LeftForearm", PrimitiveType.Capsule, leftArmPivot.transform, new Vector3(0f, -0.24f, 0.08f), new Vector3(0.16f, 0.22f, 0.16f), matPrimary);
+            GameObject leftForearmGo = CreateVisualMeshFit("LeftForearm", meshes.PlayerLimb, PrimitiveType.Capsule, leftArmPivot.transform, new Vector3(0f, -0.24f, 0.08f), new Vector3(0.17f, 0.44f, 0.17f), matPrimary);
 
             GameObject rightArmPivot = new GameObject("RightArmPivot");
             rightArmPivot.transform.SetParent(visualRoot.transform, false);
             rightArmPivot.transform.localPosition = new Vector3(0.38f, 1.24f, 0f);
             CreateVisualPrimitive("RightShoulder", PrimitiveType.Cube, rightArmPivot.transform, new Vector3(0.02f, -0.02f, 0f), new Vector3(0.22f, 0.20f, 0.24f), matSecondary);
-            CreateVisualPrimitive("RightForearm", PrimitiveType.Capsule, rightArmPivot.transform, new Vector3(0f, -0.24f, 0.12f), new Vector3(0.16f, 0.22f, 0.16f), matPrimary);
+            GameObject rightForearmGo = CreateVisualMeshFit("RightForearm", meshes.PlayerLimb, PrimitiveType.Capsule, rightArmPivot.transform, new Vector3(0f, -0.24f, 0.12f), new Vector3(0.17f, 0.44f, 0.17f), matPrimary);
 
-            // Pulse Rifle mounted to VisualRoot forward stance
+            // 4 Switchable Weapons mounted under WeaponAnchor
             GameObject weaponAnchor = new GameObject("WeaponAnchor");
             weaponAnchor.transform.SetParent(visualRoot.transform, false);
             weaponAnchor.transform.localPosition = new Vector3(0.24f, 1.04f, 0.34f);
-            CreateVisualPrimitive("RifleReceiver", PrimitiveType.Cube, weaponAnchor.transform, new Vector3(0f, 0f, 0.16f), new Vector3(0.14f, 0.18f, 0.62f), matSecondary);
-            CreateVisualPrimitive("RifleRail", PrimitiveType.Cube, weaponAnchor.transform, new Vector3(0f, 0.06f, 0.36f), new Vector3(0.08f, 0.06f, 0.56f), matAccent);
+
+            GameObject[] weaponVisuals = new GameObject[4];
+            weaponVisuals[0] = BuildWeaponModel("Weapon_PulseRifle", weaponAnchor.transform, meshes.WeaponPulseRifle, new Vector3(0.16f, 0.20f, 0.72f), matSecondary, matCyan);
+            weaponVisuals[1] = BuildWeaponModel("Weapon_Shotgun", weaponAnchor.transform, meshes.WeaponShotgun, new Vector3(0.20f, 0.22f, 0.64f), matSecondary, matAccent);
+            weaponVisuals[2] = BuildWeaponModel("Weapon_Railgun", weaponAnchor.transform, meshes.WeaponRailgun, new Vector3(0.16f, 0.22f, 0.94f), matSecondary, matCyan);
+            weaponVisuals[3] = BuildWeaponModel("Weapon_Rocket", weaponAnchor.transform, meshes.WeaponRocket, new Vector3(0.26f, 0.28f, 0.84f), matSecondary, matHealth);
+            weapon.BindWeaponVisuals(weaponVisuals);
+
             GameObject muzzlePoint = new GameObject("MuzzlePoint");
             muzzlePoint.transform.SetParent(weaponAnchor.transform, false);
-            muzzlePoint.transform.localPosition = new Vector3(0f, 0.02f, 0.72f);
+            muzzlePoint.transform.localPosition = new Vector3(0f, 0.02f, 0.74f);
 
             // Legs
             GameObject leftLegPivot = new GameObject("LeftLegPivot");
             leftLegPivot.transform.SetParent(visualRoot.transform, false);
             leftLegPivot.transform.localPosition = new Vector3(-0.15f, 0.74f, 0f);
-            CreateVisualPrimitive("LeftLeg", PrimitiveType.Cube, leftLegPivot.transform, new Vector3(0f, -0.35f, 0f), new Vector3(0.20f, 0.68f, 0.22f), matSecondary);
+            CreateVisualMeshFit("LeftLeg", meshes.PlayerLimb, PrimitiveType.Cube, leftLegPivot.transform, new Vector3(0f, -0.35f, 0f), new Vector3(0.21f, 0.68f, 0.22f), matSecondary);
 
             GameObject rightLegPivot = new GameObject("RightLegPivot");
             rightLegPivot.transform.SetParent(visualRoot.transform, false);
             rightLegPivot.transform.localPosition = new Vector3(0.15f, 0.74f, 0f);
-            CreateVisualPrimitive("RightLeg", PrimitiveType.Cube, rightLegPivot.transform, new Vector3(0f, -0.35f, 0f), new Vector3(0.20f, 0.68f, 0.22f), matSecondary);
+            CreateVisualMeshFit("RightLeg", meshes.PlayerLimb, PrimitiveType.Cube, rightLegPivot.transform, new Vector3(0f, -0.35f, 0f), new Vector3(0.21f, 0.68f, 0.22f), matSecondary);
 
             // Thruster Pack (secondary lag pivot)
             GameObject secondaryPivot = new GameObject("SecondaryPivot");
             secondaryPivot.transform.SetParent(visualRoot.transform, false);
             secondaryPivot.transform.localPosition = new Vector3(0f, 1.12f, -0.24f);
-            CreateVisualPrimitive("JetpackBody", PrimitiveType.Cube, secondaryPivot.transform, Vector3.zero, new Vector3(0.36f, 0.40f, 0.18f), matSecondary);
+            CreateVisualMeshFit("JetpackBody", meshes.PlayerJetpack, PrimitiveType.Cube, secondaryPivot.transform, Vector3.zero, new Vector3(0.40f, 0.44f, 0.22f), matSecondary);
             CreateVisualPrimitive("ThrusterGlowL", PrimitiveType.Cylinder, secondaryPivot.transform, new Vector3(-0.10f, -0.18f, -0.02f), new Vector3(0.09f, 0.08f, 0.09f), matCyan);
             CreateVisualPrimitive("ThrusterGlowR", PrimitiveType.Cylinder, secondaryPivot.transform, new Vector3(0.10f, -0.18f, -0.02f), new Vector3(0.09f, 0.08f, 0.09f), matCyan);
 
             motion.BindPivots(visualRoot.transform, headPivot.transform, leftArmPivot.transform, rightArmPivot.transform, leftLegPivot.transform, rightLegPivot.transform, secondaryPivot.transform);
-            player.BindComponents(inputAsset, cc, motion, weapon, root.GetComponentsInChildren<MeshRenderer>(true));
+            MeshRenderer[] primaryArmorParts = new[]
+            {
+                torsoGo.GetComponent<MeshRenderer>(),
+                helmetGo.GetComponent<MeshRenderer>(),
+                leftForearmGo.GetComponent<MeshRenderer>(),
+                rightForearmGo.GetComponent<MeshRenderer>()
+            };
+            player.BindComponents(inputAsset, cc, motion, weapon, root.GetComponentsInChildren<MeshRenderer>(true), primaryArmorParts);
 
             return player;
+        }
+
+        private static GameObject BuildWeaponModel(
+            string name,
+            Transform anchor,
+            Mesh weaponMesh,
+            Vector3 targetSize,
+            Material matBody,
+            Material matGlow)
+        {
+            GameObject container = new GameObject(name);
+            container.transform.SetParent(anchor, false);
+            container.transform.localPosition = Vector3.zero;
+
+            if (weaponMesh != null)
+            {
+                CreateVisualMeshFit("MeshBody", weaponMesh, PrimitiveType.Cube, container.transform, new Vector3(0f, 0f, 0.22f), targetSize, matBody, true);
+                CreateVisualPrimitive("MuzzleCore", PrimitiveType.Cube, container.transform, new Vector3(0f, 0.03f, targetSize.z * 0.45f), new Vector3(0.06f, 0.05f, targetSize.z * 0.28f), matGlow);
+            }
+            else
+            {
+                CreateVisualPrimitive("Receiver", PrimitiveType.Cube, container.transform, new Vector3(0f, 0f, 0.16f), new Vector3(targetSize.x, targetSize.y, targetSize.z * 0.85f), matBody);
+                CreateVisualPrimitive("RailGlow", PrimitiveType.Cube, container.transform, new Vector3(0f, 0.06f, 0.36f), new Vector3(targetSize.x * 0.55f, 0.06f, targetSize.z * 0.65f), matGlow);
+            }
+
+            return container;
         }
 
         private static TopDownCameraRig BuildCameraRig(Transform playerTransform, UnityEngine.Camera mainCam)
@@ -640,7 +852,8 @@ namespace TopDownShooter.Editor
             Sprite solidSprite,
             Sprite roundedSprite,
             Sprite shieldSprite,
-            Sprite crosshairSprite)
+            Sprite crosshairSprite,
+            Sprite circleSprite)
         {
             // EventSystem using New Input System UI Module
             GameObject esGo = new GameObject("EventSystem");
@@ -685,6 +898,12 @@ namespace TopDownShooter.Editor
             SetHorizontalBarRect(dashBg.rectTransform, 225f, 16f, -31f, 7f);
             Image dashFill = CreateFilledBar("DashBarFill", dashBg.transform, roundedSprite, Palette.CyanGlow);
 
+            // Top-Left Credits Pill (below HP card)
+            RectTransform crPill = CreatePanel("CreditsPill_Left", hudGroup.transform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(28f, -136f), new Vector2(200f, 34f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.92f));
+            CreateImage("CreditsAccentLeft", crPill, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(5f, 0f), new Vector2(4f, 20f), solidSprite, Palette.CreditGold, false);
+            TextMeshProUGUI hudCreditsText = CreateStyledText("HUD_CreditsText", crPill, "BANK // 200 CR", 14f, FontStyles.Bold, 2.5f, Palette.CreditGold, TextAlignmentOptions.MidlineLeft);
+            SetAnchoredRect(hudCreditsText.rectTransform, new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), new Vector2(10f, 0f), new Vector2(-24f, 28f));
+
             // Top-Center Wave & Score Pill
             RectTransform centerPill = CreatePanel("StatusPill_Center", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -24f), new Vector2(360f, 74f), roundedSprite, Palette.PanelSurface);
             CreateImage("PillAccent", centerPill, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 3f), solidSprite, Palette.CyanGlow, false);
@@ -697,6 +916,21 @@ namespace TopDownShooter.Editor
 
             TextMeshProUGUI scoreText = CreateStyledText("ScoreText", centerPill, "0 PTS", 22f, FontStyles.Bold, 2.5f, Palette.Accent, TextAlignmentOptions.MidlineRight);
             SetAnchoredRect(scoreText.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(-20f, 0f), new Vector2(165f, 44f));
+
+            // Boss Encounter Health Bar (anchored cleanly beneath Center Pill)
+            RectTransform bossRoot = CreatePanel("BossBarRoot", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -108f), new Vector2(540f, 56f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.94f));
+            CreateImage("BossBarAccent", bossRoot, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 3f), solidSprite, Palette.BossPurple, false);
+
+            TextMeshProUGUI bossNameText = CreateStyledText("BossNameText", bossRoot, "DREADNOUGHT MK-IV", 13f, FontStyles.Bold, 3.5f, Palette.BossPurple, TextAlignmentOptions.TopLeft);
+            SetAnchoredRect(bossNameText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -10f), new Vector2(300f, 20f));
+
+            TextMeshProUGUI bossHpText = CreateStyledText("BossHpText", bossRoot, "1200 / 1200", 13f, FontStyles.Bold, 2f, Palette.CharacterPrimary, TextAlignmentOptions.TopRight);
+            SetAnchoredRect(bossHpText.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-18f, -10f), new Vector2(160f, 20f));
+
+            Image bossHpBg = CreateImage("BossHpBg", bossRoot, new Vector2(0f, 0f), new Vector2(1f, 0f), Vector2.zero, new Vector2(0f, 12f), roundedSprite, TrimBarBg(), false);
+            SetHorizontalBarRect(bossHpBg.rectTransform, 18f, 18f, -14f, 12f);
+            Image bossHpFill = CreateFilledBar("BossHpFill", bossHpBg.transform, roundedSprite, Palette.BossPurple);
+            bossRoot.gameObject.SetActive(false);
 
             // Top-Right Level/XP & Pause Card
             RectTransform rightCard = CreatePanel("StatusCard_Right", hudGroup.transform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-28f, -24f), new Vector2(340f, 88f), roundedSprite, Palette.PanelSurface);
@@ -711,6 +945,49 @@ namespace TopDownShooter.Editor
             xpFill.fillAmount = 0f;
 
             Button hudPauseBtn = CreateButton("HUD_PauseButton", rightCard, "| |", new Vector2(1f, 0.5f), new Vector2(-14f, 0f), new Vector2(56f, 52f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterPrimary, 18f);
+
+            // Bottom-Center 4-Weapon Loadout Bar
+            RectTransform weaponBar = CreatePanel("WeaponLoadoutBar", hudGroup.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 22f), new Vector2(660f, 62f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.88f));
+            CreateImage("WeaponBarAccent", weaponBar, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0f, 1f), new Vector2(-28f, 2f), solidSprite, Palette.CyanGlow, false);
+
+            Button[] wpnBtns = new Button[4];
+            Image[] wpnBgs = new Image[4];
+            TextMeshProUGUI[] wpnLbls = new TextMeshProUGUI[4];
+            string[] wpnSlotDefault = { "[1] PULSE", "[2] SHOTGUN", "[3] RAILGUN", "[4] ROCKET" };
+            for (int i = 0; i < 4; i++)
+            {
+                float slotX = -237f + i * 158f;
+                Button b = CreateButton("WeaponSlot_" + i, weaponBar, wpnSlotDefault[i], new Vector2(0.5f, 0.5f), new Vector2(slotX, 0f), new Vector2(148f, 44f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterPrimary, 13f);
+                wpnBtns[i] = b;
+                wpnBgs[i] = b.GetComponent<Image>();
+                wpnLbls[i] = b.GetComponentInChildren<TextMeshProUGUI>();
+            }
+
+            // Mobile / Touch Controls (Simultaneous Twin Virtual Joysticks + Touch Dash)
+            GameObject touchRoot = new GameObject("MobileTouchControls");
+            touchRoot.transform.SetParent(hudGroup.transform, false);
+            RectTransform touchRt = touchRoot.AddComponent<RectTransform>();
+            StretchRect(touchRt);
+
+            RectTransform moveBgRt = CreatePanel("MoveStickBg", touchRt, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(138f, 138f), new Vector2(168f, 168f), circleSprite, Palette.WithAlpha(Palette.PanelSurface, 0.44f));
+            moveBgRt.pivot = new Vector2(0.5f, 0.5f);
+            moveBgRt.anchoredPosition = new Vector2(138f, 138f);
+            Image moveHandleImg = CreateImage("MoveStickHandle", moveBgRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(66f, 66f), circleSprite, Palette.WithAlpha(Palette.CyanGlow, 0.72f), false);
+            VirtualJoystick leftStick = moveBgRt.gameObject.AddComponent<VirtualJoystick>();
+            leftStick.BindRects(moveBgRt, moveHandleImg.rectTransform, 52f);
+
+            RectTransform aimBgRt = CreatePanel("AimStickBg", touchRt, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-138f, 138f), new Vector2(168f, 168f), circleSprite, Palette.WithAlpha(Palette.PanelSurface, 0.44f));
+            aimBgRt.pivot = new Vector2(0.5f, 0.5f);
+            aimBgRt.anchoredPosition = new Vector2(-138f, 138f);
+            Image aimHandleImg = CreateImage("AimStickHandle", aimBgRt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(66f, 66f), circleSprite, Palette.WithAlpha(Palette.Accent, 0.78f), false);
+            VirtualJoystick rightStick = aimBgRt.gameObject.AddComponent<VirtualJoystick>();
+            rightStick.BindRects(aimBgRt, aimHandleImg.rectTransform, 52f);
+
+            Button touchDashBtn = CreateButton("TouchDashButton", touchRt, "DASH", new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(92f, 92f), circleSprite, Palette.WithAlpha(Palette.CyanGlow, 0.28f), Palette.CharacterPrimary, 16f);
+            RectTransform dashBtnRt = touchDashBtn.GetComponent<RectTransform>();
+            dashBtnRt.anchorMin = dashBtnRt.anchorMax = new Vector2(1f, 0f);
+            dashBtnRt.pivot = new Vector2(0.5f, 0.5f);
+            dashBtnRt.anchoredPosition = new Vector2(-288f, 114f);
 
             // Transient Milestone Banner
             GameObject bannerGo = new GameObject("MilestoneBanner");
@@ -736,22 +1013,26 @@ namespace TopDownShooter.Editor
             CanvasGroup titleGroup = CreateFullScreenGroup("TitlePanel", canvasGo.transform);
             CreateImage("TitleScrim", titleGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.WithAlpha(Palette.Shadow, 0.42f), true);
 
-            RectTransform titleCard = CreatePanel("TitleCard", titleGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(640f, 380f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.92f));
+            RectTransform titleCard = CreatePanel("TitleCard", titleGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(680f, 430f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.92f));
             CreateImage("TitleAccentTop", titleCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 5f), solidSprite, Palette.Accent, false);
 
             TextMeshProUGUI gameTitle = CreateStyledText("GameTitleText", titleCard, "VANGUARD", 58f, FontStyles.Bold, 8f, Palette.CharacterPrimary, TextAlignmentOptions.Center);
             SetAnchoredRect(gameTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -64f), new Vector2(560f, 76f));
 
-            TextMeshProUGUI subtitle = CreateStyledText("SubtitleText", titleCard, "NEON ARENA // TACTICAL SURVIVAL", 18f, FontStyles.Bold, 5f, Palette.CyanGlow, TextAlignmentOptions.Center);
+            TextMeshProUGUI subtitle = CreateStyledText("SubtitleText", titleCard, "NEON ARENA // STORE EDITION 2.0", 17f, FontStyles.Bold, 5f, Palette.CyanGlow, TextAlignmentOptions.Center);
             SetAnchoredRect(subtitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -124f), new Vector2(560f, 30f));
 
             TextMeshProUGUI titleBest = CreateStyledText("TitleHighScoreText", titleCard, "HIGH SCORE // 0", 16f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.Center);
-            SetAnchoredRect(titleBest.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 10f), new Vector2(460f, 28f));
+            SetAnchoredRect(titleBest.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 26f), new Vector2(460f, 28f));
 
-            TextMeshProUGUI controlsHint = CreateStyledText("ControlsHintText", titleCard, "WASD MOVE  ·  MOUSE AIM & FIRE  ·  SHIFT DASH  ·  ESC PAUSE", 13f, FontStyles.Bold, 2.2f, Palette.MutedText, TextAlignmentOptions.Center);
-            SetAnchoredRect(controlsHint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 34f), new Vector2(580f, 24f));
+            TextMeshProUGUI titleCredits = CreateStyledText("TitleCreditsText", titleCard, "CYBER-CREDITS // 200 CR", 16f, FontStyles.Bold, 3f, Palette.CreditGold, TextAlignmentOptions.Center);
+            SetAnchoredRect(titleCredits.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -6f), new Vector2(460f, 26f));
 
-            Button startBtn = CreateButton("StartMissionButton", titleCard, "START MISSION", new Vector2(0.5f, 0.5f), new Vector2(0f, -58f), new Vector2(280f, 62f), roundedSprite, Palette.Accent, Palette.Shadow, 22f);
+            TextMeshProUGUI controlsHint = CreateStyledText("ControlsHintText", titleCard, "WASD / STICK MOVE  ·  MOUSE / AIM FIRE  ·  1-4 WEAPONS  ·  SHIFT DASH  ·  ESC PAUSE", 11.5f, FontStyles.Bold, 1.8f, Palette.MutedText, TextAlignmentOptions.Center);
+            SetAnchoredRect(controlsHint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 32f), new Vector2(630f, 24f));
+
+            Button startBtn = CreateButton("StartMissionButton", titleCard, "START MISSION", new Vector2(0.5f, 0.5f), new Vector2(-132f, -78f), new Vector2(244f, 60f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
+            Button armoryBtn = CreateButton("TitleArmoryButton", titleCard, "ARMORY & SHOP", new Vector2(0.5f, 0.5f), new Vector2(132f, -78f), new Vector2(244f, 60f), roundedSprite, Palette.SecondaryButtonBg, Palette.CyanGlow, 19f);
 
             // 3. PAUSE PANEL
             CanvasGroup pauseGroup = CreateFullScreenGroup("PausePanel", canvasGo.transform);
@@ -774,35 +1055,163 @@ namespace TopDownShooter.Editor
             CanvasGroup endedGroup = CreateFullScreenGroup("EndedPanel", canvasGo.transform);
             CreateImage("EndedScrim", endedGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.ScrimDark, true);
 
-            RectTransform endedCard = CreatePanel("EndedCard", endedGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(540f, 410f), roundedSprite, Palette.PanelSurface);
+            RectTransform endedCard = CreatePanel("EndedCard", endedGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(560f, 440f), roundedSprite, Palette.PanelSurface);
             CreateImage("EndedAccentTop", endedCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 5f), solidSprite, Palette.EnemySecondary, false);
 
             TextMeshProUGUI endedTitle = CreateStyledText("EndedTitleText", endedCard, "SIGNAL LOST", 38f, FontStyles.Bold, 6f, Palette.EnemySecondary, TextAlignmentOptions.Center);
             SetAnchoredRect(endedTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -52f), new Vector2(460f, 52f));
 
             TextMeshProUGUI endedScore = CreateStyledText("EndedScoreText", endedCard, "0 PTS", 44f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.Center);
-            SetAnchoredRect(endedScore.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 46f), new Vector2(460f, 58f));
+            SetAnchoredRect(endedScore.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 52f), new Vector2(460f, 58f));
 
             TextMeshProUGUI endedBest = CreateStyledText("EndedBestText", endedCard, "BEST // 0", 18f, FontStyles.Bold, 3.5f, Palette.CyanGlow, TextAlignmentOptions.Center);
-            SetAnchoredRect(endedBest.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -4f), new Vector2(460f, 28f));
+            SetAnchoredRect(endedBest.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 4f), new Vector2(460f, 28f));
 
             TextMeshProUGUI endedStats = CreateStyledText("EndedStatsText", endedCard, "ELIMINATIONS: 0   |   WAVE REACHED: 1", 15f, FontStyles.Bold, 2f, Palette.MutedText, TextAlignmentOptions.Center);
-            SetAnchoredRect(endedStats.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -42f), new Vector2(480f, 26f));
+            SetAnchoredRect(endedStats.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -34f), new Vector2(480f, 26f));
 
-            Button eReplayBtn = CreateButton("EndedReplayButton", endedCard, "REPLAY", new Vector2(0.5f, 0.5f), new Vector2(-115f, -124f), new Vector2(205f, 56f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
-            Button eTitleBtn = CreateButton("EndedTitleButton", endedCard, "MAIN MENU", new Vector2(0.5f, 0.5f), new Vector2(115f, -124f), new Vector2(205f, 56f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterPrimary, 18f);
+            TextMeshProUGUI endedCredits = CreateStyledText("EndedCreditsText", endedCard, "CREDITS EARNED: +0 CR   |   BANK: 200 CR", 15f, FontStyles.Bold, 2f, Palette.CreditGold, TextAlignmentOptions.Center);
+            SetAnchoredRect(endedCredits.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -72f), new Vector2(500f, 26f));
+
+            Button eReplayBtn = CreateButton("EndedReplayButton", endedCard, "REPLAY", new Vector2(0.5f, 0.5f), new Vector2(-115f, -142f), new Vector2(205f, 56f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
+            Button eTitleBtn = CreateButton("EndedTitleButton", endedCard, "MAIN MENU", new Vector2(0.5f, 0.5f), new Vector2(115f, -142f), new Vector2(205f, 56f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterPrimary, 18f);
+
+            // 5. ARMORY & UPGRADES MODAL PANEL
+            CanvasGroup armoryGroup = CreateFullScreenGroup("ArmoryPanel", canvasGo.transform);
+            CreateImage("ArmoryScrim", armoryGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.ScrimDark, true);
+
+            RectTransform armoryCard = CreatePanel("ArmoryCard", armoryGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(980f, 680f), roundedSprite, Palette.PanelSurface);
+            CreateImage("ArmoryAccentTop", armoryCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-36f, 4f), solidSprite, Palette.CyanGlow, false);
+
+            TextMeshProUGUI armoryHeader = CreateStyledText("ArmoryHeaderText", armoryCard, "VANGUARD ARMORY // META-UPGRADES", 23f, FontStyles.Bold, 3.5f, Palette.CharacterPrimary, TextAlignmentOptions.MidlineLeft);
+            SetAnchoredRect(armoryHeader.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(36f, -44f), new Vector2(620f, 44f));
+
+            TextMeshProUGUI armoryCreditsText = CreateStyledText("ArmoryCreditsText", armoryCard, "BANK: 200 CR", 22f, FontStyles.Bold, 3f, Palette.CreditGold, TextAlignmentOptions.MidlineRight);
+            SetAnchoredRect(armoryCreditsText.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(-36f, -44f), new Vector2(280f, 44f));
+
+            // Left Column: 4 Permanent Upgrades
+            TextMeshProUGUI leftColHdr = CreateStyledText("UpgradesSectionTitle", armoryCard, "PERMANENT CYBERNETICS", 14f, FontStyles.Bold, 3.5f, Palette.CyanGlow, TextAlignmentOptions.MidlineLeft);
+            SetAnchoredRect(leftColHdr.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-235f, 212f), new Vector2(440f, 26f));
+
+            string[] upgDescs = { "+20 MAX HP / RANK", "+10% ALL DMG / RANK", "+8% MOVE SPD / RANK", "+15% CREDITS / RANK" };
+            Button[] upgBtns = new Button[4];
+            TextMeshProUGUI[] upgRankLbls = new TextMeshProUGUI[4];
+            TextMeshProUGUI[] upgCostLbls = new TextMeshProUGUI[4];
+
+            for (int i = 0; i < 4; i++)
+            {
+                float rowY = 152f - i * 94f;
+                RectTransform row = CreatePanel("UpgradeRow_" + i, armoryCard, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(-235f, rowY), new Vector2(440f, 80f), roundedSprite, TrimBarBg());
+                CreateImage("UpgRowStripe", row, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(5f, 0f), new Vector2(4f, 50f), solidSprite, Palette.Accent, false);
+
+                TextMeshProUGUI uRank = CreateStyledText("UpgRank_" + i, row, "UPGRADE   [LV 0/5]", 13f, FontStyles.Bold, 1f, Palette.CharacterPrimary, TextAlignmentOptions.TopLeft);
+                SetAnchoredRect(uRank.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -14f), new Vector2(280f, 22f));
+                upgRankLbls[i] = uRank;
+
+                TextMeshProUGUI uDesc = CreateStyledText("UpgSub_" + i, row, upgDescs[i], 12f, FontStyles.Bold, 1.5f, Palette.CyanGlow, TextAlignmentOptions.BottomLeft);
+                SetAnchoredRect(uDesc.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(18f, 14f), new Vector2(275f, 20f));
+
+                Button buyBtn = CreateButton("UpgradeBtn_" + i, row, "100 CR", new Vector2(1f, 0.5f), new Vector2(-12f, 0f), new Vector2(128f, 52f), roundedSprite, Palette.Accent, Palette.Shadow, 15f);
+                upgBtns[i] = buyBtn;
+                upgCostLbls[i] = buyBtn.GetComponentInChildren<TextMeshProUGUI>();
+            }
+
+            // Right Column Top: 4 Unlockable Weapons
+            TextMeshProUGUI rightWpnHdr = CreateStyledText("WeaponsSectionTitle", armoryCard, "ARSENAL LOADOUT", 14f, FontStyles.Bold, 3.5f, Palette.Accent, TextAlignmentOptions.MidlineLeft);
+            SetAnchoredRect(rightWpnHdr.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(235f, 212f), new Vector2(440f, 26f));
+
+            Button[] shopWpnBtns = new Button[4];
+            TextMeshProUGUI[] shopWpnLbls = new TextMeshProUGUI[4];
+            for (int i = 0; i < 4; i++)
+            {
+                float wy = 166f - i * 62f;
+                Button wb = CreateButton("ShopWeapon_" + i, armoryCard, "WEAPON " + i, new Vector2(0.5f, 0.5f), new Vector2(235f, wy), new Vector2(440f, 52f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterPrimary, 14f);
+                shopWpnBtns[i] = wb;
+                shopWpnLbls[i] = wb.GetComponentInChildren<TextMeshProUGUI>();
+            }
+
+            // Right Column Bottom: 3 Armor Chassis Skins
+            TextMeshProUGUI rightSkinHdr = CreateStyledText("SkinsSectionTitle", armoryCard, "CHASSIS COATING", 14f, FontStyles.Bold, 3.5f, Palette.CreditGold, TextAlignmentOptions.MidlineLeft);
+            SetAnchoredRect(rightSkinHdr.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(235f, -74f), new Vector2(440f, 26f));
+
+            Button[] shopSkinBtns = new Button[3];
+            TextMeshProUGUI[] shopSkinLbls = new TextMeshProUGUI[3];
+            Color[] skinSwatches = { Palette.CharacterPrimary, Palette.SkinGoldPrimary, Palette.SkinCrimsonPrimary };
+            for (int i = 0; i < 3; i++)
+            {
+                float sx = 85f + i * 150f;
+                Button sb = CreateButton("ShopSkin_" + i, armoryCard, "SKIN " + i, new Vector2(0.5f, 0.5f), new Vector2(sx, -132f), new Vector2(138f, 70f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterPrimary, 12f);
+                CreateImage("Swatch", sb.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -6f), new Vector2(96f, 5f), solidSprite, skinSwatches[i], false);
+                shopSkinBtns[i] = sb;
+                shopSkinLbls[i] = sb.GetComponentInChildren<TextMeshProUGUI>();
+            }
+
+            Button armoryCloseBtn = CreateButton("ArmoryCloseButton", armoryCard, "BACK TO MENU", new Vector2(0.5f, 0.5f), new Vector2(0f, -292f), new Vector2(240f, 52f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterPrimary, 18f);
+
+            // 6. LEVEL-UP ROGUELITE SKILL DRAFT MODAL PANEL
+            CanvasGroup draftGroup = CreateFullScreenGroup("LevelUpDraftPanel", canvasGo.transform);
+            CreateImage("DraftScrim", draftGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.ScrimDark, true);
+
+            RectTransform draftRoot = CreatePanel("DraftContainer", draftGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1040f, 470f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.96f));
+            CreateImage("DraftAccentTop", draftRoot, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-36f, 5f), solidSprite, Palette.CardRareBorder, false);
+
+            TextMeshProUGUI draftTitle = CreateStyledText("DraftHeaderTitle", draftRoot, "TACTICAL UPGRADE DRAFT", 30f, FontStyles.Bold, 5.5f, Palette.Accent, TextAlignmentOptions.Center);
+            SetAnchoredRect(draftTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -40f), new Vector2(800f, 42f));
+
+            TextMeshProUGUI draftSub = CreateStyledText("DraftHeaderSub", draftRoot, "CHOOSE ONE COMBAT PROTOCOL TO INSTALL", 13.5f, FontStyles.Bold, 3f, Palette.MutedText, TextAlignmentOptions.Center);
+            SetAnchoredRect(draftSub.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -72f), new Vector2(800f, 24f));
+
+            Button[] drftBtns = new Button[3];
+            TextMeshProUGUI[] drftTitles = new TextMeshProUGUI[3];
+            TextMeshProUGUI[] drftRanks = new TextMeshProUGUI[3];
+            TextMeshProUGUI[] drftDescs = new TextMeshProUGUI[3];
+
+            for (int i = 0; i < 3; i++)
+            {
+                float cx = -325f + i * 325f;
+                Button cardBtn = CreateButton("DraftCard_" + i, draftRoot, string.Empty, new Vector2(0.5f, 0.5f), new Vector2(cx, -32f), new Vector2(296f, 290f), roundedSprite, TrimBarBg(), Palette.CharacterPrimary, 16f);
+                CreateImage("CardTopStripe", cardBtn.transform, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -2f), new Vector2(-24f, 4f), solidSprite, Palette.CardRareBorder, false);
+
+                TextMeshProUGUI dTitle = CreateStyledText("DraftTitle_" + i, cardBtn.transform, "OVERCLOCK", 20f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.Center);
+                SetAnchoredRect(dTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -44f), new Vector2(260f, 36f));
+
+                TextMeshProUGUI dRank = CreateStyledText("DraftRank_" + i, cardBtn.transform, "RANK 1 -> 2", 14f, FontStyles.Bold, 2.5f, Palette.CyanGlow, TextAlignmentOptions.Center);
+                SetAnchoredRect(dRank.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -84f), new Vector2(240f, 26f));
+
+                TextMeshProUGUI dDesc = CreateStyledText("DraftDesc_" + i, cardBtn.transform, "+18% Fire Rate across all weapons", 15f, FontStyles.Normal, 1.2f, Palette.CharacterPrimary, TextAlignmentOptions.Center);
+                dDesc.textWrappingMode = TextWrappingModes.Normal;
+                SetAnchoredRect(dDesc.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -10f), new Vector2(248f, 96f));
+
+                TextMeshProUGUI dInstall = CreateStyledText("DraftAction_" + i, cardBtn.transform, "[ INSTALL ]", 14f, FontStyles.Bold, 3f, Palette.CreditGold, TextAlignmentOptions.Center);
+                SetAnchoredRect(dInstall.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 28f), new Vector2(200f, 28f));
+
+                drftBtns[i] = cardBtn;
+                drftTitles[i] = dTitle;
+                drftRanks[i] = dRank;
+                drftDescs[i] = dDesc;
+            }
 
             UIManager ui = systemsRoot.AddComponent<UIManager>();
-            ui.BindAll(
-                titleGroup, hudGroup, pauseGroup, endedGroup,
+            ui.BindCore(
+                titleGroup, hudGroup, pauseGroup, endedGroup, armoryGroup, draftGroup,
                 hpFill, xpFill, dashFill,
-                hpValueText, levelText, waveText, enemiesText, scoreText,
+                hpValueText, levelText, waveText, enemiesText, scoreText, hudCreditsText,
                 crosshairImg.rectTransform,
+                bossRoot, bossHpFill, bossNameText, bossHpText,
                 bannerCg, bannerRt, milestoneTxt,
-                titleBest,
+                titleBest, titleCredits,
                 musicSlider, sfxSlider, musicPct, sfxPct,
-                endedTitle, endedScore, endedBest, endedStats,
-                startBtn, hudPauseBtn, resumeBtn, pRestartBtn, pTitleBtn, eReplayBtn, eTitleBtn);
+                endedTitle, endedScore, endedBest, endedStats, endedCredits,
+                startBtn, armoryBtn, hudPauseBtn, resumeBtn, pRestartBtn, pTitleBtn, eReplayBtn, eTitleBtn);
+
+            ui.BindStoreAndMobileWidgets(
+                wpnBtns, wpnBgs, wpnLbls,
+                leftStick, rightStick, touchDashBtn,
+                armoryCreditsText, armoryCloseBtn,
+                upgBtns, upgRankLbls, upgCostLbls,
+                shopWpnBtns, shopWpnLbls,
+                shopSkinBtns, shopSkinLbls,
+                drftBtns, drftTitles, drftRanks, drftDescs);
 
             return ui;
         }

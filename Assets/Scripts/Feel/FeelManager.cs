@@ -228,6 +228,14 @@ namespace TopDownShooter.Feel
             TriggerPlayerScalePop(1.24f, 0.16f);
         }
 
+        public void OnCreditCollected(Vector3 worldPos, int creditAmount)
+        {
+            VFXManager.Instance?.Play(VfxKind.PickupBurst, worldPos, Palette.CreditGold);
+            SpawnFloatingText(worldPos, "+" + creditAmount + " CR", Palette.CreditGold);
+            AudioManager.Instance?.PlayPickupBlip();
+            TriggerPlayerScalePop(1.18f, 0.14f);
+        }
+
         public void TriggerLevelUpSequence(int newLevel, Transform playerTransform)
         {
             if (playerTransform != null)

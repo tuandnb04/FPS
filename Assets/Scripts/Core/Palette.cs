@@ -37,6 +37,13 @@ namespace TopDownShooter.Core
         public static readonly Color ButtonTintIdle = FromHex("#FFFFFF");
         public static readonly Color ButtonTintHover = FromHex("#FFF3D6");
         public static readonly Color SecondaryButtonBg = FromHex("#263042");
+        public static readonly Color CreditGold = FromHex("#FFD147");
+        public static readonly Color BossPurple = FromHex("#D442FF");
+        public static readonly Color RailgunCyan = FromHex("#00F5FF");
+        public static readonly Color RocketOrange = FromHex("#FF6B2B");
+        public static readonly Color SkinGoldPrimary = FromHex("#F5A623");
+        public static readonly Color SkinCrimsonPrimary = FromHex("#E03448");
+        public static readonly Color CardRareBorder = FromHex("#38BDF8");
         public static readonly Color Transparent = new Color(0f, 0f, 0f, 0f);
 
         public static Color FromHex(string hex)
