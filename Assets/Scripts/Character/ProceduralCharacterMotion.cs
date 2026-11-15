@@ -109,6 +109,19 @@ namespace TopDownShooter.Character
             SolveWeaponArmIkImmediate();
         }
 
+        public void ConfigureWeaponIkPose(Transform leftHand, Transform rightHand, float upperLen, float foreLen)
+        {
+            leftHandTarget = leftHand;
+            rightHandTarget = rightHand;
+            upperArmLength = Mathf.Max(0.15f, upperLen);
+            forearmLength = Mathf.Max(0.15f, foreLen);
+            if (weaponAnchor != null)
+            {
+                baseWeaponAnchorLocalPos = weaponAnchor.localPosition;
+            }
+            SolveWeaponArmIkImmediate();
+        }
+
         public void TriggerWeaponRecoil(Vector3 kickLocal)
         {
             currentWeaponRecoil = Vector3.ClampMagnitude(currentWeaponRecoil + kickLocal, 0.11f);

@@ -30,10 +30,12 @@ namespace TopDownShooter.Audio
         private AudioClip milestoneStingClip;
         private AudioClip uiClickClip;
         private AudioClip dashClip;
+        private AudioClip radioChirpClip;
         private AudioClip ambientBedClip;
 
         private bool isDucked;
         private float currentDuckGain = 1f;
+        private float lastEnemyShootTime = -10f;
 
         /// <summary>Normalized Music volume [0..1] for UI sliders and verification checks.</summary>
         public float MusicVol => musicVolume;
@@ -53,6 +55,7 @@ namespace TopDownShooter.Audio
         public AudioClip PickupBlipClip => pickupBlipClip;
         public AudioClip MilestoneStingClip => milestoneStingClip;
         public AudioClip UIClickClip => uiClickClip;
+        public AudioClip RadioChirpClip => radioChirpClip;
         public AudioClip AmbientBedClip => ambientBedClip;
 
         private void Awake()
@@ -131,6 +134,7 @@ namespace TopDownShooter.Audio
             if (milestoneStingClip == null) milestoneStingClip = BuildTriadClip("SFX_Milestone", 220.00f, 277.18f, 329.63f, 0.42f, 0.34f);
             if (uiClickClip == null) uiClickClip = BuildSweepClip("SFX_UIClick", 0.024f, 920f, 440f, 0.22f, false);
             if (dashClip == null) dashClip = BuildFoleyWhooshClip("SFX_Dash", 0.16f, 0.28f);
+            if (radioChirpClip == null) radioChirpClip = BuildRadioChirpClip("SFX_RadioChirp", 0.11f, 0.24f);
             if (ambientBedClip == null) ambientBedClip = BuildAmbientBed("BGM_AmbientBed", 6.0f, 0.12f);
         }
 
@@ -220,6 +224,21 @@ namespace TopDownShooter.Audio
         public void PlayDash()
         {
             PlayOneShotWithPitch(dashClip, UnityEngine.Random.Range(0.96f, 1.04f), 0.65f);
+        }
+
+        public void PlayRadioChirp()
+        {
+            PlayOneShotWithPitch(radioChirpClip, 1f, 0.72f);
+        }
+
+        public void PlayEnemyShoot(float pitchMultiplier = 0.88f, float volumeScale = 0.22f)
+        {
+            if (Time.unscaledTime - lastEnemyShootTime < 0.045f)
+            {
+                return;
+            }
+            lastEnemyShootTime = Time.unscaledTime;
+            PlayShoot(pitchMultiplier, volumeScale);
         }
 
         private void PlayOneShotWithPitch(AudioClip clip, float pitch, float scale)
@@ -418,6 +437,29 @@ namespace TopDownShooter.Audio
                 env = Mathf.Min(env, (float)remaining / fadeSamples);
             }
             return Mathf.Clamp01(env);
+        }
+
+        private static AudioClip BuildRadioChirpClip(string clipName, float duration, float amplitude)
+        {
+            int sampleCount = Mathf.Max(512, Mathf.RoundToInt(duration * SampleRate));
+            float[] data = new float[sampleCount];
+            double phase = 0.0;
+            System.Random rng = new System.Random(8841);
+            int fadeSamples = Mathf.Min(sampleCount / 6, Mathf.RoundToInt(0.003f * SampleRate));
+
+            for (int i = 0; i < sampleCount; i++)
+            {
+                float t = (float)i / (sampleCount - 1);
+                float toneFreq = t < 0.45f ? 1760f : 2120f;
+                phase += (2.0 * Math.PI * toneFreq) / SampleRate;
+                float squelchGate = (t < 0.34f || t > 0.56f) ? 1f : 0.12f;
+                float staticNoise = (float)(rng.NextDouble() * 2.0 - 1.0) * 0.22f;
+                float beep = (float)Math.Sin(phase) * 0.78f;
+                float env = ComputeFadeEnvelope(i, sampleCount, fadeSamples) * squelchGate;
+                data[i] = Mathf.Clamp((beep + staticNoise) * amplitude * env, -1f, 1f);
+            }
+
+            return CreateClipFromSamples(clipName, data);
         }
 
         private static AudioClip CreateClipFromSamples(string clipName, float[] samples)

@@ -29,7 +29,6 @@ namespace TopDownShooter.Combat
         [SerializeField] private Transform muzzlePoint;
         [SerializeField] private ProceduralCharacterMotion characterMotion;
         [SerializeField] private Transform projectilePoolRoot;
-        [SerializeField] private LineRenderer laserSightLine;
 
         [Header("Ballistics")]
         [SerializeField] private float baseFireInterval = 0.13f;
@@ -39,7 +38,6 @@ namespace TopDownShooter.Combat
         private ObjectPool<Projectile> projectilePool;
         private readonly List<Projectile> allCreatedProjectiles = new List<Projectile>();
         private Material boltMaterial;
-        private Material laserMaterial;
         private float fireCooldown;
         private int weaponTier = 1;
         private WeaponType currentWeapon = WeaponType.PulseRifle;
@@ -80,11 +78,6 @@ namespace TopDownShooter.Combat
             muzzlePoint = muzzle;
             characterMotion = motion;
             projectilePoolRoot = poolRoot;
-        }
-
-        public void BindLaserSight(LineRenderer line)
-        {
-            laserSightLine = line;
         }
 
         public void BindWeaponVisuals(GameObject[] visuals)
@@ -256,63 +249,10 @@ namespace TopDownShooter.Combat
             return bodyFwd.sqrMagnitude > 0.0001f ? bodyFwd.normalized : Vector3.forward;
         }
 
-        public void UpdateAimVisuals(bool showLaser, Vector3? exactAimWorldPoint, Vector3 flatAimDirection)
+        /// <summary>Keeps muzzlePoint synced with the active firearm barrel tip each frame.</summary>
+        public void SyncActiveMuzzle()
         {
             SyncMuzzlePointToActiveTip();
-            if (laserSightLine == null)
-            {
-                return;
-            }
-
-            if (!showLaser || currentWeapon == WeaponType.HellfireLauncher || Time.timeScale <= 0.01f)
-            {
-                laserSightLine.enabled = false;
-                return;
-            }
-
-            if (laserSightLine.sharedMaterial == null)
-            {
-                if (laserMaterial == null)
-                {
-                    laserMaterial = Palette.CreateLitMaterial("Mat_LaserSightRuntime", Palette.EnemySecondary, 0f, 0f, true, Palette.EnemySecondary, 0.95f);
-                }
-                laserSightLine.sharedMaterial = laserMaterial;
-            }
-
-            Vector3 origin = GetMuzzlePosition(flatAimDirection);
-            Vector3 dir = GetFlatBarrelForward();
-            float maxDist = 24f;
-            if (exactAimWorldPoint.HasValue)
-            {
-                Vector3 toTarget = exactAimWorldPoint.Value - origin;
-                toTarget.y = 0f;
-                if (toTarget.sqrMagnitude > 0.25f)
-                {
-                    maxDist = Mathf.Clamp(toTarget.magnitude + 4f, 8f, 28f);
-                }
-            }
-
-            float hitDist = maxDist;
-            RaycastHit[] hits = Physics.RaycastAll(origin, dir, maxDist, ~0, QueryTriggerInteraction.Ignore);
-            if (hits != null && hits.Length > 0)
-            {
-                System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-                for (int i = 0; i < hits.Length; i++)
-                {
-                    Collider col = hits[i].collider;
-                    if (col == null || col.CompareTag("Player")) continue;
-                    hitDist = Mathf.Max(0.25f, hits[i].distance);
-                    break;
-                }
-            }
-
-            laserSightLine.enabled = true;
-            laserSightLine.useWorldSpace = true;
-            laserSightLine.startWidth = 0.006f;
-            laserSightLine.endWidth = 0.003f;
-            laserSightLine.positionCount = 2;
-            laserSightLine.SetPosition(0, origin);
-            laserSightLine.SetPosition(1, origin + dir * hitDist);
         }
 
         private Vector3 ResolveMuzzleFireDirection(Vector3 spawnPos, Vector3 flatAimDirection, Vector3? exactAimWorldPoint)
@@ -539,13 +479,14 @@ namespace TopDownShooter.Combat
             p.Initialize(projectilePool, pos, rot, spd, dmg, lifetime, pierce, aoe, false, tint, scale, crit);
         }
 
-        public void SpawnEnemyProjectile(Vector3 pos, Vector3 flatDir, float spd, float dmg, Color tintColor)
+        public void SpawnEnemyProjectile(Vector3 pos, Vector3 flatDir, float spd, float dmg, Color tintColor, Vector3? visualScale = null, float lifetime = 2.8f)
         {
             if (projectilePool == null) return;
             Vector3 d = new Vector3(flatDir.x, 0f, flatDir.z);
             if (d.sqrMagnitude < 0.001f) d = Vector3.forward;
+            Vector3 scale = visualScale ?? new Vector3(0.24f, 0.24f, 0.24f);
             Projectile p = projectilePool.Get();
-            p.Initialize(projectilePool, pos, Quaternion.LookRotation(d.normalized, Vector3.up), spd, dmg, 2.8f, 0, 0f, true, tintColor, new Vector3(0.24f, 0.24f, 0.24f), false);
+            p.Initialize(projectilePool, pos, Quaternion.LookRotation(d.normalized, Vector3.up), spd, dmg, lifetime, 0, 0f, true, tintColor, scale, false);
         }
 
         public void ReturnAllActive()

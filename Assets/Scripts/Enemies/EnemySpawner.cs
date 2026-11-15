@@ -31,6 +31,10 @@ namespace TopDownShooter.Enemies
         [SerializeField] private Mesh bossTurretMesh;
         [SerializeField] private Mesh limbMesh;
         [SerializeField] private Mesh enemyArmMesh;
+        [SerializeField] private Mesh enemyUpperArmMesh;
+        [SerializeField] private Mesh enemyForearmMesh;
+        [SerializeField] private Mesh enemyAK74Mesh;
+        [SerializeField] private Mesh enemyPKMMesh;
         [SerializeField] private Mesh xpCrystalMesh;
         [SerializeField] private Mesh medkitMesh;
         [SerializeField] private Mesh creditCoinMesh;
@@ -48,6 +52,7 @@ namespace TopDownShooter.Enemies
 
         private Material enemyPrimaryMat;
         private Material enemySecondaryMat;
+        private Material enemyWeaponMat;
         private Material bossArmorMat;
         private Material bossTrimMat;
         private Material pickupMat;
@@ -68,7 +73,11 @@ namespace TopDownShooter.Enemies
             Mesh bossTorso, Mesh bossTurret,
             Mesh limb,
             Mesh xpShard, Mesh medkit, Mesh creditCoin,
-            Mesh enemyArm = null)
+            Mesh enemyArm = null,
+            Mesh enemyUpperArm = null,
+            Mesh enemyForearm = null,
+            Mesh enemyAK74 = null,
+            Mesh enemyPKM = null)
         {
             chaserTorsoMesh = chaserTorso;
             chaserHeadMesh = chaserHead;
@@ -78,6 +87,10 @@ namespace TopDownShooter.Enemies
             bossTurretMesh = bossTurret;
             limbMesh = limb;
             enemyArmMesh = enemyArm;
+            enemyUpperArmMesh = enemyUpperArm;
+            enemyForearmMesh = enemyForearm;
+            enemyAK74Mesh = enemyAK74;
+            enemyPKMMesh = enemyPKM;
             xpCrystalMesh = xpShard;
             medkitMesh = medkit;
             creditCoinMesh = creditCoin;
@@ -103,6 +116,7 @@ namespace TopDownShooter.Enemies
 
             enemyPrimaryMat = Palette.CreateLitMaterial("Mat_EnemyChassisRuntime", Palette.EnemyPrimary, 0.20f, 0.36f);
             enemySecondaryMat = Palette.CreateLitMaterial("Mat_EnemyVisorRuntime", Palette.Props, 0.35f, 0.40f);
+            enemyWeaponMat = Palette.CreateLitMaterial("Mat_EnemyWeaponRuntime", Palette.Gunmetal, 0.78f, 0.56f);
             bossArmorMat = Palette.CreateLitMaterial("Mat_BossChassisRuntime", Palette.GuardTowerDark, 0.36f, 0.42f);
             bossTrimMat = Palette.CreateLitMaterial("Mat_BossTrimRuntime", Palette.Gunmetal, 0.55f, 0.48f);
             pickupMat = Palette.CreateLitMaterial("Mat_PickupCoreRuntime", Palette.Accent, 0.25f, 0.45f);
@@ -172,29 +186,33 @@ namespace TopDownShooter.Enemies
             GameObject heavyHeadObj = CreatePartWithMesh("HeavyCrown", heavyCrownMesh, PrimitiveType.Cube, headPivot.transform, new Vector3(0f, 0.06f, 0f), heavyCrownMesh != null ? Vector3.one : new Vector3(0.56f, 0.24f, 0.50f), enemySecondaryMat);
             heavyHeadObj.SetActive(false);
 
-            Mesh armMesh = enemyArmMesh != null ? enemyArmMesh : limbMesh;
-            Vector3 armOffset = enemyArmMesh != null ? Vector3.zero : new Vector3(0f, -0.22f, 0.08f);
-            Vector3 armScale = enemyArmMesh != null ? new Vector3(1.05f, 1.0f, 1.05f) : (armMesh != null ? new Vector3(0.85f, 0.72f, 0.85f) : new Vector3(0.20f, 0.26f, 0.20f));
+            Transform leftArmPivot = BuildEnemyOperatorArm("Left", visualRoot.transform, new Vector3(-0.30f, 1.20f, 0.07f), out Transform leftElbowPivot);
+            Transform rightArmPivot = BuildEnemyOperatorArm("Right", visualRoot.transform, new Vector3(0.32f, 1.20f, -0.02f), out Transform rightElbowPivot);
 
-            GameObject leftArmPivot = new GameObject("LeftArmPivot");
-            leftArmPivot.transform.SetParent(visualRoot.transform, false);
-            leftArmPivot.transform.localPosition = new Vector3(-0.42f, 1.15f, 0f);
-            CreatePartWithMesh("LeftArm", armMesh, PrimitiveType.Capsule, leftArmPivot.transform, armOffset, armScale, enemyPrimaryMat);
+            GameObject weaponAnchor = new GameObject("WeaponAnchor");
+            weaponAnchor.transform.SetParent(visualRoot.transform, false);
+            weaponAnchor.transform.localPosition = new Vector3(0.12f, 1.12f, 0.35f);
 
-            GameObject rightArmPivot = new GameObject("RightArmPivot");
-            rightArmPivot.transform.SetParent(visualRoot.transform, false);
-            rightArmPivot.transform.localPosition = new Vector3(0.42f, 1.15f, 0f);
-            CreatePartWithMesh("RightArm", armMesh, PrimitiveType.Capsule, rightArmPivot.transform, armOffset, armScale, enemyPrimaryMat);
+            GameObject ak74Obj = BuildEnemyWeapon(
+                "EnemyWeapon_AK74", weaponAnchor.transform, enemyAK74Mesh, 0.65f,
+                new Vector3(0f, -0.024f, 0.175f), new Vector3(0f, -0.060f, -0.036f), new Vector3(0f, 0.015f, 0.569f),
+                out Transform ak74LeftGrip, out Transform ak74RightGrip, out Transform ak74Muzzle);
+
+            GameObject pkmObj = BuildEnemyWeapon(
+                "EnemyWeapon_PKM", weaponAnchor.transform, enemyPKMMesh, 0.68f,
+                new Vector3(0f, -0.026f, 0.210f), new Vector3(0f, -0.064f, -0.044f), new Vector3(0f, 0.019f, 0.656f),
+                out Transform pkmLeftGrip, out Transform pkmRightGrip, out Transform pkmMuzzle);
+            pkmObj.SetActive(false);
 
             GameObject leftLegPivot = new GameObject("LeftLegPivot");
             leftLegPivot.transform.SetParent(visualRoot.transform, false);
-            leftLegPivot.transform.localPosition = new Vector3(-0.18f, 0.68f, 0f);
-            CreatePartWithMesh("LeftLeg", limbMesh, PrimitiveType.Cube, leftLegPivot.transform, new Vector3(0f, -0.34f, 0f), limbMesh != null ? Vector3.one : new Vector3(0.22f, 0.62f, 0.24f), enemyPrimaryMat);
+            leftLegPivot.transform.localPosition = new Vector3(-0.18f, 0.74f, 0f);
+            CreatePartWithMesh("LeftLeg", limbMesh, PrimitiveType.Cube, leftLegPivot.transform, new Vector3(0f, -0.35f, 0f), limbMesh != null ? Vector3.one : new Vector3(0.22f, 0.62f, 0.24f), enemyPrimaryMat);
 
             GameObject rightLegPivot = new GameObject("RightLegPivot");
             rightLegPivot.transform.SetParent(visualRoot.transform, false);
-            rightLegPivot.transform.localPosition = new Vector3(0.18f, 0.68f, 0f);
-            CreatePartWithMesh("RightLeg", limbMesh, PrimitiveType.Cube, rightLegPivot.transform, new Vector3(0f, -0.34f, 0f), limbMesh != null ? Vector3.one : new Vector3(0.22f, 0.62f, 0.24f), enemyPrimaryMat);
+            rightLegPivot.transform.localPosition = new Vector3(0.18f, 0.74f, 0f);
+            CreatePartWithMesh("RightLeg", limbMesh, PrimitiveType.Cube, rightLegPivot.transform, new Vector3(0f, -0.35f, 0f), limbMesh != null ? Vector3.one : new Vector3(0.22f, 0.62f, 0.24f), enemyPrimaryMat);
 
             GameObject reactorPivot = new GameObject("SecondaryPivot");
             reactorPivot.transform.SetParent(visualRoot.transform, false);
@@ -225,14 +243,99 @@ namespace TopDownShooter.Enemies
             turretPivot.transform.SetParent(bossGroup.transform, false);
             turretPivot.transform.localPosition = new Vector3(0f, 1.25f, 0f);
             CreatePartWithMesh("BossTurretMesh", bossTurretMesh, PrimitiveType.Cube, turretPivot.transform, Vector3.zero, bossTurretMesh != null ? Vector3.one : new Vector3(0.85f, 0.38f, 0.9f), bossTrimMat);
+            GameObject bossMuzzleTip = new GameObject("BossMuzzleTip");
+            bossMuzzleTip.transform.SetParent(turretPivot.transform, false);
+            bossMuzzleTip.transform.localPosition = new Vector3(0f, 0.02f, 1.52f);
             bossGroup.SetActive(false);
 
-            // Note: ProceduralCharacterMotion moves bipedal pivots when visible; for Boss, visualRoot hides cleanly
-            motion.BindPivots(visualRoot.transform, headPivot.transform, leftArmPivot.transform, rightArmPivot.transform, leftLegPivot.transform, rightLegPivot.transform, reactorPivot.transform);
-            ctrl.BindComponents(cc, motion, root.GetComponentsInChildren<MeshRenderer>(true), visualRoot, chaserToggle, heavyToggle, bossGroup, turretPivot.transform);
+            // Bind bipedal pivots & two-bone weapon IK
+            motion.BindPivots(visualRoot.transform, headPivot.transform, leftArmPivot, rightArmPivot, leftLegPivot.transform, rightLegPivot.transform, reactorPivot.transform);
+            motion.BindWeaponArmIk(leftElbowPivot, rightElbowPivot, weaponAnchor.transform, ak74LeftGrip, ak74RightGrip, 0.34f, 0.35f);
+            ctrl.BindComponents(
+                cc, motion, root.GetComponentsInChildren<MeshRenderer>(true),
+                visualRoot, chaserToggle, heavyToggle, bossGroup, turretPivot.transform,
+                leftArmPivot, rightArmPivot, weaponAnchor.transform,
+                ak74Obj, ak74LeftGrip, ak74RightGrip, ak74Muzzle,
+                pkmObj, pkmLeftGrip, pkmRightGrip, pkmMuzzle,
+                bossMuzzleTip.transform);
 
             root.SetActive(false);
             return ctrl;
+        }
+
+        private Transform BuildEnemyOperatorArm(string side, Transform visualRoot, Vector3 shoulderPos, out Transform elbowPivotOut)
+        {
+            GameObject armPivot = new GameObject(side + "ArmPivot");
+            armPivot.transform.SetParent(visualRoot, false);
+            armPivot.transform.localPosition = shoulderPos;
+
+            if (enemyUpperArmMesh != null)
+            {
+                CreatePartWithMesh(side + "UpperArm", enemyUpperArmMesh, PrimitiveType.Capsule, armPivot.transform, Vector3.zero, new Vector3(1.06f, 0.34f / 0.295f, 1.06f), enemyPrimaryMat);
+            }
+            else if (enemyArmMesh != null)
+            {
+                CreatePartWithMesh(side + "UpperArm", enemyArmMesh, PrimitiveType.Capsule, armPivot.transform, Vector3.zero, new Vector3(0.95f, 0.60f, 0.95f), enemyPrimaryMat);
+            }
+            else
+            {
+                CreatePartWithMesh(side + "UpperArm", null, PrimitiveType.Capsule, armPivot.transform, new Vector3(0f, -0.17f, 0f), new Vector3(0.14f, 0.18f, 0.14f), enemyPrimaryMat);
+            }
+
+            GameObject elbowPivot = new GameObject(side + "ElbowPivot");
+            elbowPivot.transform.SetParent(armPivot.transform, false);
+            elbowPivot.transform.localPosition = new Vector3(0f, -0.34f, 0f);
+            elbowPivotOut = elbowPivot.transform;
+
+            if (enemyForearmMesh != null)
+            {
+                CreatePartWithMesh(side + "Forearm", enemyForearmMesh, PrimitiveType.Capsule, elbowPivot.transform, Vector3.zero, new Vector3(1.04f, 0.30f / 0.25f, 1.04f), enemyPrimaryMat);
+            }
+            else
+            {
+                CreatePartWithMesh(side + "Forearm", null, PrimitiveType.Capsule, elbowPivot.transform, new Vector3(0f, -0.15f, 0f), new Vector3(0.12f, 0.16f, 0.12f), enemyPrimaryMat);
+            }
+
+            CreatePartWithMesh(side + "Glove", null, PrimitiveType.Cube, elbowPivot.transform, new Vector3(0f, -0.335f, 0f), new Vector3(0.085f, 0.09f, 0.095f), enemyWeaponMat);
+            return armPivot.transform;
+        }
+
+        private GameObject BuildEnemyWeapon(
+            string name,
+            Transform anchor,
+            Mesh weaponMesh,
+            float uniformScale,
+            Vector3 leftGripLocal,
+            Vector3 rightGripLocal,
+            Vector3 muzzleLocal,
+            out Transform leftGripOut,
+            out Transform rightGripOut,
+            out Transform muzzleOut)
+        {
+            GameObject container = new GameObject(name);
+            container.transform.SetParent(anchor, false);
+
+            CreatePartWithMesh("MeshBody", weaponMesh, PrimitiveType.Cube, container.transform,
+                weaponMesh != null ? Vector3.zero : new Vector3(0f, 0f, 0.16f),
+                weaponMesh != null ? Vector3.one * uniformScale : new Vector3(0.09f, 0.14f, 0.56f),
+                enemyWeaponMat);
+
+            GameObject leftGrip = new GameObject("LeftHandGrip");
+            leftGrip.transform.SetParent(container.transform, false);
+            leftGrip.transform.localPosition = leftGripLocal;
+            leftGripOut = leftGrip.transform;
+
+            GameObject rightGrip = new GameObject("RightHandGrip");
+            rightGrip.transform.SetParent(container.transform, false);
+            rightGrip.transform.localPosition = rightGripLocal;
+            rightGripOut = rightGrip.transform;
+
+            GameObject muzzleTip = new GameObject("MuzzleTip");
+            muzzleTip.transform.SetParent(container.transform, false);
+            muzzleTip.transform.localPosition = muzzleLocal;
+            muzzleOut = muzzleTip.transform;
+
+            return container;
         }
 
         private PickupItem CreatePickupRig()
@@ -299,10 +402,16 @@ namespace TopDownShooter.Enemies
             remainingToSpawnInWave = 5 + currentWave * 3;
             spawnTimer = 0.2f;
 
+            if (currentWave > 1)
+            {
+                StoryDirector.NotifyWaveStarted(currentWave);
+            }
+
             if (currentWave % 3 == 0)
             {
                 SpawnBossAt(PickSafeSpawnPosition());
-                UIManager.Instance?.ShowMilestoneBanner("INCOMING // ARMORED IFV IRONCLAD");
+                StoryDirector.NotifyBossSpawned(currentWave);
+                UIManager.Instance?.ShowMilestoneBanner("INCOMING // " + StoryDirector.GetBossCallsign(currentWave));
             }
 
             UIManager.Instance?.UpdateWave(currentWave, remainingToSpawnInWave + activeEnemies.Count);
@@ -333,13 +442,21 @@ namespace TopDownShooter.Enemies
             else if (activeEnemies.Count == 0)
             {
                 waveIntermissionTimer += dt;
-                if (waveIntermissionTimer >= 1.4f)
+                if (currentWave >= StoryDirector.FinalCampaignWave)
+                {
+                    if (waveIntermissionTimer >= 0.9f)
+                    {
+                        waveIntermissionTimer = 0f;
+                        GameManager.Instance?.CompleteCampaignVictory();
+                    }
+                }
+                else if (waveIntermissionTimer >= 1.4f)
                 {
                     waveIntermissionTimer = 0f;
                     BeginWave(currentWave + 1);
                     if (currentWave % 3 != 0)
                     {
-                        UIManager.Instance?.ShowMilestoneBanner("WAVE " + currentWave + " INCOMING");
+                        UIManager.Instance?.ShowMilestoneBanner(StoryDirector.GetActLabel(currentWave) + " // WAVE " + currentWave);
                     }
                 }
             }
@@ -449,6 +566,7 @@ namespace TopDownShooter.Enemies
             {
                 if (enemy.Archetype == EnemyArchetype.Boss)
                 {
+                    StoryDirector.NotifyBossDefeated(currentWave);
                     Vector3 center = enemy.transform.position;
                     SpawnPickupAt(PickupKind.Medkit, center);
                     for (int i = 0; i < 3; i++)

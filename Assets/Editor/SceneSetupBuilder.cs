@@ -52,6 +52,8 @@ namespace TopDownShooter.Editor
             public Mesh WeaponRocket;
             public Mesh WeaponAN94;
             public Mesh WeaponVectorSMG;
+            public Mesh WeaponAK74;
+            public Mesh WeaponPKM;
 
             public Mesh ChaserTorso;
             public Mesh ChaserHead;
@@ -148,7 +150,11 @@ namespace TopDownShooter.Editor
                 meshes.PickupXpCrystal,
                 meshes.PickupMedkit,
                 meshes.PickupCreditCoin,
-                meshes.EnemyArm);
+                meshes.EnemyArm,
+                meshes.PlayerUpperArm,
+                meshes.PlayerForearm,
+                meshes.WeaponAK74,
+                meshes.WeaponPKM);
 
             UIManager ui = BuildGameCanvasAndUI(systemsRoot, solidSprite, roundedSprite, shieldSprite, crosshairSprite, circleSprite);
             systemsRoot.AddComponent<GameManager>();
@@ -211,6 +217,8 @@ namespace TopDownShooter.Editor
             pack.WeaponRocket = Get("Mesh_Weapon_Rocket");
             pack.WeaponAN94 = Get("Mesh_Weapon_AN94");
             pack.WeaponVectorSMG = Get("Mesh_Weapon_VectorSMG");
+            pack.WeaponAK74 = Get("Mesh_Weapon_AK74");
+            pack.WeaponPKM = Get("Mesh_Weapon_PKM");
 
             pack.ChaserTorso = Get("Mesh_ChaserTorso");
             pack.ChaserHead = Get("Mesh_ChaserHead");
@@ -815,20 +823,6 @@ namespace TopDownShooter.Editor
             muzzlePoint.transform.SetParent(weaponAnchor.transform, false);
             muzzlePoint.transform.SetPositionAndRotation(weaponMuzzleTips[0].position, weaponMuzzleTips[0].rotation);
 
-            Material matLaser = SaveOrUpdateLitMaterial("Mat_LaserSight", Palette.EnemySecondary, 0f, 0f, true, 0.95f);
-            GameObject laserGo = new GameObject("LaserSight");
-            laserGo.transform.SetParent(muzzlePoint.transform, false);
-            LineRenderer laserLine = laserGo.AddComponent<LineRenderer>();
-            laserLine.sharedMaterial = matLaser;
-            laserLine.shadowCastingMode = ShadowCastingMode.Off;
-            laserLine.receiveShadows = false;
-            laserLine.useWorldSpace = true;
-            laserLine.startWidth = 0.006f;
-            laserLine.endWidth = 0.003f;
-            laserLine.startColor = Palette.EnemySecondary;
-            laserLine.endColor = Palette.Accent;
-            laserLine.enabled = false;
-
             // Legs
             GameObject leftLegPivot = new GameObject("LeftLegPivot");
             leftLegPivot.transform.SetParent(visualRoot.transform, false);
@@ -849,7 +843,6 @@ namespace TopDownShooter.Editor
             motion.BindPivots(visualRoot.transform, headPivot.transform, leftArmPivot, rightArmPivot, leftLegPivot.transform, rightLegPivot.transform, secondaryPivot.transform);
             motion.BindWeaponArmIk(leftElbowPivot, rightElbowPivot, weaponAnchor.transform, weaponLeftGrips[0], weaponRightGrips[0], 0.34f, 0.35f);
             weapon.BindReferences(muzzlePoint.transform, motion, null);
-            weapon.BindLaserSight(laserLine);
             weapon.BindWeaponVisuals(weaponVisuals);
             weapon.BindWeaponGrips(weaponLeftGrips, weaponRightGrips, weaponMuzzleTips);
 
@@ -1052,6 +1045,21 @@ namespace TopDownShooter.Editor
             TextMeshProUGUI hudCreditsText = CreateStyledText("HUD_CreditsText", crPill, "200 CR", 14f, FontStyles.Bold, 2.5f, Palette.CreditGold, TextAlignmentOptions.MidlineLeft);
             SetAnchoredRect(hudCreditsText.rectTransform, new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), new Vector2(10f, 0f), new Vector2(-24f, 28f));
 
+            // Top-Left Non-Blocking TAC-NET Radio Comms Box (below Credits pill)
+            RectTransform radioRt = CreatePanel("RadioCommsBox", hudGroup.transform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(28f, -182f), new Vector2(410f, 98f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.92f));
+            Image radioBgImg = radioRt.GetComponent<Image>();
+            if (radioBgImg != null) radioBgImg.raycastTarget = false;
+            CanvasGroup radioCg = radioRt.gameObject.AddComponent<CanvasGroup>();
+            radioCg.alpha = 0f;
+            radioCg.interactable = false;
+            radioCg.blocksRaycasts = false;
+            Image radioStripe = CreateImage("RadioAccentStripe", radioRt, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(6f, 0f), new Vector2(4f, 70f), solidSprite, Palette.Accent, false);
+            TextMeshProUGUI radioCallsignTxt = CreateStyledText("RadioCallsignText", radioRt, "OVERWATCH // TAC-NET CH-04", 12.5f, FontStyles.Bold, 2.2f, Palette.Accent, TextAlignmentOptions.TopLeft);
+            SetAnchoredRect(radioCallsignTxt.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -10f), new Vector2(376f, 22f));
+            TextMeshProUGUI radioBodyTxt = CreateStyledText("RadioBodyText", radioRt, "", 13f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.TopLeft);
+            radioBodyTxt.textWrappingMode = TextWrappingModes.Normal;
+            SetAnchoredRect(radioBodyTxt.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(18f, -34f), new Vector2(376f, 56f));
+
             // Top-Center Wave & Score Pill
             RectTransform centerPill = CreatePanel("StatusPill_Center", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -24f), new Vector2(360f, 74f), roundedSprite, Palette.PanelSurface);
             CreateImage("PillAccent", centerPill, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 3f), solidSprite, Palette.Accent, false);
@@ -1162,26 +1170,31 @@ namespace TopDownShooter.Editor
             CanvasGroup titleGroup = CreateFullScreenGroup("TitlePanel", canvasGo.transform);
             CreateImage("TitleScrim", titleGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.WithAlpha(Palette.Shadow, 0.36f), true);
 
-            RectTransform titleCard = CreatePanel("TitleCard", titleGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(720f, 430f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.93f));
+            RectTransform titleCard = CreatePanel("TitleCard", titleGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(760f, 470f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.93f));
             CreateImage("TitleAccentTop", titleCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 5f), solidSprite, Palette.Accent, false);
 
             TextMeshProUGUI gameTitle = CreateStyledText("GameTitleText", titleCard, "TASK FORCE // ZERO", 46f, FontStyles.Bold, 6f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
-            SetAnchoredRect(gameTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -64f), new Vector2(640f, 72f));
+            SetAnchoredRect(gameTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -58f), new Vector2(680f, 70f));
 
-            TextMeshProUGUI subtitle = CreateStyledText("SubtitleText", titleCard, "MODERN TACTICAL COMBAT // FIELD EDITION", 16f, FontStyles.Bold, 4.5f, Palette.Accent, TextAlignmentOptions.Center);
-            SetAnchoredRect(subtitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -124f), new Vector2(600f, 30f));
+            TextMeshProUGUI subtitle = CreateStyledText("SubtitleText", titleCard, "OPERATION IRON HARVEST // SECTOR ECHO-7", 15.5f, FontStyles.Bold, 4f, Palette.Accent, TextAlignmentOptions.Center);
+            SetAnchoredRect(subtitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -114f), new Vector2(660f, 28f));
+
+            TextMeshProUGUI titleBrief = CreateStyledText("TitleBriefText", titleCard, "Break Kronos PMC's blockade, flank PKM gunners, and destroy Col. Volkov's Wave 9 Ironclad IFV to clear Evac-6.", 13.5f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
+            titleBrief.textWrappingMode = TextWrappingModes.Normal;
+            SetAnchoredRect(titleBrief.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -152f), new Vector2(700f, 46f));
 
             TextMeshProUGUI titleBest = CreateStyledText("TitleHighScoreText", titleCard, "HIGH SCORE // 0", 16f, FontStyles.Bold, 3f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
-            SetAnchoredRect(titleBest.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 26f), new Vector2(460f, 28f));
+            SetAnchoredRect(titleBest.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 24f), new Vector2(460f, 28f));
 
             TextMeshProUGUI titleCredits = CreateStyledText("TitleCreditsText", titleCard, "FUNDS // 200 CR", 16f, FontStyles.Bold, 3f, Palette.CreditGold, TextAlignmentOptions.Center);
             SetAnchoredRect(titleCredits.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -6f), new Vector2(460f, 26f));
 
             TextMeshProUGUI controlsHint = CreateStyledText("ControlsHintText", titleCard, "WASD MOVE  ·  MOUSE AIM / FIRE  ·  1-6 WEAPONS  ·  SHIFT SPRINT  ·  ESC PAUSE", 11.5f, FontStyles.Bold, 1.8f, Palette.MutedText, TextAlignmentOptions.Center);
-            SetAnchoredRect(controlsHint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 32f), new Vector2(660f, 24f));
+            SetAnchoredRect(controlsHint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 30f), new Vector2(700f, 24f));
 
-            Button startBtn = CreateButton("StartMissionButton", titleCard, "DEPLOY", new Vector2(0.5f, 0.5f), new Vector2(-132f, -78f), new Vector2(244f, 60f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
-            Button armoryBtn = CreateButton("TitleArmoryButton", titleCard, "ARMORY & LOADOUT", new Vector2(0.5f, 0.5f), new Vector2(132f, -78f), new Vector2(244f, 60f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
+            Button startBtn = CreateButton("StartMissionButton", titleCard, "DEPLOY", new Vector2(0.5f, 0.5f), new Vector2(-216f, -82f), new Vector2(204f, 58f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
+            Button armoryBtn = CreateButton("TitleArmoryButton", titleCard, "ARMORY", new Vector2(0.5f, 0.5f), new Vector2(0f, -82f), new Vector2(204f, 58f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
+            Button intelBtn = CreateButton("TitleIntelButton", titleCard, "INTEL DOSSIER", new Vector2(0.5f, 0.5f), new Vector2(216f, -82f), new Vector2(204f, 58f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 17f);
 
             // 3. PAUSE PANEL
             CanvasGroup pauseGroup = CreateFullScreenGroup("PausePanel", canvasGo.transform);
@@ -1204,26 +1217,30 @@ namespace TopDownShooter.Editor
             CanvasGroup endedGroup = CreateFullScreenGroup("EndedPanel", canvasGo.transform);
             CreateImage("EndedScrim", endedGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.ScrimDark, true);
 
-            RectTransform endedCard = CreatePanel("EndedCard", endedGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(560f, 440f), roundedSprite, Palette.PanelSurface);
-            CreateImage("EndedAccentTop", endedCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 5f), solidSprite, Palette.EnemySecondary, false);
+            RectTransform endedCard = CreatePanel("EndedCard", endedGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(600f, 476f), roundedSprite, Palette.PanelSurface);
+            Image endedAccent = CreateImage("EndedAccentTop", endedCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 5f), solidSprite, Palette.EnemySecondary, false);
 
-            TextMeshProUGUI endedTitle = CreateStyledText("EndedTitleText", endedCard, "K.I.A. // MISSION FAILED", 34f, FontStyles.Bold, 5f, Palette.EnemySecondary, TextAlignmentOptions.Center);
-            SetAnchoredRect(endedTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -52f), new Vector2(500f, 52f));
+            TextMeshProUGUI endedTitle = CreateStyledText("EndedTitleText", endedCard, "K.I.A. // MISSION FAILED", 30f, FontStyles.Bold, 4.5f, Palette.EnemySecondary, TextAlignmentOptions.Center);
+            SetAnchoredRect(endedTitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -48f), new Vector2(540f, 50f));
 
             TextMeshProUGUI endedScore = CreateStyledText("EndedScoreText", endedCard, "0 PTS", 44f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.Center);
-            SetAnchoredRect(endedScore.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 52f), new Vector2(460f, 58f));
+            SetAnchoredRect(endedScore.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 84f), new Vector2(460f, 56f));
 
             TextMeshProUGUI endedBest = CreateStyledText("EndedBestText", endedCard, "BEST // 0", 18f, FontStyles.Bold, 3.5f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
-            SetAnchoredRect(endedBest.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 4f), new Vector2(460f, 28f));
+            SetAnchoredRect(endedBest.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 34f), new Vector2(460f, 28f));
 
             TextMeshProUGUI endedStats = CreateStyledText("EndedStatsText", endedCard, "ELIMINATIONS: 0   |   WAVE REACHED: 1", 15f, FontStyles.Bold, 2f, Palette.MutedText, TextAlignmentOptions.Center);
-            SetAnchoredRect(endedStats.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -34f), new Vector2(480f, 26f));
+            SetAnchoredRect(endedStats.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -6f), new Vector2(500f, 24f));
 
             TextMeshProUGUI endedCredits = CreateStyledText("EndedCreditsText", endedCard, "EARNED +0 CR   |   FUNDS: 200 CR", 15f, FontStyles.Bold, 2f, Palette.CreditGold, TextAlignmentOptions.Center);
-            SetAnchoredRect(endedCredits.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -72f), new Vector2(500f, 26f));
+            SetAnchoredRect(endedCredits.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -40f), new Vector2(520f, 24f));
 
-            Button eReplayBtn = CreateButton("EndedReplayButton", endedCard, "REDEPLOY", new Vector2(0.5f, 0.5f), new Vector2(-115f, -142f), new Vector2(205f, 56f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
-            Button eTitleBtn = CreateButton("EndedTitleButton", endedCard, "HQ MENU", new Vector2(0.5f, 0.5f), new Vector2(115f, -142f), new Vector2(205f, 56f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
+            TextMeshProUGUI endedNarrative = CreateStyledText("EndedNarrativeText", endedCard, "", 13f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.Center);
+            endedNarrative.textWrappingMode = TextWrappingModes.Normal;
+            SetAnchoredRect(endedNarrative.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, -90f), new Vector2(520f, 58f));
+
+            Button eReplayBtn = CreateButton("EndedReplayButton", endedCard, "REDEPLOY", new Vector2(0.5f, 0.5f), new Vector2(-115f, -168f), new Vector2(205f, 54f), roundedSprite, Palette.Accent, Palette.Shadow, 20f);
+            Button eTitleBtn = CreateButton("EndedTitleButton", endedCard, "HQ MENU", new Vector2(0.5f, 0.5f), new Vector2(115f, -168f), new Vector2(205f, 54f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 18f);
 
             // 5. ARMORY & LOADOUT MODAL PANEL
             CanvasGroup armoryGroup = CreateFullScreenGroup("ArmoryPanel", canvasGo.transform);
@@ -1344,6 +1361,25 @@ namespace TopDownShooter.Editor
                 drftDescs[i] = dDesc;
             }
 
+            // 7. INTEL DOSSIER MODAL OVERLAY
+            CanvasGroup intelGroup = CreateFullScreenGroup("IntelPanel", canvasGo.transform);
+            intelGroup.alpha = 0f;
+            intelGroup.interactable = false;
+            intelGroup.blocksRaycasts = false;
+            CreateImage("IntelScrim", intelGroup.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, solidSprite, Palette.ScrimDark, true);
+
+            RectTransform intelCard = CreatePanel("IntelCard", intelGroup.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(880f, 590f), roundedSprite, Palette.PanelSurface);
+            CreateImage("IntelAccentTop", intelCard, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-36f, 4f), solidSprite, Palette.Accent, false);
+
+            TextMeshProUGUI intelHeader = CreateStyledText("IntelHeaderText", intelCard, "TAC-NET INTEL DOSSIER // OPERATION IRON HARVEST", 21f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.MidlineLeft);
+            SetAnchoredRect(intelHeader.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(34f, -42f), new Vector2(810f, 40f));
+
+            TextMeshProUGUI intelBodyText = CreateStyledText("IntelBodyText", intelCard, StoryDirector.BuildIntelDossierText(0), 13.5f, FontStyles.Normal, 0.6f, Palette.CharacterSecondary, TextAlignmentOptions.TopLeft);
+            intelBodyText.textWrappingMode = TextWrappingModes.Normal;
+            SetAnchoredRect(intelBodyText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 6f), new Vector2(810f, 420f));
+
+            Button intelCloseBtn = CreateButton("IntelCloseButton", intelCard, "CLOSE DOSSIER", new Vector2(0.5f, 0f), new Vector2(0f, 40f), new Vector2(240f, 48f), roundedSprite, Palette.Accent, Palette.Shadow, 17f);
+
             UIManager ui = systemsRoot.AddComponent<UIManager>();
             ui.BindCore(
                 titleGroup, hudGroup, pauseGroup, endedGroup, armoryGroup, draftGroup,
@@ -1366,6 +1402,10 @@ namespace TopDownShooter.Editor
                 shopSkinBtns, shopSkinLbls,
                 drftBtns, drftTitles, drftRanks, drftDescs,
                 touchRoot);
+
+            ui.BindStoryWidgets(
+                radioCg, radioStripe, radioCallsignTxt, radioBodyTxt,
+                intelGroup, intelBodyText, intelBtn, intelCloseBtn, endedNarrative, endedAccent);
 
             return ui;
         }

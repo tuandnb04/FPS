@@ -391,12 +391,12 @@ namespace TopDownShooter.Character
             if (GameManager.Instance != null && GameManager.Instance.CurrentState != GameState.Playing)
             {
                 characterMotion?.StepMotion(Vector3.zero, 0f, isAimingWeapon: true);
-                weaponController?.UpdateAimVisuals(false, null, transform.forward);
+                weaponController?.SyncActiveMuzzle();
                 return;
             }
             if (isDead)
             {
-                weaponController?.UpdateAimVisuals(false, null, transform.forward);
+                weaponController?.SyncActiveMuzzle();
                 return;
             }
 
@@ -478,8 +478,7 @@ namespace TopDownShooter.Character
 
         private void LateUpdate()
         {
-            bool showLaser = Time.timeScale > 0.01f && !isDead && GameManager.Instance != null && GameManager.Instance.CurrentState == GameState.Playing;
-            weaponController?.UpdateAimVisuals(showLaser, latestAimWorldTarget, latestAimDir);
+            weaponController?.SyncActiveMuzzle();
         }
 
         private void CheckWeaponHotkeys()

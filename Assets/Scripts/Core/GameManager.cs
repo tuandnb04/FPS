@@ -116,6 +116,8 @@ namespace TopDownShooter.Core
             FeelManager.Instance?.ClearAllFloatingText();
             EnemySpawner.Instance?.ResetAndClearAll();
             PlayerController.Instance?.ResetPlayer();
+            StoryDirector.ResetCampaignRun();
+            UIManager.Instance?.HideRadioCommsImmediate();
 
             score = 0;
             kills = 0;
@@ -129,6 +131,7 @@ namespace TopDownShooter.Core
             UIManager.Instance?.UpdateCredits(save.Data.credits, 0);
             UIManager.Instance?.RefreshWeaponBar();
             UIManager.Instance?.TransitionToState(GameState.Playing);
+            StoryDirector.NotifyMissionDeployed();
             EnemySpawner.Instance?.BeginWave(1);
         }
 
@@ -202,6 +205,17 @@ namespace TopDownShooter.Core
             UIManager.Instance?.UpdateCredits(save.Data.credits, runCreditsEarned);
             UIManager.Instance?.PopulateEndedSummary(victory, score, highScore, kills, waveReached, isNewRecord);
             UIManager.Instance?.TransitionToState(GameState.Ended);
+            if (victory)
+            {
+                AudioManager.Instance?.PlayMilestoneSting();
+            }
+        }
+
+        public void CompleteCampaignVictory()
+        {
+            if (currentState == GameState.Ended) return;
+            AddRunCredits(StoryDirector.CampaignVictoryBonusCredits);
+            EndMission(true);
         }
 
         public void RestartMission()
@@ -218,6 +232,8 @@ namespace TopDownShooter.Core
             FeelManager.Instance?.ClearAllFloatingText();
             EnemySpawner.Instance?.ResetAndClearAll();
             PlayerController.Instance?.ResetPlayer();
+            StoryDirector.ResetCampaignRun();
+            UIManager.Instance?.HideRadioCommsImmediate();
 
             score = 0;
             kills = 0;
@@ -237,6 +253,7 @@ namespace TopDownShooter.Core
         {
             score += Mathf.Max(0, points);
             kills++;
+            StoryDirector.NotifyKillCount(kills);
             if (score > highScore)
             {
                 highScore = score;

@@ -108,6 +108,18 @@ namespace TopDownShooter.UI
         [SerializeField] private TextMeshProUGUI endedBestText;
         [SerializeField] private TextMeshProUGUI endedStatsText;
         [SerializeField] private TextMeshProUGUI endedCreditsText;
+        [SerializeField] private TextMeshProUGUI endedNarrativeText;
+        [SerializeField] private Image endedAccentStripe;
+
+        [Header("Story Radio & Intel Dossier")]
+        [SerializeField] private CanvasGroup radioCommsGroup;
+        [SerializeField] private Image radioAccentStripe;
+        [SerializeField] private TextMeshProUGUI radioCallsignText;
+        [SerializeField] private TextMeshProUGUI radioBodyText;
+        [SerializeField] private CanvasGroup intelGroup;
+        [SerializeField] private TextMeshProUGUI intelBodyText;
+        [SerializeField] private Button titleIntelButton;
+        [SerializeField] private Button intelCloseButton;
 
         [Header("Core Navigation Buttons")]
         [SerializeField] private Button startButton;
@@ -122,6 +134,7 @@ namespace TopDownShooter.UI
         private Coroutine xpTween;
         private Coroutine transitionTween;
         private Coroutine milestoneRoutine;
+        private Coroutine radioRoutine;
         private bool touchDashQueued;
         private List<RogueliteSkillInfo> currentDraftOptions = new List<RogueliteSkillInfo>();
 
@@ -133,6 +146,11 @@ namespace TopDownShooter.UI
         public float EndedAlpha => endedGroup != null ? endedGroup.alpha : 0f;
         public float ArmoryAlpha => armoryGroup != null ? armoryGroup.alpha : 0f;
         public float DraftAlpha => draftGroup != null ? draftGroup.alpha : 0f;
+        public float IntelAlpha => intelGroup != null ? intelGroup.alpha : 0f;
+        public bool IsIntelOpen => intelGroup != null && intelGroup.alpha > 0.5f;
+        public bool IsRadioCommsVisible => radioCommsGroup != null && radioCommsGroup.alpha > 0.05f;
+        public string LastDisplayedRadioCallsign { get; private set; } = string.Empty;
+        public string LastDisplayedRadioBody { get; private set; } = string.Empty;
         public bool IsBossBarVisible => bossBarRoot != null && bossBarRoot.gameObject.activeSelf;
         public static bool? ForceMobileControlsOverride { get; set; }
         public VirtualJoystick LeftJoystick => leftJoystick;
@@ -250,6 +268,30 @@ namespace TopDownShooter.UI
             RefreshPlatformControls();
         }
 
+        public void BindStoryWidgets(
+            CanvasGroup radioGroup,
+            Image radioStripe,
+            TextMeshProUGUI radioCallsign,
+            TextMeshProUGUI radioBody,
+            CanvasGroup intelModalGroup,
+            TextMeshProUGUI intelText,
+            Button intelOpenBtn,
+            Button intelCloseBtn,
+            TextMeshProUGUI endedNarrative,
+            Image endedAccent = null)
+        {
+            radioCommsGroup = radioGroup;
+            radioAccentStripe = radioStripe;
+            radioCallsignText = radioCallsign;
+            radioBodyText = radioBody;
+            intelGroup = intelModalGroup;
+            intelBodyText = intelText;
+            titleIntelButton = intelOpenBtn;
+            intelCloseButton = intelCloseBtn;
+            endedNarrativeText = endedNarrative;
+            endedAccentStripe = endedAccent;
+        }
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -258,6 +300,17 @@ namespace TopDownShooter.UI
                 return;
             }
             Instance = this;
+        }
+
+        private void OnEnable()
+        {
+            StoryDirector.OnRadioTransmission -= HandleRadioTransmission;
+            StoryDirector.OnRadioTransmission += HandleRadioTransmission;
+        }
+
+        private void OnDisable()
+        {
+            StoryDirector.OnRadioTransmission -= HandleRadioTransmission;
         }
 
         private void Start()
@@ -334,6 +387,16 @@ namespace TopDownShooter.UI
             {
                 endedTitleButton.onClick.RemoveAllListeners();
                 endedTitleButton.onClick.AddListener(() => GameManager.Instance?.ReturnToTitle());
+            }
+            if (titleIntelButton != null)
+            {
+                titleIntelButton.onClick.RemoveAllListeners();
+                titleIntelButton.onClick.AddListener(OpenIntel);
+            }
+            if (intelCloseButton != null)
+            {
+                intelCloseButton.onClick.RemoveAllListeners();
+                intelCloseButton.onClick.AddListener(CloseIntel);
             }
 
             if (touchDashButton != null)
@@ -510,15 +573,21 @@ namespace TopDownShooter.UI
             SetGroupState(endedGroup, state == GameState.Ended ? 1f : 0f);
             SetGroupState(armoryGroup, state == GameState.Armory ? 1f : 0f);
             SetGroupState(draftGroup, state == GameState.LevelUpDraft ? 1f : 0f);
+            SetGroupState(intelGroup, 0f);
             if (milestoneBannerGroup != null)
             {
                 milestoneBannerGroup.alpha = 0f;
+            }
+            if (state != GameState.Playing)
+            {
+                HideRadioCommsImmediate();
             }
             HideBossHp();
         }
 
         public void TransitionToState(GameState state)
         {
+            SetGroupState(intelGroup, 0f);
             RefreshPlatformControls();
             if (transitionTween != null)
             {
@@ -803,10 +872,93 @@ namespace TopDownShooter.UI
 
         public void PopulateEndedSummary(bool victory, int score, int highScore, int kills, int wave, bool isNewRecord)
         {
-            if (endedTitleText != null) endedTitleText.text = victory ? "AO SECURED" : "K.I.A. // MISSION FAILED";
+            if (endedTitleText != null)
+            {
+                endedTitleText.text = victory ? "CAMPAIGN VICTORY // SECTOR SECURED" : "K.I.A. // MISSION FAILED";
+                endedTitleText.color = victory ? Palette.HealthGreen : Palette.EnemySecondary;
+            }
+            if (endedAccentStripe != null)
+            {
+                endedAccentStripe.color = victory ? Palette.HealthGreen : Palette.EnemySecondary;
+            }
             if (endedScoreText != null) endedScoreText.text = score.ToString("N0") + " PTS";
             if (endedBestText != null) endedBestText.text = isNewRecord ? "NEW RECORD // " + highScore.ToString("N0") : "BEST // " + highScore.ToString("N0");
             if (endedStatsText != null) endedStatsText.text = "ELIMINATIONS: " + kills + "   |   WAVE REACHED: " + wave;
+            if (endedNarrativeText != null) endedNarrativeText.text = StoryDirector.GetEndedDebrief(victory, wave, kills);
+        }
+
+        public void OpenIntel()
+        {
+            AudioManager.Instance?.PlayUIClick();
+            if (intelBodyText != null)
+            {
+                int bestWave = SaveManager.EnsureInstance().Data.highestWave;
+                intelBodyText.text = StoryDirector.BuildIntelDossierText(bestWave);
+            }
+            SetGroupState(titleGroup, 0f);
+            SetGroupState(intelGroup, 1f);
+        }
+
+        public void CloseIntel()
+        {
+            AudioManager.Instance?.PlayUIClick();
+            SetGroupState(intelGroup, 0f);
+            if (GameManager.Instance == null || GameManager.Instance.CurrentState == GameState.Title)
+            {
+                SetGroupState(titleGroup, 1f);
+            }
+        }
+
+        public void HideRadioCommsImmediate()
+        {
+            if (radioRoutine != null)
+            {
+                StopCoroutine(radioRoutine);
+                radioRoutine = null;
+            }
+            if (radioCommsGroup != null)
+            {
+                radioCommsGroup.alpha = 0f;
+                radioCommsGroup.interactable = false;
+                radioCommsGroup.blocksRaycasts = false;
+            }
+        }
+
+        private void HandleRadioTransmission(string callsign, string channel, string body)
+        {
+            LastDisplayedRadioCallsign = callsign;
+            LastDisplayedRadioBody = body;
+            if (radioCommsGroup == null) return;
+
+            if (radioCallsignText != null) radioCallsignText.text = callsign + " // " + channel;
+            if (radioBodyText != null) radioBodyText.text = body;
+            if (radioAccentStripe != null)
+            {
+                radioAccentStripe.color = callsign.Contains("VOLKOV") ? Palette.EnemySecondary : Palette.Accent;
+            }
+
+            if (radioRoutine != null) StopCoroutine(radioRoutine);
+            radioRoutine = StartCoroutine(RadioCommsRoutine());
+        }
+
+        private IEnumerator RadioCommsRoutine()
+        {
+            AudioManager.Instance?.PlayRadioChirp();
+            float startAlpha = radioCommsGroup != null ? radioCommsGroup.alpha : 0f;
+            yield return Ease.Tween(0.18f, t =>
+            {
+                if (radioCommsGroup != null) radioCommsGroup.alpha = Mathf.Lerp(startAlpha, 1f, Ease.OutCubic(t));
+            }, Ease.Linear, unscaled: false);
+
+            yield return new WaitForSeconds(5.2f);
+
+            yield return Ease.Tween(0.35f, t =>
+            {
+                if (radioCommsGroup != null) radioCommsGroup.alpha = Mathf.Lerp(1f, 0f, Ease.OutCubic(t));
+            }, Ease.Linear, unscaled: false);
+
+            if (radioCommsGroup != null) radioCommsGroup.alpha = 0f;
+            radioRoutine = null;
         }
 
         public void ShowMilestoneBanner(string message)
