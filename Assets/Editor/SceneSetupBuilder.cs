@@ -65,9 +65,25 @@ namespace TopDownShooter.Editor
 
             public Mesh TacticalCrate;
             public Mesh EnergyPylon;
+            public Mesh EnvShippingContainer;
+            public Mesh EnvFuelTank;
+            public Mesh EnvBunker;
+            public Mesh EnvRadarDish;
+            public Mesh VehicleBlackhawk;
+            public Mesh VehicleBlackhawkRotor;
             public Mesh PickupXpCrystal;
             public Mesh PickupMedkit;
             public Mesh PickupCreditCoin;
+        }
+
+        private struct CampaignCutsceneProps
+        {
+            public Transform Gate1Left;
+            public Transform Gate1Right;
+            public Transform Gate2Left;
+            public Transform Gate2Right;
+            public Transform EvacChopperRoot;
+            public Transform EvacChopperRotor;
         }
 
         [MenuItem("Vanguard/Rebuild Top-Down Shooter Scene")]
@@ -86,7 +102,7 @@ namespace TopDownShooter.Editor
             VanguardMeshPack meshes = LoadVanguardMeshes();
 
             // 2. Persisted Grounded Military Palette Materials & Skybox
-            Material matFloor = SaveOrUpdateLitMaterial("Mat_Floor", Palette.Floor, 0.06f, 0.25f, false, 0f, floorTex, new Vector2(14f, 14f));
+            Material matFloor = SaveOrUpdateLitMaterial("Mat_Floor", Palette.Floor, 0.06f, 0.25f, false, 0f, floorTex, new Vector2(38f, 54f));
             Material matWalls = SaveOrUpdateLitMaterial("Mat_Walls", Palette.Walls, 0.08f, 0.24f, false, 0f);
             Material matProps = SaveOrUpdateLitMaterial("Mat_Props", Palette.Props, 0.08f, 0.26f, false, 0f);
             Material matTrim = SaveOrUpdateLitMaterial("Mat_TrimDark", Palette.Gunmetal, 0.62f, 0.46f, false, 0f);
@@ -95,6 +111,8 @@ namespace TopDownShooter.Editor
             Material matAccentEmissive = SaveOrUpdateLitMaterial("Mat_AccentEmissive", Palette.HazardYellow, 0.08f, 0.30f, false, 0f);
             Material matCyanGlow = SaveOrUpdateLitMaterial("Mat_CyanGlow", Palette.NvgGreen, 0.25f, 0.68f, false, 0f);
             Material matHealthGlow = SaveOrUpdateLitMaterial("Mat_HealthEmissive", Palette.KeyLightWarm, 0.15f, 0.45f, true, 1.55f);
+            Material matContainerRust = SaveOrUpdateLitMaterial("Mat_ContainerRust", Palette.EnemyPrimary, 0.16f, 0.32f, false, 0f);
+            Material matFuelSteel = SaveOrUpdateLitMaterial("Mat_FuelSteel", Palette.GuardTowerDark, 0.42f, 0.48f, false, 0f);
             Material matSkybox = SaveOrUpdateSkyboxMaterial("Mat_ArenaSkybox");
 
             // 3. Configure URP Global Volume Profile
@@ -108,8 +126,10 @@ namespace TopDownShooter.Editor
             ConfigureEnvironmentLighting(matSkybox, profile);
             UnityEngine.Camera mainCam = ConfigureMainCamera();
 
-            // 6. Arena Environment (Concrete Jersey Barriers & Watchtowers + Perimeter Walls)
-            BuildArenaEnvironment(matFloor, matWalls, matProps, matTrim, matAccentEmissive, matHealthGlow, meshes);
+            // 6. Echo-7 3-Sector Military Base Environment + Extraction Blackhawk
+            CampaignCutsceneProps campaignProps = BuildArenaEnvironment(
+                matFloor, matWalls, matProps, matTrim, matAccentEmissive, matHealthGlow,
+                matPlayerPrimary, matContainerRust, matFuelSteel, meshes);
 
             // 7. Player Rig (Modern Tactical Operator + 4 Real-World Weapons)
             InputActionAsset inputAsset = AssetDatabase.LoadAssetAtPath<InputActionAsset>(InputActionsPath);
@@ -157,6 +177,14 @@ namespace TopDownShooter.Editor
                 meshes.WeaponPKM);
 
             UIManager ui = BuildGameCanvasAndUI(systemsRoot, solidSprite, roundedSprite, shieldSprite, crosshairSprite, circleSprite);
+            CutsceneDirector cutscene = systemsRoot.AddComponent<CutsceneDirector>();
+            cutscene.BindSceneProps(
+                campaignProps.Gate1Left,
+                campaignProps.Gate1Right,
+                campaignProps.Gate2Left,
+                campaignProps.Gate2Right,
+                campaignProps.EvacChopperRoot,
+                campaignProps.EvacChopperRotor);
             systemsRoot.AddComponent<GameManager>();
 
             if (cameraRig == null || ui == null || matHealthGlow == null)
@@ -230,6 +258,12 @@ namespace TopDownShooter.Editor
 
             pack.TacticalCrate = Get("Mesh_TacticalCrate");
             pack.EnergyPylon = Get("Mesh_EnergyPylon");
+            pack.EnvShippingContainer = Get("Mesh_Env_ShippingContainer");
+            pack.EnvFuelTank = Get("Mesh_Env_FuelTank");
+            pack.EnvBunker = Get("Mesh_Env_Bunker");
+            pack.EnvRadarDish = Get("Mesh_Env_RadarDish");
+            pack.VehicleBlackhawk = Get("Mesh_Vehicle_Blackhawk");
+            pack.VehicleBlackhawkRotor = Get("Mesh_Vehicle_BlackhawkRotor");
             pack.PickupXpCrystal = Get("Mesh_Pickup_XpCrystal");
             pack.PickupMedkit = Get("Mesh_Pickup_Medkit");
             pack.PickupCreditCoin = Get("Mesh_Pickup_CreditCoin");
@@ -443,8 +477,8 @@ namespace TopDownShooter.Editor
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.Linear;
             RenderSettings.fogColor = Palette.SkyboxHorizon;
-            RenderSettings.fogStartDistance = 28f;
-            RenderSettings.fogEndDistance = 80f;
+            RenderSettings.fogStartDistance = 52f;
+            RenderSettings.fogEndDistance = 158f;
 
             GameObject keyLightGo = GameObject.Find("Directional Light");
             if (keyLightGo == null)
@@ -492,7 +526,8 @@ namespace TopDownShooter.Editor
             mainCam.clearFlags = CameraClearFlags.Skybox;
             mainCam.allowHDR = true;
             mainCam.fieldOfView = 52f;
-            mainCam.transform.SetPositionAndRotation(new Vector3(0f, 13.4f, -8.2f), Quaternion.Euler(56.7f, 0f, 0f));
+            mainCam.farClipPlane = 260f;
+            mainCam.transform.SetPositionAndRotation(new Vector3(0f, 13.4f, -51.2f), Quaternion.Euler(56.7f, 0f, 0f));
 
             var urpCam = mainCam.GetComponent<UniversalAdditionalCameraData>();
             if (urpCam == null) urpCam = mainCam.gameObject.AddComponent<UniversalAdditionalCameraData>();
@@ -511,63 +546,275 @@ namespace TopDownShooter.Editor
             return mainCam;
         }
 
-        private static void BuildArenaEnvironment(
+        private static CampaignCutsceneProps BuildArenaEnvironment(
             Material matFloor,
             Material matWalls,
             Material matProps,
             Material matTrim,
             Material matAccent,
             Material matCyan,
+            Material matOlive,
+            Material matRust,
+            Material matFuelSteel,
             VanguardMeshPack meshes)
         {
+            CampaignCutsceneProps props = new CampaignCutsceneProps();
             GameObject env = new GameObject("ArenaEnvironment");
 
-            // Ground plane (visual) + unit-scale floor BoxCollider
+            // Huge 3-Sector Echo-7 Tarmac Compound Floor (76m x 108m: x[-38..38], z[-52..56])
             GameObject floorRoot = new GameObject("ArenaFloor");
             floorRoot.transform.SetParent(env.transform, false);
             BoxCollider floorCol = floorRoot.AddComponent<BoxCollider>();
-            floorCol.size = new Vector3(28f, 0.4f, 28f);
-            floorCol.center = new Vector3(0f, -0.2f, 0f);
+            floorCol.size = new Vector3(76f, 0.4f, 108f);
+            floorCol.center = new Vector3(0f, -0.2f, 2f);
 
             GameObject floorVisual = GameObject.CreatePrimitive(PrimitiveType.Cube);
             floorVisual.name = "FloorDeck";
             floorVisual.transform.SetParent(floorRoot.transform, false);
-            floorVisual.transform.localPosition = new Vector3(0f, -0.2f, 0f);
-            floorVisual.transform.localScale = new Vector3(28f, 0.4f, 28f);
+            floorVisual.transform.localPosition = new Vector3(0f, -0.2f, 2f);
+            floorVisual.transform.localScale = new Vector3(76f, 0.4f, 108f);
             Object.DestroyImmediate(floorVisual.GetComponent<Collider>());
             floorVisual.GetComponent<MeshRenderer>().sharedMaterial = matFloor;
 
-            // Outer Perimeter Apron (extends subtly into fog so edge looks intentional)
             GameObject apron = GameObject.CreatePrimitive(PrimitiveType.Cube);
             apron.name = "OuterFoundation";
             apron.transform.SetParent(env.transform, false);
-            apron.transform.localPosition = new Vector3(0f, -0.55f, 0f);
-            apron.transform.localScale = new Vector3(44f, 0.4f, 44f);
+            apron.transform.localPosition = new Vector3(0f, -0.55f, 2f);
+            apron.transform.localScale = new Vector3(116f, 0.4f, 148f);
             Object.DestroyImmediate(apron.GetComponent<Collider>());
             apron.GetComponent<MeshRenderer>().sharedMaterial = matTrim;
 
-            // 4 Compound Perimeter Walls (reinforced concrete blast walls w/ gunmetal steel coping)
-            BuildPerimeterWall(env.transform, "Wall_North", new Vector3(0f, 0f, 13.6f), new Vector3(28.4f, 1.8f, 1.0f), matWalls, matTrim, matTrim);
-            BuildPerimeterWall(env.transform, "Wall_South", new Vector3(0f, 0f, -13.6f), new Vector3(28.4f, 1.8f, 1.0f), matWalls, matTrim, matTrim);
-            BuildPerimeterWall(env.transform, "Wall_East", new Vector3(13.6f, 0f, 0f), new Vector3(1.0f, 1.8f, 26.2f), matWalls, matTrim, matTrim);
-            BuildPerimeterWall(env.transform, "Wall_West", new Vector3(-13.6f, 0f, 0f), new Vector3(1.0f, 1.8f, 26.2f), matWalls, matTrim, matTrim);
+            // Central Convoy Asphalt Road Strip & Hazard Road Markings (South Gate -> Helipad)
+            BuildRoadDeck(env.transform, matTrim, matAccent);
 
-            // 8 Concrete Jersey Barriers (Blender Mesh_TacticalCrate + dark steel cap)
-            BuildTacticalCover(env.transform, "Cover_NW", new Vector3(-5.2f, 0f, 5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matTrim, meshes.TacticalCrate);
-            BuildTacticalCover(env.transform, "Cover_NE", new Vector3(5.2f, 0f, 5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matTrim, meshes.TacticalCrate);
-            BuildTacticalCover(env.transform, "Cover_SW", new Vector3(-5.2f, 0f, -5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matTrim, meshes.TacticalCrate);
-            BuildTacticalCover(env.transform, "Cover_SE", new Vector3(5.2f, 0f, -5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matTrim, meshes.TacticalCrate);
+            // Outer Perimeter Blast Walls framing 3 stepped Sectors
+            BuildPerimeterWall(env.transform, "Wall_South", new Vector3(0f, 0f, -52f), new Vector3(57.4f, 2.4f, 1.4f), matWalls, matTrim, matAccent);
+            BuildPerimeterWall(env.transform, "Wall_North", new Vector3(0f, 0f, 56f), new Vector3(61.4f, 2.6f, 1.4f), matWalls, matTrim, matAccent);
+            BuildPerimeterWall(env.transform, "Wall_S1_West", new Vector3(-28f, 0f, -33f), new Vector3(1.4f, 2.4f, 38.4f), matWalls, matTrim, matTrim);
+            BuildPerimeterWall(env.transform, "Wall_S1_East", new Vector3(28f, 0f, -33f), new Vector3(1.4f, 2.4f, 38.4f), matWalls, matTrim, matTrim);
+            BuildPerimeterWall(env.transform, "Wall_S1_WingWest", new Vector3(-33f, 0f, -14f), new Vector3(11.4f, 2.4f, 1.4f), matWalls, matTrim, matTrim);
+            BuildPerimeterWall(env.transform, "Wall_S1_WingEast", new Vector3(33f, 0f, -14f), new Vector3(11.4f, 2.4f, 1.4f), matWalls, matTrim, matTrim);
+            BuildPerimeterWall(env.transform, "Wall_S2_West", new Vector3(-38f, 0f, 4f), new Vector3(1.4f, 2.4f, 36.4f), matWalls, matTrim, matTrim);
+            BuildPerimeterWall(env.transform, "Wall_S2_East", new Vector3(38f, 0f, 4f), new Vector3(1.4f, 2.4f, 36.4f), matWalls, matTrim, matTrim);
+            BuildPerimeterWall(env.transform, "Wall_S2_WingWest", new Vector3(-34f, 0f, 22f), new Vector3(9.4f, 2.4f, 1.4f), matWalls, matTrim, matTrim);
+            BuildPerimeterWall(env.transform, "Wall_S2_WingEast", new Vector3(34f, 0f, 22f), new Vector3(9.4f, 2.4f, 1.4f), matWalls, matTrim, matTrim);
+            BuildPerimeterWall(env.transform, "Wall_S3_West", new Vector3(-30f, 0f, 39f), new Vector3(1.4f, 2.6f, 34.4f), matWalls, matTrim, matTrim);
+            BuildPerimeterWall(env.transform, "Wall_S3_East", new Vector3(30f, 0f, 39f), new Vector3(1.4f, 2.6f, 34.4f), matWalls, matTrim, matTrim);
 
-            BuildTacticalCover(env.transform, "Cover_North", new Vector3(0f, 0f, 8.2f), 0f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matTrim, meshes.TacticalCrate);
-            BuildTacticalCover(env.transform, "Cover_South", new Vector3(0f, 0f, -8.2f), 0f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matTrim, meshes.TacticalCrate);
-            BuildTacticalCover(env.transform, "Cover_East", new Vector3(8.2f, 0f, 0f), 90f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matTrim, meshes.TacticalCrate);
-            BuildTacticalCover(env.transform, "Cover_West", new Vector3(-8.2f, 0f, 0f), 90f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matTrim, meshes.TacticalCrate);
+            // Sector Divider Checkpoints + Sliding Blast Gates
+            BuildBlastGateDivider(
+                env.transform, "GateDivider_Act1", -14f, 56f, 12f,
+                matWalls, matTrim, matAccent,
+                out props.Gate1Left, out props.Gate1Right);
+            BuildBlastGateDivider(
+                env.transform, "GateDivider_Act2", 22f, 60f, 14f,
+                matWalls, matTrim, matAccent,
+                out props.Gate2Left, out props.Gate2Right);
 
-            // 4 Corner Floodlight Guard Towers (Blender Mesh_EnergyPylon + warm halogen spotlights)
+            // SECTOR 1 (z: -52..-14): South Insertion Checkpoint & Convoy Yard
+            BuildEnvPropMesh(env.transform, "S1_Bunker_West", meshes.EnvBunker, new Vector3(-18.5f, 0f, -24.5f), 18f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+            BuildEnvPropMesh(env.transform, "S1_Container_SW", meshes.EnvShippingContainer, new Vector3(-14.5f, 0f, -40f), 14f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
+            BuildEnvPropMesh(env.transform, "S1_Container_SE", meshes.EnvShippingContainer, new Vector3(15.5f, 0f, -38f), -12f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
+            BuildEnvPropMesh(env.transform, "S1_Container_NE", meshes.EnvShippingContainer, new Vector3(17.5f, 0f, -22.5f), 86f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
+
+            BuildTacticalCover(env.transform, "S1_Cover_SW", new Vector3(-5.8f, 0f, -38.5f), 12f, new Vector3(3.2f, 1.25f, 1.1f), matProps, matTrim, matAccent, meshes.TacticalCrate);
+            BuildTacticalCover(env.transform, "S1_Cover_SE", new Vector3(5.8f, 0f, -38.5f), -12f, new Vector3(3.2f, 1.25f, 1.1f), matProps, matTrim, matAccent, meshes.TacticalCrate);
+            BuildTacticalCover(env.transform, "S1_Cover_MidW", new Vector3(-7.8f, 0f, -28.5f), -18f, new Vector3(3.5f, 1.3f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
+            BuildTacticalCover(env.transform, "S1_Cover_MidE", new Vector3(7.8f, 0f, -28.5f), 18f, new Vector3(3.5f, 1.3f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
+            BuildCornerPylon(env.transform, "Pylon_S1_SW", new Vector3(-24.5f, 0f, -48.5f), matTrim, matWalls, matCyan, Palette.KeyLightWarm, meshes.EnergyPylon);
+            BuildCornerPylon(env.transform, "Pylon_S1_SE", new Vector3(24.5f, 0f, -48.5f), matTrim, matWalls, matCyan, Palette.KeyLightWarm, meshes.EnergyPylon);
+
+            // SECTOR 2 (z: -14..+22): Central Fuel Tank Farm & Cargo Container Depot
+            // Note: Keeps (0, 0, 0), (0, 0, 6), and (10, 0, 10) completely unobstructed!
+            BuildTacticalCover(env.transform, "Cover_NW", new Vector3(-5.2f, 0f, 5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
+            BuildTacticalCover(env.transform, "Cover_NE", new Vector3(5.2f, 0f, 5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
+            BuildTacticalCover(env.transform, "Cover_SW", new Vector3(-5.2f, 0f, -5.2f), -45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
+            BuildTacticalCover(env.transform, "Cover_SE", new Vector3(5.2f, 0f, -5.2f), 45f, new Vector3(3.0f, 1.35f, 1.15f), matProps, matTrim, matAccent, meshes.TacticalCrate);
+            BuildTacticalCover(env.transform, "Cover_West", new Vector3(-8.2f, 0f, 0f), 90f, new Vector3(3.6f, 1.25f, 1.1f), matProps, matTrim, matAccent, meshes.TacticalCrate);
             BuildCornerPylon(env.transform, "Pylon_NW", new Vector3(-11.8f, 0f, 11.8f), matTrim, matWalls, matCyan, Palette.KeyLightWarm, meshes.EnergyPylon);
             BuildCornerPylon(env.transform, "Pylon_NE", new Vector3(11.8f, 0f, 11.8f), matTrim, matWalls, matCyan, Palette.KeyLightWarm, meshes.EnergyPylon);
-            BuildCornerPylon(env.transform, "Pylon_SW", new Vector3(-11.8f, 0f, -11.8f), matTrim, matWalls, matCyan, Palette.KeyLightWarm, meshes.EnergyPylon);
-            BuildCornerPylon(env.transform, "Pylon_SE", new Vector3(11.8f, 0f, -11.8f), matTrim, matWalls, matCyan, Palette.KeyLightWarm, meshes.EnergyPylon);
+
+            // West Fuel Farm Silos & Radar Array
+            BuildEnvPropMesh(env.transform, "S2_FuelTank_1", meshes.EnvFuelTank, new Vector3(-25.5f, 0f, -6.0f), 0f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
+            BuildEnvPropMesh(env.transform, "S2_FuelTank_2", meshes.EnvFuelTank, new Vector3(-25.5f, 0f, 3.5f), 90f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
+            BuildEnvPropMesh(env.transform, "S2_FuelTank_3", meshes.EnvFuelTank, new Vector3(-19.5f, 0f, -1.2f), 180f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
+            BuildEnvPropMesh(env.transform, "S2_FuelTank_4", meshes.EnvFuelTank, new Vector3(-25.5f, 0f, 13.0f), 45f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
+            BuildEnvPropMesh(env.transform, "S2_Radar_West", meshes.EnvRadarDish, new Vector3(-32.5f, 0f, 14.5f), -35f, new Vector3(2.7f, 4.6f, 2.7f), matFuelSteel);
+
+            // East ISO Cargo Container Yard (with iconic 2-story stacked container)
+            BuildEnvPropMesh(env.transform, "S2_Container_E1", meshes.EnvShippingContainer, new Vector3(18.5f, 0f, -5.5f), 0f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
+            BuildEnvPropMesh(env.transform, "S2_Container_E2", meshes.EnvShippingContainer, new Vector3(23.0f, 0f, -5.5f), 0f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
+            BuildEnvPropMesh(env.transform, "S2_Container_E2_Top", meshes.EnvShippingContainer, new Vector3(23.0f, 2.6f, -5.5f), 4f, new Vector3(2.55f, 2.6f, 6.0f), matProps);
+            BuildEnvPropMesh(env.transform, "S2_Container_E3", meshes.EnvShippingContainer, new Vector3(21.5f, 0f, 6.0f), 90f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
+            BuildEnvPropMesh(env.transform, "S2_Container_E4", meshes.EnvShippingContainer, new Vector3(30.5f, 0f, 12.0f), -16f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
+
+            // SECTOR 3 (z: +22..+56): North Command HQ, Bunkers & EVAC-6 Helipad
+            BuildHelipadMarkings(env.transform, new Vector3(0f, 0.015f, 42f), matTrim, matAccent);
+            BuildEnvPropMesh(env.transform, "S3_Bunker_West", meshes.EnvBunker, new Vector3(-19.5f, 0f, 40.5f), -22f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+            BuildEnvPropMesh(env.transform, "S3_Bunker_East", meshes.EnvBunker, new Vector3(19.5f, 0f, 40.5f), 22f, new Vector3(5.8f, 3.3f, 4.6f), matWalls);
+            BuildEnvPropMesh(env.transform, "S3_Radar_NE", meshes.EnvRadarDish, new Vector3(24.0f, 0f, 50.5f), -140f, new Vector3(2.7f, 4.6f, 2.7f), matFuelSteel);
+            BuildEnvPropMesh(env.transform, "S3_FuelTank_NW", meshes.EnvFuelTank, new Vector3(-23.5f, 0f, 50.0f), 120f, new Vector3(3.4f, 4.6f, 3.4f), matFuelSteel);
+            BuildEnvPropMesh(env.transform, "S3_Container_SW", meshes.EnvShippingContainer, new Vector3(-17.5f, 0f, 28.5f), 88f, new Vector3(2.55f, 2.6f, 6.0f), matOlive);
+            BuildEnvPropMesh(env.transform, "S3_Container_SE", meshes.EnvShippingContainer, new Vector3(17.5f, 0f, 28.5f), -88f, new Vector3(2.55f, 2.6f, 6.0f), matRust);
+            BuildCornerPylon(env.transform, "Pylon_S3_NW", new Vector3(-26.5f, 0f, 52.5f), matTrim, matWalls, matCyan, Palette.KeyLightWarm, meshes.EnergyPylon);
+            BuildCornerPylon(env.transform, "Pylon_S3_NE", new Vector3(26.5f, 0f, 52.5f), matTrim, matWalls, matCyan, Palette.KeyLightWarm, meshes.EnergyPylon);
+
+            // EVAC-6 Blackhawk Helicopter (parked sky-high inactive until Victory Evac Cutscene)
+            BuildBlackhawkProp(env.transform, meshes.VehicleBlackhawk, meshes.VehicleBlackhawkRotor, matOlive, matTrim, out props.EvacChopperRoot, out props.EvacChopperRotor);
+
+            return props;
+        }
+
+        private static void BuildRoadDeck(Transform parent, Material matAsphaltDark, Material matStripeYellow)
+        {
+            GameObject road = CreateVisualBox("ConvoyMainRoad", parent, new Vector3(0f, 0.005f, -5f), new Vector3(11.5f, 0.01f, 88f), matAsphaltDark);
+            road.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+
+            for (float z = -47f; z <= 31f; z += 5.5f)
+            {
+                GameObject dash = CreateVisualBox("RoadCenterDash_" + Mathf.RoundToInt(z), parent, new Vector3(0f, 0.012f, z), new Vector3(0.32f, 0.01f, 2.6f), matStripeYellow);
+                dash.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            }
+        }
+
+        private static void BuildBlastGateDivider(
+            Transform parent,
+            string gateName,
+            float zPos,
+            float totalWidth,
+            float openingWidth,
+            Material matWalls,
+            Material matTrim,
+            Material matAccent,
+            out Transform leftLeafOut,
+            out Transform rightLeafOut)
+        {
+            GameObject root = new GameObject(gateName);
+            root.transform.SetParent(parent, false);
+
+            float wingW = Mathf.Max(2f, (totalWidth - openingWidth) * 0.5f);
+            float wingOffsetX = openingWidth * 0.5f + wingW * 0.5f;
+            BuildPerimeterWall(root.transform, gateName + "_WingWest", new Vector3(-wingOffsetX, 0f, zPos), new Vector3(wingW, 2.6f, 1.5f), matWalls, matTrim, matTrim);
+            BuildPerimeterWall(root.transform, gateName + "_WingEast", new Vector3(wingOffsetX, 0f, zPos), new Vector3(wingW, 2.6f, 1.5f), matWalls, matTrim, matTrim);
+
+            // Overhead Gantry Bridge spanning the blast gate opening (visual only, non-blocking!)
+            CreateVisualBox(gateName + "_GantryBeam", root.transform, new Vector3(0f, 3.25f, zPos), new Vector3(openingWidth + 2.4f, 0.65f, 1.6f), matTrim);
+            CreateVisualBox(gateName + "_GantryHazard", root.transform, new Vector3(0f, 3.00f, zPos - 0.82f), new Vector3(openingWidth, 0.16f, 0.08f), matAccent);
+
+            float leafW = openingWidth * 0.5f;
+            leftLeafOut = CreateSlidingBlastLeaf(root.transform, gateName + "_LeafLeft", new Vector3(-leafW * 0.5f, 0f, zPos), new Vector3(leafW, 2.45f, 0.72f), matTrim, matAccent);
+            rightLeafOut = CreateSlidingBlastLeaf(root.transform, gateName + "_LeafRight", new Vector3(leafW * 0.5f, 0f, zPos), new Vector3(leafW, 2.45f, 0.72f), matTrim, matAccent);
+        }
+
+        private static Transform CreateSlidingBlastLeaf(Transform parent, string leafName, Vector3 pos, Vector3 size, Material matDoor, Material matStripe)
+        {
+            GameObject leaf = new GameObject(leafName);
+            leaf.transform.SetParent(parent, false);
+            leaf.transform.position = pos;
+
+            BoxCollider col = leaf.AddComponent<BoxCollider>();
+            col.size = size;
+            col.center = new Vector3(0f, size.y * 0.5f, 0f);
+
+            CreateVisualBox("SteelDoorPanel", leaf.transform, new Vector3(0f, size.y * 0.5f, 0f), size, matDoor);
+            CreateVisualBox("DoorHazardBand", leaf.transform, new Vector3(0f, size.y * 0.52f, 0f), new Vector3(size.x * 0.96f, 0.22f, size.z + 0.06f), matStripe);
+            return leaf.transform;
+        }
+
+        private static void BuildHelipadMarkings(Transform parent, Vector3 centerPos, Material matPadDark, Material matYellow)
+        {
+            GameObject pad = new GameObject("NorthHelipad_LZ");
+            pad.transform.SetParent(parent, false);
+            pad.transform.position = centerPos;
+
+            GameObject deck = CreateVisualBox("HelipadConcretePad", pad.transform, Vector3.zero, new Vector3(15f, 0.02f, 15f), matPadDark);
+            deck.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+
+            // Bold yellow "H" marking + outer apron border strips (visual decals cleanly on y=0.02)
+            CreateVisualBox("H_LeftLeg", pad.transform, new Vector3(-2.1f, 0.02f, 0f), new Vector3(0.9f, 0.015f, 6.2f), matYellow);
+            CreateVisualBox("H_RightLeg", pad.transform, new Vector3(2.1f, 0.02f, 0f), new Vector3(0.9f, 0.015f, 6.2f), matYellow);
+            CreateVisualBox("H_CrossBar", pad.transform, new Vector3(0f, 0.02f, 0f), new Vector3(4.2f, 0.015f, 1.0f), matYellow);
+
+            CreateVisualBox("Border_N", pad.transform, new Vector3(0f, 0.02f, 6.8f), new Vector3(13.6f, 0.015f, 0.45f), matYellow);
+            CreateVisualBox("Border_S", pad.transform, new Vector3(0f, 0.02f, -6.8f), new Vector3(13.6f, 0.015f, 0.45f), matYellow);
+            CreateVisualBox("Border_W", pad.transform, new Vector3(-6.8f, 0.02f, 0f), new Vector3(0.45f, 0.015f, 13.6f), matYellow);
+            CreateVisualBox("Border_E", pad.transform, new Vector3(6.8f, 0.02f, 0f), new Vector3(0.45f, 0.015f, 13.6f), matYellow);
+        }
+
+        private static void BuildEnvPropMesh(
+            Transform parent,
+            string propName,
+            Mesh mesh,
+            Vector3 worldPos,
+            float yawDeg,
+            Vector3 colliderSize,
+            Material mat)
+        {
+            GameObject root = new GameObject(propName);
+            root.transform.SetParent(parent, false);
+            root.transform.SetPositionAndRotation(worldPos, Quaternion.Euler(0f, yawDeg, 0f));
+
+            BoxCollider col = root.AddComponent<BoxCollider>();
+            col.size = colliderSize;
+            col.center = new Vector3(0f, colliderSize.y * 0.5f, 0f);
+
+            if (mesh != null)
+            {
+                GameObject vis = new GameObject("VisualMesh");
+                vis.transform.SetParent(root.transform, false);
+                MeshFilter mf = vis.AddComponent<MeshFilter>();
+                mf.sharedMesh = mesh;
+                MeshRenderer mr = vis.AddComponent<MeshRenderer>();
+                mr.sharedMaterial = mat;
+            }
+            else
+            {
+                CreateVisualBox("FallbackBlock", root.transform, new Vector3(0f, colliderSize.y * 0.5f, 0f), colliderSize, mat);
+            }
+        }
+
+        private static void BuildBlackhawkProp(
+            Transform parent,
+            Mesh hullMesh,
+            Mesh rotorMesh,
+            Material matHull,
+            Material matRotor,
+            out Transform rootOut,
+            out Transform rotorOut)
+        {
+            GameObject chopper = new GameObject("EVAC6_Blackhawk");
+            chopper.transform.SetParent(parent, false);
+            chopper.transform.SetPositionAndRotation(new Vector3(0f, 28f, 66f), Quaternion.Euler(0f, 180f, 0f));
+
+            if (hullMesh != null)
+            {
+                GameObject hull = new GameObject("BlackhawkHull");
+                hull.transform.SetParent(chopper.transform, false);
+                hull.AddComponent<MeshFilter>().sharedMesh = hullMesh;
+                hull.AddComponent<MeshRenderer>().sharedMaterial = matHull;
+            }
+            else
+            {
+                CreateVisualBox("BlackhawkHullFallback", chopper.transform, new Vector3(0f, 1.4f, 0f), new Vector3(2.8f, 2.2f, 9.5f), matHull);
+            }
+
+            GameObject rotor = new GameObject("MainRotor");
+            rotor.transform.SetParent(chopper.transform, false);
+            rotor.transform.localPosition = new Vector3(0f, 2.66f, 0.25f);
+            if (rotorMesh != null)
+            {
+                rotor.AddComponent<MeshFilter>().sharedMesh = rotorMesh;
+                rotor.AddComponent<MeshRenderer>().sharedMaterial = matRotor;
+            }
+            else
+            {
+                CreateVisualBox("RotorBladeA", rotor.transform, Vector3.zero, new Vector3(9.2f, 0.08f, 0.3f), matRotor);
+                CreateVisualBox("RotorBladeB", rotor.transform, Vector3.zero, new Vector3(0.3f, 0.08f, 9.2f), matRotor);
+            }
+
+            chopper.SetActive(false);
+            rootOut = chopper.transform;
+            rotorOut = rotor.transform;
         }
 
         private static void BuildPerimeterWall(Transform parent, string wallName, Vector3 pos, Vector3 size, Material matWall, Material matTrim, Material matGlow)
@@ -725,7 +972,7 @@ namespace TopDownShooter.Editor
         {
             GameObject root = new GameObject("Player");
             root.tag = "Player";
-            root.transform.SetPositionAndRotation(new Vector3(0f, 0.02f, 0f), Quaternion.identity);
+            root.transform.SetPositionAndRotation(new Vector3(0f, 0.02f, -43f), Quaternion.identity);
 
             CharacterController cc = root.AddComponent<CharacterController>();
             cc.radius = 0.45f;
@@ -1073,8 +1320,14 @@ namespace TopDownShooter.Editor
             TextMeshProUGUI scoreText = CreateStyledText("ScoreText", centerPill, "0 PTS", 22f, FontStyles.Bold, 2.5f, Palette.Accent, TextAlignmentOptions.MidlineRight);
             SetAnchoredRect(scoreText.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(-20f, 0f), new Vector2(165f, 44f));
 
-            // Boss Encounter Health Bar (anchored cleanly beneath Center Pill)
-            RectTransform bossRoot = CreatePanel("BossBarRoot", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -108f), new Vector2(540f, 56f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.94f));
+            // Top-Center Objective Banner + Boss Bar below StatusPill_Center
+            RectTransform objPill = CreatePanel("ObjectivePill_Center", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -104f), new Vector2(460f, 30f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.97f));
+            CreateImage("ObjAccentLeft", objPill, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(6f, 0f), new Vector2(4f, 18f), solidSprite, Palette.Accent, false);
+            TextMeshProUGUI objectiveText = CreateStyledText("ObjectiveBannerText", objPill, "OBJ I // BREACH SOUTH CHECKPOINT", 11.5f, FontStyles.Bold, 2.4f, Palette.Accent, TextAlignmentOptions.Center);
+            StretchRect(objectiveText.rectTransform);
+
+            // Boss Encounter Health Bar (anchored cleanly beneath Objective Pill)
+            RectTransform bossRoot = CreatePanel("BossBarRoot", hudGroup.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -142f), new Vector2(540f, 56f), roundedSprite, Palette.WithAlpha(Palette.PanelSurface, 0.94f));
             CreateImage("BossBarAccent", bossRoot, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, -1f), new Vector2(-24f, 3f), solidSprite, Palette.EnemySecondary, false);
 
             TextMeshProUGUI bossNameText = CreateStyledText("BossNameText", bossRoot, "ARMORED IFV // IRONCLAD", 13f, FontStyles.Bold, 3.5f, Palette.EnemySecondary, TextAlignmentOptions.TopLeft);
@@ -1380,6 +1633,27 @@ namespace TopDownShooter.Editor
 
             Button intelCloseBtn = CreateButton("IntelCloseButton", intelCard, "CLOSE DOSSIER", new Vector2(0.5f, 0f), new Vector2(0f, 40f), new Vector2(240f, 48f), roundedSprite, Palette.Accent, Palette.Shadow, 17f);
 
+            // 8. CALL-OF-DUTY WIDESCREEN CUTSCENE LETTERBOX OVERLAY
+            CanvasGroup cinemaGroup = CreateFullScreenGroup("CinemaOverlay", canvasGo.transform);
+            cinemaGroup.alpha = 0f;
+            cinemaGroup.interactable = false;
+            cinemaGroup.blocksRaycasts = false;
+
+            CreateImage("TopCinemaBar", cinemaGroup.transform, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, 0f), new Vector2(0f, 100f), solidSprite, Palette.Shadow, true);
+            RectTransform bottomCinemaBar = CreatePanel("BottomCinemaBar", cinemaGroup.transform, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0f, 0f), new Vector2(0f, 136f), solidSprite, Palette.Shadow);
+
+            TextMeshProUGUI cinemaStampTxt = CreateStyledText("CinemaMissionStampText", bottomCinemaBar, "OPERATION: IRON HARVEST\nSECTOR ECHO-7", 17f, FontStyles.Bold, 2.2f, Palette.HealthGreen, TextAlignmentOptions.BottomLeft);
+            SetAnchoredRect(cinemaStampTxt.rectTransform, new Vector2(0f, 0f), new Vector2(0f, 0f), new Vector2(42f, 20f), new Vector2(540f, 96f));
+
+            TextMeshProUGUI cinemaSpeakerTxt = CreateStyledText("CinemaSpeakerText", bottomCinemaBar, "OVERWATCH // TAC-NET CH-04", 13f, FontStyles.Bold, 3f, Palette.Accent, TextAlignmentOptions.Center);
+            SetAnchoredRect(cinemaSpeakerTxt.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(30f, -14f), new Vector2(680f, 24f));
+
+            TextMeshProUGUI cinemaDialogueTxt = CreateStyledText("CinemaDialogueText", bottomCinemaBar, "", 15.5f, FontStyles.Normal, 0.8f, Palette.CharacterSecondary, TextAlignmentOptions.Top);
+            cinemaDialogueTxt.textWrappingMode = TextWrappingModes.Normal;
+            SetAnchoredRect(cinemaDialogueTxt.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(30f, -10f), new Vector2(720f, 68f));
+
+            Button skipCutsceneBtn = CreateButton("SkipCutsceneButton", bottomCinemaBar, "SKIP [SPACE] >>", new Vector2(1f, 0.5f), new Vector2(-36f, 0f), new Vector2(204f, 46f), roundedSprite, Palette.SecondaryButtonBg, Palette.CharacterSecondary, 14f);
+
             UIManager ui = systemsRoot.AddComponent<UIManager>();
             ui.BindCore(
                 titleGroup, hudGroup, pauseGroup, endedGroup, armoryGroup, draftGroup,
@@ -1406,6 +1680,10 @@ namespace TopDownShooter.Editor
             ui.BindStoryWidgets(
                 radioCg, radioStripe, radioCallsignTxt, radioBodyTxt,
                 intelGroup, intelBodyText, intelBtn, intelCloseBtn, endedNarrative, endedAccent);
+
+            ui.BindCutsceneWidgets(
+                cinemaGroup, cinemaStampTxt, cinemaSpeakerTxt, cinemaDialogueTxt,
+                skipCutsceneBtn, objectiveText);
 
             return ui;
         }

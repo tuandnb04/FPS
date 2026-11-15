@@ -67,6 +67,7 @@ namespace TopDownShooter.Character
         [SerializeField] private MeshRenderer[] primarySkinRenderers;
 
         [Header("Stats")]
+        [SerializeField] private Vector3 campaignSpawnPosition = new Vector3(0f, 0.02f, -43f);
         [SerializeField] private float baseMoveSpeed = 7.4f;
         [SerializeField] private float dashSpeed = 20f;
         [SerializeField] private float dashDuration = 0.16f;
@@ -677,6 +678,26 @@ namespace TopDownShooter.Character
             }
         }
 
+        public void SetSpawnPosition(Vector3 pos)
+        {
+            campaignSpawnPosition = pos;
+        }
+
+        public void TeleportTo(Vector3 pos)
+        {
+            if (characterController != null)
+            {
+                characterController.enabled = false;
+                transform.position = pos;
+                characterController.enabled = true;
+            }
+            else
+            {
+                transform.position = pos;
+            }
+            TopDownCameraRig.Instance?.SnapToPlayerImmediate();
+        }
+
         public void ResetPlayer()
         {
             isDead = false;
@@ -701,12 +722,12 @@ namespace TopDownShooter.Character
             if (characterController != null)
             {
                 characterController.enabled = false;
-                transform.SetPositionAndRotation(new Vector3(0f, 0.02f, 0f), Quaternion.identity);
+                transform.SetPositionAndRotation(campaignSpawnPosition, Quaternion.identity);
                 characterController.enabled = true;
             }
             else
             {
-                transform.SetPositionAndRotation(new Vector3(0f, 0.02f, 0f), Quaternion.identity);
+                transform.SetPositionAndRotation(campaignSpawnPosition, Quaternion.identity);
             }
 
             weaponController?.ReturnAllActive();

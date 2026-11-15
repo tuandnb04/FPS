@@ -176,9 +176,17 @@ namespace TopDownShooter.Core
 
         public static string GetActLabel(int wave)
         {
-            if (wave <= 3) return "ACT I: PERIMETER BREACH";
-            if (wave <= 6) return "ACT II: FUEL DEPOT";
-            return "ACT III: IRON HARVEST";
+            if (wave <= 3) return "ACT I: SOUTH CHECKPOINT";
+            if (wave <= 6) return "ACT II: FUEL & CARGO DEPOT";
+            return "ACT III: NORTH COMMAND HELIPAD";
+        }
+
+        public static string GetSectorObjective(int wave)
+        {
+            if (wave <= 3) return "OBJ I // BREACH SOUTH CHECKPOINT";
+            if (wave <= 6) return "OBJ II // SEIZE CENTRAL FUEL DEPOT";
+            if (wave < FinalCampaignWave) return "OBJ III // ASSAULT NORTH COMMAND HQ";
+            return "FINAL OBJ // DESTROY IRONCLAD ALPHA AT HELIPAD";
         }
 
         public static string GetEndedDebrief(bool victory, int waveReached, int kills)
@@ -205,7 +213,7 @@ namespace TopDownShooter.Core
             StringBuilder sb = new StringBuilder(1024);
 
             sb.AppendLine("TASK FORCE BRIEFING // OPERATION IRON HARVEST");
-            sb.AppendLine("Location: Echo-7 Logistics Yard | Mission: Eliminate Kronos PMC garrison & Col. Volkov's Ironclad IFVs (Wave 9 Clear = Full Victory).");
+            sb.AppendLine("Location: Echo-7 3-Sector Compound (South Checkpoint -> Central Fuel Depot -> North Helipad HQ). Clear Wave 9 for EVAC-6 extraction.");
             sb.AppendLine();
 
             sb.AppendLine("[COMMAND & CALLSIGNS]");

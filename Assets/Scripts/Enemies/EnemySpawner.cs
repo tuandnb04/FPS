@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Pool;
 using TopDownShooter.Audio;
+using TopDownShooter.CameraRig;
 using TopDownShooter.Character;
 using TopDownShooter.Core;
 using TopDownShooter.Feel;
@@ -19,8 +20,14 @@ namespace TopDownShooter.Enemies
     {
         public static EnemySpawner Instance { get; private set; }
 
-        [Header("Arena Bounds")]
-        [SerializeField] private float arenaHalfExtent = 11.6f;
+        [Header("Campaign Sector Bounds (Echo-7)")]
+        [SerializeField] private float sector1HalfWidth = 25.0f;
+        [SerializeField] private float sector2HalfWidth = 34.5f;
+        [SerializeField] private float sector3HalfWidth = 26.5f;
+        [SerializeField] private float compoundMinZ = -49.5f;
+        [SerializeField] private float sector1MaxZ = -17.0f;
+        [SerializeField] private float sector2MaxZ = 19.0f;
+        [SerializeField] private float sector3MaxZ = 52.0f;
 
         [Header("Blender Custom Meshes (Assigned by SceneSetupBuilder)")]
         [SerializeField] private Mesh chaserTorsoMesh;
@@ -62,6 +69,7 @@ namespace TopDownShooter.Enemies
         private int remainingToSpawnInWave;
         private float spawnTimer;
         private float waveIntermissionTimer;
+        private bool waveTransitionPending;
 
         public int CurrentWave => currentWave;
         public int ActiveEnemyCount => activeEnemies.Count;
@@ -398,9 +406,19 @@ namespace TopDownShooter.Enemies
 
         public void BeginWave(int waveNum)
         {
+            waveTransitionPending = false;
             currentWave = Mathf.Max(1, waveNum);
             remainingToSpawnInWave = 5 + currentWave * 3;
             spawnTimer = 0.2f;
+
+            if (currentWave >= 4)
+            {
+                CutsceneDirector.Instance?.OpenGateImmediate(1);
+            }
+            if (currentWave >= 7)
+            {
+                CutsceneDirector.Instance?.OpenGateImmediate(2);
+            }
 
             if (currentWave > 1)
             {
@@ -409,9 +427,15 @@ namespace TopDownShooter.Enemies
 
             if (currentWave % 3 == 0)
             {
-                SpawnBossAt(PickSafeSpawnPosition());
+                Vector3 bossPos = GetCampaignBossSpawnPoint(currentWave);
+                SpawnBossAt(bossPos);
                 StoryDirector.NotifyBossSpawned(currentWave);
                 UIManager.Instance?.ShowMilestoneBanner("INCOMING // " + StoryDirector.GetBossCallsign(currentWave));
+
+                if (currentWave >= StoryDirector.FinalCampaignWave && GameManager.Instance != null && GameManager.Instance.CurrentState == GameState.Playing)
+                {
+                    GameManager.Instance.TriggerCutscene(CutsceneType.Act3BossVolkov);
+                }
             }
 
             UIManager.Instance?.UpdateWave(currentWave, remainingToSpawnInWave + activeEnemies.Count);
@@ -419,7 +443,7 @@ namespace TopDownShooter.Enemies
 
         private void Update()
         {
-            if (GameManager.Instance == null || GameManager.Instance.CurrentState != GameState.Playing)
+            if (waveTransitionPending || GameManager.Instance == null || GameManager.Instance.CurrentState != GameState.Playing)
             {
                 return;
             }
@@ -447,13 +471,35 @@ namespace TopDownShooter.Enemies
                     if (waveIntermissionTimer >= 0.9f)
                     {
                         waveIntermissionTimer = 0f;
+                        waveTransitionPending = true;
                         GameManager.Instance?.CompleteCampaignVictory();
                     }
                 }
                 else if (waveIntermissionTimer >= 1.4f)
                 {
                     waveIntermissionTimer = 0f;
-                    BeginWave(currentWave + 1);
+                    int nextWave = currentWave + 1;
+
+                    if (nextWave == 4 && GameManager.Instance != null)
+                    {
+                        waveTransitionPending = true;
+                        GameManager.Instance.TriggerCutscene(CutsceneType.Act2GateBreach, () =>
+                        {
+                            BeginWave(4);
+                            UIManager.Instance?.ShowMilestoneBanner(StoryDirector.GetActLabel(4) + " // WAVE 4");
+                        });
+                        return;
+                    }
+
+                    if (nextWave == 7)
+                    {
+                        CutsceneDirector.Instance?.OpenGateImmediate(2);
+                        VFXManager.Instance?.Play(VfxKind.EnemyDeath, new Vector3(0f, 1.6f, 22f), Palette.RocketOrange);
+                        FeelManager.Instance?.TriggerCameraShake(0.32f);
+                        AudioManager.Instance?.PlayEnemyExplode();
+                    }
+
+                    BeginWave(nextWave);
                     if (currentWave % 3 != 0)
                     {
                         UIManager.Instance?.ShowMilestoneBanner(StoryDirector.GetActLabel(currentWave) + " // WAVE " + currentWave);
@@ -598,32 +644,44 @@ namespace TopDownShooter.Enemies
             activePickups.Remove(item);
         }
 
+        private Vector3 GetCampaignBossSpawnPoint(int waveNum)
+        {
+            if (waveNum <= 3) return new Vector3(0f, 0f, -20.5f);
+            if (waveNum <= 6) return new Vector3(0f, 0f, 15.5f);
+            return new Vector3(0f, 0f, 42.0f);
+        }
+
         private Vector3 PickSafeSpawnPosition()
         {
-            Vector3 playerPos = PlayerController.Instance != null ? PlayerController.Instance.transform.position : Vector3.zero;
-            for (int attempt = 0; attempt < 24; attempt++)
-            {
-                int side = UnityEngine.Random.Range(0, 4);
-                float edge = arenaHalfExtent;
-                float along = UnityEngine.Random.Range(-edge, edge);
-                Vector3 candidate = side switch
-                {
-                    0 => new Vector3(along, 0f, edge),
-                    1 => new Vector3(along, 0f, -edge),
-                    2 => new Vector3(edge, 0f, along),
-                    _ => new Vector3(-edge, 0f, along)
-                };
+            Vector3 playerPos = PlayerController.Instance != null ? PlayerController.Instance.transform.position : new Vector3(0f, 0f, -43f);
 
+            float maxZ = currentWave <= 3 ? sector1MaxZ : (currentWave <= 6 ? sector2MaxZ : sector3MaxZ);
+            float minZ = currentWave <= 3 ? compoundMinZ : (playerPos.z > -10f ? -12f : compoundMinZ);
+
+            for (int attempt = 0; attempt < 36; attempt++)
+            {
+                float angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+                float dist = UnityEngine.Random.Range(10.5f, 20.5f);
+                float rawX = playerPos.x + Mathf.Cos(angle) * dist;
+                float rawZ = Mathf.Clamp(playerPos.z + Mathf.Sin(angle) * dist, minZ, maxZ);
+
+                float allowedHalfW = rawZ < -14f ? sector1HalfWidth : (rawZ <= 22f ? sector2HalfWidth : sector3HalfWidth);
+                Vector3 candidate = new Vector3(Mathf.Clamp(rawX, -allowedHalfW, allowedHalfW), 0f, rawZ);
+
+                if (Mathf.Abs(candidate.z - (-14f)) < 2.2f || Mathf.Abs(candidate.z - 22f) < 2.2f) continue;
                 if (Vector3.Distance(candidate, playerPos) < 8.0f) continue;
-                if (Physics.CheckSphere(candidate + Vector3.up * 0.9f, 0.75f, ~0, QueryTriggerInteraction.Ignore)) continue;
+                if (Physics.CheckSphere(candidate + Vector3.up * 0.9f, 0.85f, ~0, QueryTriggerInteraction.Ignore)) continue;
                 return candidate;
             }
-            return new Vector3(0f, 0f, arenaHalfExtent);
+
+            float fallbackZ = Mathf.Clamp(playerPos.z + 11f, compoundMinZ + 4f, maxZ - 2f);
+            return new Vector3(0f, 0f, fallbackZ);
         }
 
         public void ResetAndClearAll()
         {
             StopAllCoroutines();
+            waveTransitionPending = false;
             currentWave = 1;
             remainingToSpawnInWave = 0;
             spawnTimer = 0f;

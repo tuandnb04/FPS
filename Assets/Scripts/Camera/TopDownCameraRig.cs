@@ -18,19 +18,56 @@ namespace TopDownShooter.CameraRig
         [SerializeField] private float maxLookAheadDistance = 1.35f;
         [SerializeField] private float titleOrbitDegPerSec = 5f;
 
-        private CinemachineCamera vcam;
-        private CinemachineFollow follow;
-        private CinemachineImpulseListener impulseListener;
-        private Transform followProxy;
-        private Transform playerTarget;
+        [SerializeField, HideInInspector] private CinemachineCamera vcam;
+        [SerializeField, HideInInspector] private CinemachineFollow follow;
+        [SerializeField, HideInInspector] private CinemachineImpulseListener impulseListener;
+        [SerializeField, HideInInspector] private Transform followProxy;
+        [SerializeField, HideInInspector] private Transform playerTarget;
 
         private float titleOrbitAngle;
         private Vector3 currentLookAhead;
         private bool isTitleMode = true;
+        private bool cutsceneOverride;
+        private CinemachineBrain cachedBrain;
 
         public float ConfiguredDistance => baseFollowOffset.magnitude;
         public CinemachineCamera VirtualCamera => vcam;
         public CinemachineFollow FollowComponent => follow;
+        public bool IsCutsceneOverride => cutsceneOverride;
+
+        public void SetCutsceneOverride(bool active)
+        {
+            cutsceneOverride = active;
+            if (cachedBrain == null && Camera.main != null)
+            {
+                cachedBrain = Camera.main.GetComponent<CinemachineBrain>();
+            }
+            if (cachedBrain != null)
+            {
+                cachedBrain.enabled = !active;
+            }
+
+            if (!active)
+            {
+                if (Camera.main != null)
+                {
+                    Camera.main.fieldOfView = fieldOfView;
+                }
+                if (followProxy != null && playerTarget != null)
+                {
+                    followProxy.position = playerTarget.position + Vector3.up * 0.9f + currentLookAhead;
+                }
+                if (follow != null)
+                {
+                    follow.FollowOffset = baseFollowOffset;
+                }
+                if (vcam != null && followProxy != null)
+                {
+                    vcam.transform.position = followProxy.position + baseFollowOffset;
+                    SnapOrientationToOffset(baseFollowOffset);
+                }
+            }
+        }
 
         public void BindComponents(
             CinemachineCamera virtualCamera,
@@ -86,7 +123,21 @@ namespace TopDownShooter.CameraRig
             if (vcam == null) vcam = GetComponent<CinemachineCamera>();
             if (follow == null) follow = GetComponent<CinemachineFollow>();
             if (impulseListener == null) impulseListener = GetComponent<CinemachineImpulseListener>();
+            if (followProxy == null && vcam != null) followProxy = vcam.Target.TrackingTarget;
             ConfigureSettings();
+        }
+
+        public void SnapToPlayerImmediate()
+        {
+            if (followProxy == null && vcam != null) followProxy = vcam.Target.TrackingTarget;
+            if (followProxy == null || playerTarget == null) return;
+            followProxy.position = playerTarget.position + Vector3.up * 0.9f + currentLookAhead;
+            if (follow != null) follow.FollowOffset = baseFollowOffset;
+            if (vcam != null)
+            {
+                vcam.transform.position = followProxy.position + baseFollowOffset;
+                SnapOrientationToOffset(baseFollowOffset);
+            }
         }
 
         private void ConfigureSettings()
@@ -98,7 +149,7 @@ namespace TopDownShooter.CameraRig
 
             vcam.Lens.FieldOfView = fieldOfView;
             vcam.Lens.NearClipPlane = 0.3f;
-            vcam.Lens.FarClipPlane = 180f;
+            vcam.Lens.FarClipPlane = 260f;
 
             if (followProxy != null)
             {
@@ -131,7 +182,7 @@ namespace TopDownShooter.CameraRig
 
         private void LateUpdate()
         {
-            if (followProxy == null || follow == null || vcam == null)
+            if (cutsceneOverride || followProxy == null || follow == null || vcam == null)
             {
                 return;
             }

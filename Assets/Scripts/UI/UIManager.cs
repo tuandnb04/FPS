@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
 using TopDownShooter.Audio;
+using TopDownShooter.CameraRig;
 using TopDownShooter.Character;
 using TopDownShooter.Core;
 
@@ -17,7 +18,8 @@ namespace TopDownShooter.UI
         Paused,
         Ended,
         Armory,
-        LevelUpDraft
+        LevelUpDraft,
+        Cutscene
     }
 
     /// <summary>
@@ -121,6 +123,14 @@ namespace TopDownShooter.UI
         [SerializeField] private Button titleIntelButton;
         [SerializeField] private Button intelCloseButton;
 
+        [Header("Cutscene Cinema Letterbox & Objective")]
+        [SerializeField] private CanvasGroup cinemaOverlayGroup;
+        [SerializeField] private TextMeshProUGUI cinemaStampText;
+        [SerializeField] private TextMeshProUGUI cinemaSpeakerText;
+        [SerializeField] private TextMeshProUGUI cinemaDialogueText;
+        [SerializeField] private Button cinemaSkipButton;
+        [SerializeField] private TextMeshProUGUI objectiveBannerText;
+
         [Header("Core Navigation Buttons")]
         [SerializeField] private Button startButton;
         [SerializeField] private Button hudPauseButton;
@@ -151,6 +161,8 @@ namespace TopDownShooter.UI
         public bool IsRadioCommsVisible => radioCommsGroup != null && radioCommsGroup.alpha > 0.05f;
         public string LastDisplayedRadioCallsign { get; private set; } = string.Empty;
         public string LastDisplayedRadioBody { get; private set; } = string.Empty;
+        public bool IsCinemaOverlayVisible => cinemaOverlayGroup != null && cinemaOverlayGroup.alpha > 0.5f;
+        public string CurrentObjectiveText => objectiveBannerText != null ? objectiveBannerText.text : string.Empty;
         public bool IsBossBarVisible => bossBarRoot != null && bossBarRoot.gameObject.activeSelf;
         public static bool? ForceMobileControlsOverride { get; set; }
         public VirtualJoystick LeftJoystick => leftJoystick;
@@ -292,6 +304,22 @@ namespace TopDownShooter.UI
             endedAccentStripe = endedAccent;
         }
 
+        public void BindCutsceneWidgets(
+            CanvasGroup cinemaGroup,
+            TextMeshProUGUI stampText,
+            TextMeshProUGUI speakerText,
+            TextMeshProUGUI dialogueText,
+            Button skipButton,
+            TextMeshProUGUI objectiveText)
+        {
+            cinemaOverlayGroup = cinemaGroup;
+            cinemaStampText = stampText;
+            cinemaSpeakerText = speakerText;
+            cinemaDialogueText = dialogueText;
+            cinemaSkipButton = skipButton;
+            objectiveBannerText = objectiveText;
+        }
+
         private void Awake()
         {
             if (Instance != null && Instance != this)
@@ -346,7 +374,12 @@ namespace TopDownShooter.UI
             if (startButton != null)
             {
                 startButton.onClick.RemoveAllListeners();
-                startButton.onClick.AddListener(() => GameManager.Instance?.StartMission());
+                startButton.onClick.AddListener(() => GameManager.Instance?.DeployCampaign());
+            }
+            if (cinemaSkipButton != null)
+            {
+                cinemaSkipButton.onClick.RemoveAllListeners();
+                cinemaSkipButton.onClick.AddListener(() => CutsceneDirector.Instance?.SkipCurrentCutscene());
             }
             if (titleArmoryButton != null)
             {
@@ -582,6 +615,10 @@ namespace TopDownShooter.UI
             {
                 HideRadioCommsImmediate();
             }
+            if (state != GameState.Cutscene)
+            {
+                HideCutsceneOverlayImmediate();
+            }
             HideBossHp();
         }
 
@@ -697,6 +734,41 @@ namespace TopDownShooter.UI
         {
             if (waveText != null) waveText.text = "WAVE " + wave.ToString("00");
             if (enemiesText != null) enemiesText.text = enemiesRemaining + " HOSTILES";
+            UpdateObjective(StoryDirector.GetSectorObjective(wave));
+        }
+
+        public void UpdateObjective(string objectiveText)
+        {
+            if (objectiveBannerText != null)
+            {
+                objectiveBannerText.text = objectiveText;
+            }
+        }
+
+        public void ShowCutsceneOverlay()
+        {
+            if (cinemaOverlayGroup != null)
+            {
+                SetGroupState(cinemaOverlayGroup, 1f);
+            }
+            if (cinemaStampText != null) cinemaStampText.text = string.Empty;
+            if (cinemaSpeakerText != null) cinemaSpeakerText.text = string.Empty;
+            if (cinemaDialogueText != null) cinemaDialogueText.text = string.Empty;
+        }
+
+        public void HideCutsceneOverlayImmediate()
+        {
+            if (cinemaOverlayGroup != null)
+            {
+                SetGroupState(cinemaOverlayGroup, 0f);
+            }
+        }
+
+        public void UpdateCutsceneText(string stamp, string speaker, string dialogue)
+        {
+            if (cinemaStampText != null) cinemaStampText.text = stamp;
+            if (cinemaSpeakerText != null) cinemaSpeakerText.text = speaker;
+            if (cinemaDialogueText != null) cinemaDialogueText.text = dialogue;
         }
 
         public void UpdateScore(int score, int highScore)

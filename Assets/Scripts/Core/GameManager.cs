@@ -82,6 +82,10 @@ namespace TopDownShooter.Core
                 {
                     CloseArmory();
                 }
+                else if (currentState == GameState.Cutscene)
+                {
+                    CutsceneDirector.Instance?.SkipCurrentCutscene();
+                }
             }
         }
 
@@ -107,13 +111,37 @@ namespace TopDownShooter.Core
             UIManager.Instance?.TransitionToState(GameState.Title);
         }
 
+        public void DeployCampaign()
+        {
+            AudioManager.Instance?.PlayUIClick();
+            PrepareFreshMissionState();
+
+            if (CutsceneDirector.Instance != null)
+            {
+                currentState = GameState.Cutscene;
+                TopDownCameraRig.Instance?.SetTitleMode(false);
+                UIManager.Instance?.ApplyImmediateState(GameState.Cutscene);
+                CutsceneDirector.Instance.PlayCutscene(CutsceneType.IntroInfil, EnterCombatWaveOneAfterIntro);
+            }
+            else
+            {
+                EnterCombatWaveOneAfterIntro();
+            }
+        }
+
         public void StartMission()
         {
             AudioManager.Instance?.PlayUIClick();
-            AudioManager.Instance?.SetPausedDucking(false);
+            PrepareFreshMissionState();
+            EnterCombatWaveOneAfterIntro();
+        }
 
+        private void PrepareFreshMissionState()
+        {
+            AudioManager.Instance?.SetPausedDucking(false);
             FeelManager.Instance?.CancelHitStop();
             FeelManager.Instance?.ClearAllFloatingText();
+            CutsceneDirector.Instance?.ResetCampaignProps();
             EnemySpawner.Instance?.ResetAndClearAll();
             PlayerController.Instance?.ResetPlayer();
             StoryDirector.ResetCampaignRun();
@@ -123,16 +151,43 @@ namespace TopDownShooter.Core
             kills = 0;
             runCreditsEarned = 0;
             Time.timeScale = 1f;
-            currentState = GameState.Playing;
 
             SaveManager save = SaveManager.EnsureInstance();
-            TopDownCameraRig.Instance?.SetTitleMode(false);
             UIManager.Instance?.UpdateScore(score, highScore);
             UIManager.Instance?.UpdateCredits(save.Data.credits, 0);
             UIManager.Instance?.RefreshWeaponBar();
+        }
+
+        private void EnterCombatWaveOneAfterIntro()
+        {
+            currentState = GameState.Playing;
+            TopDownCameraRig.Instance?.SetTitleMode(false);
             UIManager.Instance?.TransitionToState(GameState.Playing);
             StoryDirector.NotifyMissionDeployed();
             EnemySpawner.Instance?.BeginWave(1);
+        }
+
+        public void TriggerCutscene(CutsceneType cutsceneType, System.Action onComplete = null)
+        {
+            if (currentState == GameState.Ended) return;
+            if (CutsceneDirector.Instance == null)
+            {
+                onComplete?.Invoke();
+                return;
+            }
+
+            FeelManager.Instance?.CancelHitStop();
+            currentState = GameState.Cutscene;
+            UIManager.Instance?.ApplyImmediateState(GameState.Cutscene);
+            CutsceneDirector.Instance.PlayCutscene(cutsceneType, () =>
+            {
+                if (currentState != GameState.Ended)
+                {
+                    currentState = GameState.Playing;
+                    UIManager.Instance?.TransitionToState(GameState.Playing);
+                }
+                onComplete?.Invoke();
+            });
         }
 
         public void OpenLevelUpDraft()
@@ -214,6 +269,21 @@ namespace TopDownShooter.Core
         public void CompleteCampaignVictory()
         {
             if (currentState == GameState.Ended) return;
+            if (CutsceneDirector.Instance != null)
+            {
+                currentState = GameState.Cutscene;
+                UIManager.Instance?.ApplyImmediateState(GameState.Cutscene);
+                CutsceneDirector.Instance.PlayCutscene(CutsceneType.VictoryEvac, FinishCampaignVictoryImmediate);
+            }
+            else
+            {
+                FinishCampaignVictoryImmediate();
+            }
+        }
+
+        public void FinishCampaignVictoryImmediate()
+        {
+            if (currentState == GameState.Ended) return;
             AddRunCredits(StoryDirector.CampaignVictoryBonusCredits);
             EndMission(true);
         }
@@ -230,6 +300,7 @@ namespace TopDownShooter.Core
 
             FeelManager.Instance?.CancelHitStop();
             FeelManager.Instance?.ClearAllFloatingText();
+            CutsceneDirector.Instance?.ResetCampaignProps();
             EnemySpawner.Instance?.ResetAndClearAll();
             PlayerController.Instance?.ResetPlayer();
             StoryDirector.ResetCampaignRun();
