@@ -42,6 +42,8 @@ namespace TopDownShooter.Editor
             public Mesh PlayerHelmet;
             public Mesh PlayerVisor;
             public Mesh PlayerLimb;
+            public Mesh PlayerUpperArm;
+            public Mesh PlayerForearm;
             public Mesh PlayerJetpack;
 
             public Mesh WeaponPulseRifle;
@@ -55,6 +57,7 @@ namespace TopDownShooter.Editor
             public Mesh HeavyCrown;
             public Mesh BossTorso;
             public Mesh BossTurret;
+            public Mesh EnemyArm;
 
             public Mesh TacticalCrate;
             public Mesh EnergyPylon;
@@ -142,7 +145,8 @@ namespace TopDownShooter.Editor
                 meshes.PlayerLimb,
                 meshes.PickupXpCrystal,
                 meshes.PickupMedkit,
-                meshes.PickupCreditCoin);
+                meshes.PickupCreditCoin,
+                meshes.EnemyArm);
 
             UIManager ui = BuildGameCanvasAndUI(systemsRoot, solidSprite, roundedSprite, shieldSprite, crosshairSprite, circleSprite);
             systemsRoot.AddComponent<GameManager>();
@@ -195,6 +199,8 @@ namespace TopDownShooter.Editor
             pack.PlayerHelmet = Get("Mesh_PlayerHelmet");
             pack.PlayerVisor = Get("Mesh_PlayerVisor");
             pack.PlayerLimb = Get("Mesh_PlayerLimb");
+            pack.PlayerUpperArm = Get("Mesh_PlayerUpperArm");
+            pack.PlayerForearm = Get("Mesh_PlayerForearm");
             pack.PlayerJetpack = Get("Mesh_PlayerJetpack");
 
             pack.WeaponPulseRifle = Get("Mesh_Weapon_PulseRifle");
@@ -208,6 +214,7 @@ namespace TopDownShooter.Editor
             pack.HeavyCrown = Get("Mesh_HeavyCrown");
             pack.BossTorso = Get("Mesh_BossTorso");
             pack.BossTurret = Get("Mesh_BossTurret");
+            pack.EnemyArm = Get("Mesh_EnemyArm");
 
             pack.TacticalCrate = Get("Mesh_TacticalCrate");
             pack.EnergyPylon = Get("Mesh_EnergyPylon");
@@ -733,7 +740,7 @@ namespace TopDownShooter.Editor
             // Operator Plate Carrier & Combat Torso (Blender custom meshes)
             Material matWeaponSteel = SaveOrUpdateLitMaterial("Mat_WeaponSteel", Palette.Gunmetal, 0.78f, 0.56f, false, 0f);
             GameObject torsoGo = CreateVisualMeshFit("Torso", meshes.PlayerTorso, PrimitiveType.Cube, visualRoot.transform, new Vector3(0f, 1.05f, 0f), new Vector3(0.58f, 0.58f, 0.38f), matPrimary);
-            CreateVisualMeshFit("ChestRig", meshes.PlayerChestRig, PrimitiveType.Cube, visualRoot.transform, new Vector3(0f, 1.12f, 0.06f), new Vector3(0.64f, 0.36f, 0.40f), matSecondary);
+            CreateVisualMeshFit("ChestRig", meshes.PlayerChestRig, PrimitiveType.Cube, visualRoot.transform, new Vector3(0f, 1.11f, 0.04f), new Vector3(0.62f, 0.36f, 0.34f), matSecondary);
 
             // FAST Tactical Helmet & NVG Goggles
             GameObject headPivot = new GameObject("HeadPivot");
@@ -743,34 +750,54 @@ namespace TopDownShooter.Editor
             CreateVisualMeshFit("TacticalVisor", meshes.PlayerVisor, PrimitiveType.Cube, headPivot.transform, new Vector3(0f, 0.02f, 0.22f), new Vector3(0.36f, 0.12f, 0.14f), matCyan);
             CreateVisualPrimitive("Antenna", PrimitiveType.Cylinder, headPivot.transform, new Vector3(0.18f, 0.14f, -0.10f), new Vector3(0.018f, 0.10f, 0.018f), matWeaponSteel);
 
-            // Left & Right Arms
-            GameObject leftArmPivot = new GameObject("LeftArmPivot");
-            leftArmPivot.transform.SetParent(visualRoot.transform, false);
-            leftArmPivot.transform.localPosition = new Vector3(-0.38f, 1.24f, 0f);
-            CreateVisualPrimitive("LeftShoulder", PrimitiveType.Cube, leftArmPivot.transform, new Vector3(-0.02f, -0.02f, 0f), new Vector3(0.22f, 0.20f, 0.24f), matSecondary);
-            GameObject leftForearmGo = CreateVisualMeshFit("LeftForearm", meshes.PlayerLimb, PrimitiveType.Capsule, leftArmPivot.transform, new Vector3(0f, -0.24f, 0.08f), new Vector3(0.17f, 0.44f, 0.17f), matPrimary);
+            // Articulated Two-Bone Tactical Arms + Gloved Hands (UpperArm 0.34m + Forearm/Glove 0.35m)
+            Transform leftArmPivot = BuildOperatorArm(
+                "Left", visualRoot.transform, new Vector3(-0.28f, 1.24f, 0.07f),
+                meshes.PlayerUpperArm, meshes.PlayerForearm, matPrimary, matWeaponSteel,
+                out Transform leftElbowPivot, out MeshRenderer leftUpperRenderer, out MeshRenderer leftForearmRenderer);
 
-            GameObject rightArmPivot = new GameObject("RightArmPivot");
-            rightArmPivot.transform.SetParent(visualRoot.transform, false);
-            rightArmPivot.transform.localPosition = new Vector3(0.38f, 1.24f, 0f);
-            CreateVisualPrimitive("RightShoulder", PrimitiveType.Cube, rightArmPivot.transform, new Vector3(0.02f, -0.02f, 0f), new Vector3(0.22f, 0.20f, 0.24f), matSecondary);
-            GameObject rightForearmGo = CreateVisualMeshFit("RightForearm", meshes.PlayerLimb, PrimitiveType.Capsule, rightArmPivot.transform, new Vector3(0f, -0.24f, 0.12f), new Vector3(0.17f, 0.44f, 0.17f), matPrimary);
+            Transform rightArmPivot = BuildOperatorArm(
+                "Right", visualRoot.transform, new Vector3(0.30f, 1.24f, -0.02f),
+                meshes.PlayerUpperArm, meshes.PlayerForearm, matPrimary, matWeaponSteel,
+                out Transform rightElbowPivot, out MeshRenderer rightUpperRenderer, out MeshRenderer rightForearmRenderer);
 
-            // 4 Switchable Modern Military Firearms mounted under WeaponAnchor
+            // 4 Switchable Modern Military Firearms mounted under WeaponAnchor with exact grip & muzzle nodes
             GameObject weaponAnchor = new GameObject("WeaponAnchor");
             weaponAnchor.transform.SetParent(visualRoot.transform, false);
-            weaponAnchor.transform.localPosition = new Vector3(0.24f, 1.04f, 0.34f);
+            weaponAnchor.transform.localPosition = new Vector3(0.13f, 1.17f, 0.46f);
 
             GameObject[] weaponVisuals = new GameObject[4];
-            weaponVisuals[0] = BuildWeaponModel("Weapon_PulseRifle", weaponAnchor.transform, meshes.WeaponPulseRifle, new Vector3(0.14f, 0.24f, 0.86f), matWeaponSteel, matSecondary);
-            weaponVisuals[1] = BuildWeaponModel("Weapon_Shotgun", weaponAnchor.transform, meshes.WeaponShotgun, new Vector3(0.16f, 0.24f, 0.78f), matWeaponSteel, matSecondary);
-            weaponVisuals[2] = BuildWeaponModel("Weapon_Railgun", weaponAnchor.transform, meshes.WeaponRailgun, new Vector3(0.16f, 0.24f, 1.12f), matWeaponSteel, matPrimary);
-            weaponVisuals[3] = BuildWeaponModel("Weapon_Rocket", weaponAnchor.transform, meshes.WeaponRocket, new Vector3(0.26f, 0.28f, 0.96f), matPrimary, matWeaponSteel);
-            weapon.BindWeaponVisuals(weaponVisuals);
+            Transform[] weaponLeftGrips = new Transform[4];
+            Transform[] weaponRightGrips = new Transform[4];
+            Transform[] weaponMuzzleTips = new Transform[4];
+
+            weaponVisuals[0] = BuildWeaponModel(
+                "Weapon_PulseRifle", weaponAnchor.transform, meshes.WeaponPulseRifle, 0.65f,
+                Vector3.zero, new Vector3(2f, -16f, -4f), matWeaponSteel,
+                new Vector3(0f, -0.028f, 0.215f), new Vector3(0f, -0.060f, -0.033f), new Vector3(0f, 0.020f, 0.555f),
+                out weaponLeftGrips[0], out weaponRightGrips[0], out weaponMuzzleTips[0]);
+
+            weaponVisuals[1] = BuildWeaponModel(
+                "Weapon_Shotgun", weaponAnchor.transform, meshes.WeaponShotgun, 0.68f,
+                Vector3.zero, new Vector3(2f, -16f, -4f), matWeaponSteel,
+                new Vector3(0f, -0.012f, 0.225f), new Vector3(0f, -0.060f, -0.055f), new Vector3(0f, 0.030f, 0.515f),
+                out weaponLeftGrips[1], out weaponRightGrips[1], out weaponMuzzleTips[1]);
+
+            weaponVisuals[2] = BuildWeaponModel(
+                "Weapon_Railgun", weaponAnchor.transform, meshes.WeaponRailgun, 0.66f,
+                new Vector3(0f, 0f, -0.02f), new Vector3(2f, -16f, -4f), matWeaponSteel,
+                new Vector3(0f, -0.010f, 0.225f), new Vector3(0f, -0.058f, -0.052f), new Vector3(0f, 0.020f, 0.690f),
+                out weaponLeftGrips[2], out weaponRightGrips[2], out weaponMuzzleTips[2]);
+
+            weaponVisuals[3] = BuildWeaponModel(
+                "Weapon_Rocket", weaponAnchor.transform, meshes.WeaponRocket, 0.85f,
+                new Vector3(0.14f, 0.21f, -0.14f), new Vector3(0f, -2f, 0f), matPrimary,
+                new Vector3(0f, -0.068f, 0.136f), new Vector3(0f, -0.068f, -0.034f), new Vector3(0f, 0.025f, 0.595f),
+                out weaponLeftGrips[3], out weaponRightGrips[3], out weaponMuzzleTips[3]);
 
             GameObject muzzlePoint = new GameObject("MuzzlePoint");
             muzzlePoint.transform.SetParent(weaponAnchor.transform, false);
-            muzzlePoint.transform.localPosition = new Vector3(0f, 0.02f, 0.74f);
+            muzzlePoint.transform.SetPositionAndRotation(weaponMuzzleTips[0].position, weaponMuzzleTips[0].rotation);
 
             // Legs
             GameObject leftLegPivot = new GameObject("LeftLegPivot");
@@ -789,41 +816,133 @@ namespace TopDownShooter.Editor
             secondaryPivot.transform.localPosition = new Vector3(0f, 1.10f, -0.24f);
             CreateVisualMeshFit("JetpackBody", meshes.PlayerJetpack, PrimitiveType.Cube, secondaryPivot.transform, Vector3.zero, new Vector3(0.38f, 0.44f, 0.22f), matSecondary);
 
-            motion.BindPivots(visualRoot.transform, headPivot.transform, leftArmPivot.transform, rightArmPivot.transform, leftLegPivot.transform, rightLegPivot.transform, secondaryPivot.transform);
+            motion.BindPivots(visualRoot.transform, headPivot.transform, leftArmPivot, rightArmPivot, leftLegPivot.transform, rightLegPivot.transform, secondaryPivot.transform);
+            motion.BindWeaponArmIk(leftElbowPivot, rightElbowPivot, weaponAnchor.transform, weaponLeftGrips[0], weaponRightGrips[0], 0.34f, 0.35f);
+            weapon.BindReferences(muzzlePoint.transform, motion, null);
+            weapon.BindWeaponVisuals(weaponVisuals);
+            weapon.BindWeaponGrips(weaponLeftGrips, weaponRightGrips, weaponMuzzleTips);
+
             MeshRenderer[] primaryArmorParts = new[]
             {
                 torsoGo.GetComponent<MeshRenderer>(),
                 helmetGo.GetComponent<MeshRenderer>(),
-                leftForearmGo.GetComponent<MeshRenderer>(),
-                rightForearmGo.GetComponent<MeshRenderer>()
+                leftUpperRenderer,
+                leftForearmRenderer,
+                rightUpperRenderer,
+                rightForearmRenderer
             };
             player.BindComponents(inputAsset, cc, motion, weapon, root.GetComponentsInChildren<MeshRenderer>(true), primaryArmorParts);
 
             return player;
         }
 
+        private static Transform BuildOperatorArm(
+            string side,
+            Transform visualRoot,
+            Vector3 shoulderLocalPos,
+            Mesh upperArmMesh,
+            Mesh forearmMesh,
+            Material matSleeve,
+            Material matGlove,
+            out Transform elbowPivotOut,
+            out MeshRenderer upperRendererOut,
+            out MeshRenderer forearmRendererOut)
+        {
+            GameObject armPivot = new GameObject(side + "ArmPivot");
+            armPivot.transform.SetParent(visualRoot, false);
+            armPivot.transform.localPosition = shoulderLocalPos;
+
+            GameObject upperGo;
+            if (upperArmMesh != null)
+            {
+                upperGo = new GameObject(side + "UpperArm");
+                upperGo.transform.SetParent(armPivot.transform, false);
+                upperGo.transform.localPosition = Vector3.zero;
+                upperGo.transform.localScale = new Vector3(1.06f, 0.34f / 0.295f, 1.06f);
+                upperGo.AddComponent<MeshFilter>().sharedMesh = upperArmMesh;
+                upperRendererOut = upperGo.AddComponent<MeshRenderer>();
+                upperRendererOut.sharedMaterial = matSleeve;
+            }
+            else
+            {
+                upperGo = CreateVisualPrimitive(side + "UpperArm", PrimitiveType.Capsule, armPivot.transform, new Vector3(0f, -0.17f, 0f), new Vector3(0.14f, 0.18f, 0.14f), matSleeve);
+                upperRendererOut = upperGo.GetComponent<MeshRenderer>();
+            }
+
+            GameObject elbowPivot = new GameObject(side + "ElbowPivot");
+            elbowPivot.transform.SetParent(armPivot.transform, false);
+            elbowPivot.transform.localPosition = new Vector3(0f, -0.34f, 0f);
+            elbowPivotOut = elbowPivot.transform;
+
+            GameObject forearmGo;
+            if (forearmMesh != null)
+            {
+                forearmGo = new GameObject(side + "Forearm");
+                forearmGo.transform.SetParent(elbowPivot.transform, false);
+                forearmGo.transform.localPosition = Vector3.zero;
+                forearmGo.transform.localScale = new Vector3(1.04f, 0.30f / 0.25f, 1.04f);
+                forearmGo.AddComponent<MeshFilter>().sharedMesh = forearmMesh;
+                forearmRendererOut = forearmGo.AddComponent<MeshRenderer>();
+                forearmRendererOut.sharedMaterial = matSleeve;
+            }
+            else
+            {
+                forearmGo = CreateVisualPrimitive(side + "Forearm", PrimitiveType.Capsule, elbowPivot.transform, new Vector3(0f, -0.15f, 0f), new Vector3(0.12f, 0.16f, 0.12f), matSleeve);
+                forearmRendererOut = forearmGo.GetComponent<MeshRenderer>();
+            }
+
+            CreateVisualBox(side + "Glove", elbowPivot.transform, new Vector3(0f, -0.335f, 0f), new Vector3(0.085f, 0.09f, 0.095f), matGlove);
+            return armPivot.transform;
+        }
+
         private static GameObject BuildWeaponModel(
             string name,
             Transform anchor,
             Mesh weaponMesh,
-            Vector3 targetSize,
+            float uniformScale,
+            Vector3 localOffset,
+            Vector3 localEuler,
             Material matBody,
-            Material matGlow)
+            Vector3 leftGripLocal,
+            Vector3 rightGripLocal,
+            Vector3 muzzleLocal,
+            out Transform leftGripOut,
+            out Transform rightGripOut,
+            out Transform muzzleOut)
         {
             GameObject container = new GameObject(name);
             container.transform.SetParent(anchor, false);
-            container.transform.localPosition = Vector3.zero;
+            container.transform.localPosition = localOffset;
+            container.transform.localRotation = Quaternion.Euler(localEuler);
 
             if (weaponMesh != null)
             {
-                CreateVisualMeshFit("MeshBody", weaponMesh, PrimitiveType.Cube, container.transform, new Vector3(0f, 0f, 0.22f), targetSize, matBody, true);
-                CreateVisualPrimitive("ButtstockAccent", PrimitiveType.Cube, container.transform, new Vector3(0f, 0f, -0.06f), new Vector3(targetSize.x * 0.42f, targetSize.y * 0.34f, targetSize.z * 0.18f), matGlow);
+                GameObject body = new GameObject("MeshBody");
+                body.transform.SetParent(container.transform, false);
+                body.transform.localPosition = Vector3.zero;
+                body.transform.localScale = Vector3.one * uniformScale;
+                body.AddComponent<MeshFilter>().sharedMesh = weaponMesh;
+                body.AddComponent<MeshRenderer>().sharedMaterial = matBody;
             }
             else
             {
-                CreateVisualPrimitive("Receiver", PrimitiveType.Cube, container.transform, new Vector3(0f, 0f, 0.16f), new Vector3(targetSize.x, targetSize.y, targetSize.z * 0.85f), matBody);
-                CreateVisualPrimitive("BarrelSteel", PrimitiveType.Cube, container.transform, new Vector3(0f, 0.04f, 0.36f), new Vector3(targetSize.x * 0.35f, 0.05f, targetSize.z * 0.55f), matGlow);
+                CreateVisualPrimitive("Receiver", PrimitiveType.Cube, container.transform, new Vector3(0f, 0f, 0.16f), new Vector3(0.10f, 0.16f, 0.60f), matBody);
             }
+
+            GameObject leftGrip = new GameObject("LeftHandGrip");
+            leftGrip.transform.SetParent(container.transform, false);
+            leftGrip.transform.localPosition = leftGripLocal;
+            leftGripOut = leftGrip.transform;
+
+            GameObject rightGrip = new GameObject("RightHandGrip");
+            rightGrip.transform.SetParent(container.transform, false);
+            rightGrip.transform.localPosition = rightGripLocal;
+            rightGripOut = rightGrip.transform;
+
+            GameObject muzzleTip = new GameObject("MuzzleTip");
+            muzzleTip.transform.SetParent(container.transform, false);
+            muzzleTip.transform.localPosition = muzzleLocal;
+            muzzleOut = muzzleTip.transform;
 
             return container;
         }

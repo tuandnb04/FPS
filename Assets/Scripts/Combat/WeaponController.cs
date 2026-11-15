@@ -38,7 +38,10 @@ namespace TopDownShooter.Combat
         private float fireCooldown;
         private int weaponTier = 1;
         private WeaponType currentWeapon = WeaponType.PulseRifle;
-        private GameObject[] weaponVisuals = new GameObject[4];
+        [SerializeField] private GameObject[] weaponVisuals = new GameObject[4];
+        [SerializeField] private Transform[] weaponLeftGrips = new Transform[4];
+        [SerializeField] private Transform[] weaponRightGrips = new Transform[4];
+        [SerializeField] private Transform[] weaponMuzzleTips = new Transform[4];
 
         // Meta + Roguelite modifiers
         private float permanentDamageMult = 1f;
@@ -60,6 +63,14 @@ namespace TopDownShooter.Combat
         {
             if (visuals == null) return;
             weaponVisuals = visuals;
+            RefreshWeaponVisuals();
+        }
+
+        public void BindWeaponGrips(Transform[] leftGrips, Transform[] rightGrips, Transform[] muzzleTips)
+        {
+            if (leftGrips != null) weaponLeftGrips = leftGrips;
+            if (rightGrips != null) weaponRightGrips = rightGrips;
+            if (muzzleTips != null) weaponMuzzleTips = muzzleTips;
             RefreshWeaponVisuals();
         }
 
@@ -145,12 +156,23 @@ namespace TopDownShooter.Combat
         private void RefreshWeaponVisuals()
         {
             if (weaponVisuals == null) return;
+            int idx = (int)currentWeapon;
             for (int i = 0; i < weaponVisuals.Length; i++)
             {
                 if (weaponVisuals[i] != null)
                 {
-                    weaponVisuals[i].SetActive(i == (int)currentWeapon);
+                    weaponVisuals[i].SetActive(i == idx);
                 }
+            }
+
+            Transform leftGrip = (weaponLeftGrips != null && idx >= 0 && idx < weaponLeftGrips.Length) ? weaponLeftGrips[idx] : null;
+            Transform rightGrip = (weaponRightGrips != null && idx >= 0 && idx < weaponRightGrips.Length) ? weaponRightGrips[idx] : null;
+            characterMotion?.SetWeaponGripTargets(leftGrip, rightGrip);
+
+            Transform muzzleTip = (weaponMuzzleTips != null && idx >= 0 && idx < weaponMuzzleTips.Length) ? weaponMuzzleTips[idx] : null;
+            if (muzzlePoint != null && muzzleTip != null)
+            {
+                muzzlePoint.SetPositionAndRotation(muzzleTip.position, muzzleTip.rotation);
             }
         }
 
@@ -190,6 +212,7 @@ namespace TopDownShooter.Combat
                     VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.Accent);
                     FeelManager.Instance?.TriggerCameraShake(0.16f);
                     characterMotion?.TriggerSquash(new Vector3(1.16f, 0.88f, 0.86f), 0.13f);
+                    characterMotion?.TriggerWeaponRecoil(new Vector3(0f, 0.014f, -0.075f));
                     break;
                 }
                 case WeaponType.PlasmaRailgun:
@@ -206,6 +229,7 @@ namespace TopDownShooter.Combat
                     VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.RailgunCyan);
                     FeelManager.Instance?.TriggerCameraShake(0.20f);
                     characterMotion?.TriggerSquash(new Vector3(1.14f, 0.90f, 0.88f), 0.14f);
+                    characterMotion?.TriggerWeaponRecoil(new Vector3(0f, 0.012f, -0.068f));
                     break;
                 }
                 case WeaponType.HellfireLauncher:
@@ -222,6 +246,7 @@ namespace TopDownShooter.Combat
                     VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.RocketOrange);
                     FeelManager.Instance?.TriggerCameraShake(0.22f);
                     characterMotion?.TriggerSquash(new Vector3(1.18f, 0.86f, 0.86f), 0.16f);
+                    characterMotion?.TriggerWeaponRecoil(new Vector3(0f, 0.015f, -0.090f));
                     break;
                 }
                 default: // M4A1 Carbine
@@ -241,6 +266,7 @@ namespace TopDownShooter.Combat
                     VFXManager.Instance?.Play(VfxKind.MuzzleFlash, spawnPos, Palette.Accent);
                     FeelManager.Instance?.TriggerCameraShake(0.07f);
                     characterMotion?.TriggerSquash(new Vector3(1.10f, 0.92f, 0.90f), 0.10f);
+                    characterMotion?.TriggerWeaponRecoil(new Vector3(0f, 0.005f, -0.042f));
                     break;
                 }
             }

@@ -30,6 +30,7 @@ namespace TopDownShooter.Enemies
         [SerializeField] private Mesh bossTorsoMesh;
         [SerializeField] private Mesh bossTurretMesh;
         [SerializeField] private Mesh limbMesh;
+        [SerializeField] private Mesh enemyArmMesh;
         [SerializeField] private Mesh xpCrystalMesh;
         [SerializeField] private Mesh medkitMesh;
         [SerializeField] private Mesh creditCoinMesh;
@@ -66,7 +67,8 @@ namespace TopDownShooter.Enemies
             Mesh heavyTorso, Mesh heavyCrown,
             Mesh bossTorso, Mesh bossTurret,
             Mesh limb,
-            Mesh xpShard, Mesh medkit, Mesh creditCoin)
+            Mesh xpShard, Mesh medkit, Mesh creditCoin,
+            Mesh enemyArm = null)
         {
             chaserTorsoMesh = chaserTorso;
             chaserHeadMesh = chaserHead;
@@ -75,6 +77,7 @@ namespace TopDownShooter.Enemies
             bossTorsoMesh = bossTorso;
             bossTurretMesh = bossTurret;
             limbMesh = limb;
+            enemyArmMesh = enemyArm;
             xpCrystalMesh = xpShard;
             medkitMesh = medkit;
             creditCoinMesh = creditCoin;
@@ -169,15 +172,19 @@ namespace TopDownShooter.Enemies
             GameObject heavyHeadObj = CreatePartWithMesh("HeavyCrown", heavyCrownMesh, PrimitiveType.Cube, headPivot.transform, new Vector3(0f, 0.06f, 0f), heavyCrownMesh != null ? Vector3.one : new Vector3(0.56f, 0.24f, 0.50f), enemySecondaryMat);
             heavyHeadObj.SetActive(false);
 
+            Mesh armMesh = enemyArmMesh != null ? enemyArmMesh : limbMesh;
+            Vector3 armOffset = enemyArmMesh != null ? Vector3.zero : new Vector3(0f, -0.22f, 0.08f);
+            Vector3 armScale = enemyArmMesh != null ? new Vector3(1.05f, 1.0f, 1.05f) : (armMesh != null ? new Vector3(0.85f, 0.72f, 0.85f) : new Vector3(0.20f, 0.26f, 0.20f));
+
             GameObject leftArmPivot = new GameObject("LeftArmPivot");
             leftArmPivot.transform.SetParent(visualRoot.transform, false);
-            leftArmPivot.transform.localPosition = new Vector3(-0.46f, 1.15f, 0f);
-            CreatePartWithMesh("LeftArm", limbMesh, PrimitiveType.Capsule, leftArmPivot.transform, new Vector3(0f, -0.22f, 0.08f), limbMesh != null ? new Vector3(0.85f, 0.72f, 0.85f) : new Vector3(0.20f, 0.26f, 0.20f), enemyPrimaryMat);
+            leftArmPivot.transform.localPosition = new Vector3(-0.42f, 1.15f, 0f);
+            CreatePartWithMesh("LeftArm", armMesh, PrimitiveType.Capsule, leftArmPivot.transform, armOffset, armScale, enemyPrimaryMat);
 
             GameObject rightArmPivot = new GameObject("RightArmPivot");
             rightArmPivot.transform.SetParent(visualRoot.transform, false);
-            rightArmPivot.transform.localPosition = new Vector3(0.46f, 1.15f, 0f);
-            CreatePartWithMesh("RightArm", limbMesh, PrimitiveType.Capsule, rightArmPivot.transform, new Vector3(0f, -0.22f, 0.08f), limbMesh != null ? new Vector3(0.85f, 0.72f, 0.85f) : new Vector3(0.20f, 0.26f, 0.20f), enemyPrimaryMat);
+            rightArmPivot.transform.localPosition = new Vector3(0.42f, 1.15f, 0f);
+            CreatePartWithMesh("RightArm", armMesh, PrimitiveType.Capsule, rightArmPivot.transform, armOffset, armScale, enemyPrimaryMat);
 
             GameObject leftLegPivot = new GameObject("LeftLegPivot");
             leftLegPivot.transform.SetParent(visualRoot.transform, false);
