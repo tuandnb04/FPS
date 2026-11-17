@@ -126,6 +126,17 @@ namespace Character
 
         public float MaxHp { get; private set; } = 100f;
 
+        public float CurrentArmor { get; private set; } = 50f;
+
+        public float MaxArmor { get; private set; } = 50f;
+
+        public int TraumaKits { get; private set; } = 2;
+        private const int MaxTraumaKits = 4;
+
+        public int CurrentHeartRateBpm { get; private set; } = 74;
+        private float _smoothedBpm = 74f;
+        private float _armorCooldownTimer;
+
         private int CurrentXp { get; set; }
 
         private int XpToNextLevel { get; set; } = 100;
@@ -488,14 +499,14 @@ namespace Character
             {
                 case 3 when !IsUavReconActive:
                     IsUavReconActive = true;
-                    StoryDirector.NotifyKillstreakReady("3-Kill Streak: UAV Recon Online — all sector hostiles sweeping on tactical radar!");
-                    UIManager.Instance?.ShowMilestoneBanner("KILLSTREAK // UAV RECON ONLINE");
+                    StoryDirector.NotifyKillstreakReady("Reaper-04 ISR Drone now sweeping hostile transponders on ATAK grid.");
+                    UIManager.Instance?.ShowMilestoneBanner("ISR LINK // REAPER-04 OVERWATCH ACTIVE");
                     AudioManager.Instance?.PlayMilestoneSting();
                     break;
                 case >= 5 when KillStreakCount % 5 == 0 && MortarStrikeCharges < 2:
                     MortarStrikeCharges++;
-                    StoryDirector.NotifyKillstreakReady($"{KillStreakCount}-Kill Streak: Mortar Strike ready — press [F] for danger-close barrage!");
-                    UIManager.Instance?.ShowMilestoneBanner("KILLSTREAK // MORTAR STRIKE [F]");
+                    StoryDirector.NotifyKillstreakReady($"{KillStreakCount} Confirmed KIA: 155mm Battery cleared for Fire Mission [F]!");
+                    UIManager.Instance?.ShowMilestoneBanner("CAS 155MM // FIRE MISSION AUTHORIZED [F]");
                     AudioManager.Instance?.PlayMilestoneSting();
                     break;
             }
@@ -505,7 +516,7 @@ namespace Character
             {
                 Heal(4f * siphonRank);
             }
-            UIManager.Instance?.UpdateEquipmentHud(FragGrenades, MortarStrikeCharges, KillStreakCount, IsUavReconActive, IsRegeneratingHealth);
+            UIManager.Instance?.UpdateEquipmentHud(FragGrenades, MortarStrikeCharges, KillStreakCount, IsUavReconActive, IsRegeneratingHealth, TraumaKits);
         }
 
         private void Update()
@@ -531,6 +542,7 @@ namespace Character
 
             if (_invulnTimer > 0f) _invulnTimer -= dt;
             if (_grenadeCooldownTimer > 0f) _grenadeCooldownTimer = Mathf.Max(0f, _grenadeCooldownTimer - dt);
+            if (_armorCooldownTimer > 0f) _armorCooldownTimer = Mathf.Max(0f, _armorCooldownTimer - dt);
             if (_dashCooldownTimer > 0f)
             {
                 _dashCooldownTimer = Mathf.Max(0f, _dashCooldownTimer - dt);
@@ -560,12 +572,23 @@ namespace Character
             var hitPulse = Mathf.Clamp01(_damageFlashTimer / 0.14f);
             var vignetteAlpha = Mathf.Clamp01(Mathf.Max(hitPulse * 0.72f, lowHpFactor * (0.60f + 0.18f * Mathf.Sin(Time.time * 5.5f))));
             UIManager.Instance?.UpdateDamageVignette(vignetteAlpha);
-            UIManager.Instance?.UpdateEquipmentHud(FragGrenades, MortarStrikeCharges, KillStreakCount, IsUavReconActive, IsRegeneratingHealth);
+
+            // Live operator BPM biometrics (combat stress, armor broken, fallen squadmates)
+            var downedPenalty = SquadDirector.Instance != null ? SquadDirector.Instance.DownedCount * 14f : 0f;
+            var armorBrokenPenalty = CurrentArmor <= 0.1f ? 15f : 0f;
+            var recentCombatStress = _timeSinceLastDamage < 3.5f ? 22f : 0f;
+            var targetBpm = 74f + lowHpFactor * 54f + armorBrokenPenalty + recentCombatStress + downedPenalty;
+            _smoothedBpm = Mathf.MoveTowards(_smoothedBpm, targetBpm, dt * 18f);
+            CurrentHeartRateBpm = Mathf.RoundToInt(_smoothedBpm);
+
+            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, CurrentHeartRateBpm, TraumaKits);
+            UIManager.Instance?.UpdateEquipmentHud(FragGrenades, MortarStrikeCharges, KillStreakCount, IsUavReconActive, IsRegeneratingHealth, TraumaKits);
 
             if (Keyboard.current != null)
             {
                 if (Keyboard.current.gKey.wasPressedThisFrame) TryThrowFragGrenade();
                 if (Keyboard.current.fKey.wasPressedThisFrame) TryCallMortarStrike();
+                if (Keyboard.current.qKey.wasPressedThisFrame) TryUseTraumaKit();
                 if (Keyboard.current.rKey.wasPressedThisFrame) weaponController?.StartReload();
                 if (Keyboard.current.nKey.wasPressedThisFrame) ToggleNightVision();
             }
@@ -584,6 +607,7 @@ namespace Character
                 AudioManager.Instance?.PlayDash();
                 characterMotion?.TriggerSquash(new Vector3(0.84f, 1.18f, 0.84f), 0.16f);
                 UIManager.Instance?.UpdateDashCooldown(0f);
+                UIManager.Instance?.AddReticleBloom(0.45f);
             }
 
             // Velocity computation
@@ -603,6 +627,16 @@ namespace Character
             if (characterController != null && characterController.enabled)
             {
                 characterController.Move((horizontalVelocity + Vector3.down * 6f) * dt);
+                if (EnemySpawner.Instance != null)
+                {
+                    var clamped = EnemySpawner.Instance.ClampPositionToUnlockedSectors(transform.position);
+                    if ((clamped - transform.position).sqrMagnitude > 0.0004f)
+                    {
+                        characterController.enabled = false;
+                        transform.position = new Vector3(clamped.x, transform.position.y, clamped.z);
+                        characterController.enabled = true;
+                    }
+                }
             }
             else
             {
@@ -625,6 +659,10 @@ namespace Character
 
             characterMotion?.StepMotion(horizontalVelocity, yawRate, isAimingWeapon: true);
             weaponController?.TryFire(fireHeld, aimDir, aimWorldTarget);
+            if (fireHeld && weaponController != null && !weaponController.IsReloading)
+            {
+                UIManager.Instance?.AddReticleBloom(0.18f * dt * 12f);
+            }
         }
 
         private void LateUpdate()
@@ -810,7 +848,7 @@ namespace Character
             yield return Ease.GetWait(0.24f);
             _fragGrenadePool.Release(gren);
 
-            DetonateTacticalBlast(target, 4.8f, 145f, Palette.RocketOrange, "FRAG OUT!");
+            DetonateTacticalBlast(target, 4.8f, 145f, Palette.RocketOrange, "M67 DETONATION");
         }
 
         public bool TryCallMortarStrike()
@@ -822,9 +860,10 @@ namespace Character
             var center = _latestAimWorldTarget ?? (transform.position + transform.forward * 12f);
             center.y = 0f;
             StartCoroutine(MortarBarrageRoutine(center));
-            UIManager.Instance?.ShowMilestoneBanner("DANGER CLOSE // MORTAR BARRAGE INBOUND");
+            UIManager.Instance?.TriggerThreatWarning("FRIENDLY CAS // 155MM ARTILLERY INBOUND", 2.6f);
+            UIManager.Instance?.ShowMilestoneBanner("DANGER CLOSE // 155MM BARRAGE INBOUND");
             AudioManager.Instance?.PlayMilestoneSting();
-            UIManager.Instance?.UpdateEquipmentHud(FragGrenades, MortarStrikeCharges, KillStreakCount, IsUavReconActive, IsRegeneratingHealth);
+            UIManager.Instance?.UpdateEquipmentHud(FragGrenades, MortarStrikeCharges, KillStreakCount, IsUavReconActive, IsRegeneratingHealth, TraumaKits);
             return true;
         }
 
@@ -836,7 +875,7 @@ namespace Character
                 var impact = center + t;
                 VFXManager.Instance?.Play(VfxKind.MuzzleFlash, impact + Vector3.up * 0.4f, Palette.C4Amber);
                 yield return Ease.GetWait(0.32f);
-                DetonateTacticalBlast(impact, 5.6f, 185f, Palette.RocketOrange, "SPLASH!");
+                DetonateTacticalBlast(impact, 5.6f, 185f, Palette.RocketOrange, "155MM IMPACT");
             }
         }
 
@@ -871,7 +910,7 @@ namespace Character
                 var wasDead = enemy.IsDead;
                 var pushDir = enemy.transform.position - center;
                 pushDir.y = 0f;
-                enemy.ApplyDamage(dmg, enemy.transform.position + Vector3.up * 0.9f, pushDir.sqrMagnitude > 0.01f ? pushDir.normalized : Vector3.forward, isCrit: true);
+                enemy.ApplyDamage(dmg, enemy.transform.position + Vector3.up * 0.9f, pushDir.sqrMagnitude > 0.01f ? pushDir.normalized : Vector3.forward, isCrit: true, isExplosive: true);
                 if (!wasDead && enemy.IsDead)
                 {
                     anyKill = true;
@@ -912,22 +951,79 @@ namespace Character
             UIManager.Instance?.UpdateHealth(CurrentHp, MaxHp);
         }
 
-        public void TakeDamage(float dmg)
+        public bool TryUseTraumaKit()
+        {
+            if (IsDead || TraumaKits <= 0 || _armorCooldownTimer > 0f) return false;
+            if (GameManager.Instance != null && GameManager.Instance.CurrentState != GameState.Playing) return false;
+
+            var patchedSquad = SquadDirector.Instance != null && SquadDirector.Instance.TryPatchNearestDownedMember(transform.position, 8.0f);
+            if (!patchedSquad && CurrentArmor >= MaxArmor * 0.98f && CurrentHp >= MaxHp * 0.98f)
+            {
+                return false;
+            }
+
+            TraumaKits--;
+            _armorCooldownTimer = 0.65f;
+            CurrentArmor = MaxArmor;
+            Heal(45f);
+            AudioManager.Instance?.PlayPickupBlip();
+            VFXManager.Instance?.Play(VfxKind.HitSpark, transform.position + Vector3.up * 0.9f, Palette.M3HeliosCoreCyan);
+            FeelManager.Instance?.SpawnFloatingText(transform.position + Vector3.up * 1.1f,
+                patchedSquad ? "TRAUMA PATCH + PLATES" : "PLATES LOCKED // +45 HP", Palette.M3HeliosCoreCyan);
+            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, CurrentHeartRateBpm, TraumaKits);
+            UIManager.Instance?.UpdateEquipmentHud(FragGrenades, MortarStrikeCharges, KillStreakCount, IsUavReconActive, IsRegeneratingHealth, TraumaKits);
+            return true;
+        }
+
+        public void AddArmorAndTrauma(float armorGain, int kitGain = 0)
+        {
+            if (armorGain > 0f)
+            {
+                CurrentArmor = Mathf.Min(MaxArmor, CurrentArmor + armorGain);
+            }
+            if (kitGain > 0)
+            {
+                TraumaKits = Mathf.Clamp(TraumaKits + kitGain, 0, MaxTraumaKits);
+            }
+            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, CurrentHeartRateBpm, TraumaKits);
+        }
+
+        public void TakeDamage(float dmg, Vector3? sourceWorldPos = null)
         {
             if (IsDead || _invulnTimer > 0f || dmg <= 0f) return;
 
             _timeSinceLastDamage = 0f;
             IsRegeneratingHealth = false;
-            CurrentHp = Mathf.Max(0f, CurrentHp - dmg);
+            if (sourceWorldPos.HasValue)
+            {
+                UIManager.Instance?.ShowDirectionalHit(sourceWorldPos.Value);
+            }
+
+            var remainingDmg = dmg;
+            if (CurrentArmor > 0f)
+            {
+                var beforeArmor = CurrentArmor;
+                var absorb = Mathf.Min(CurrentArmor, dmg * 0.70f);
+                CurrentArmor = Mathf.Max(0f, CurrentArmor - absorb);
+                remainingDmg = Mathf.Max(1f, dmg - absorb);
+                if (beforeArmor > 0.1f && CurrentArmor <= 0.1f)
+                {
+                    FeelManager.Instance?.SpawnFloatingText(transform.position + Vector3.up * 1.1f, "PLATES SHATTERED!", Palette.C4Amber);
+                    UIManager.Instance?.TriggerThreatWarning("!! BALLISTIC PLATES SHATTERED — PRESS [Q] TO RE-PLATE !!", 2.4f);
+                }
+            }
+
+            CurrentHp = Mathf.Max(0f, CurrentHp - remainingDmg);
             _invulnTimer = 0.28f;
             _damageFlashTimer = 0.14f;
             ApplyDamageFlash(1f);
 
             characterMotion?.TriggerSquash(new Vector3(1.24f, 0.78f, 1.24f), 0.14f);
             FeelManager.Instance?.TriggerCameraShake(0.38f);
-            FeelManager.Instance?.SpawnFloatingText(transform.position, "-" + Mathf.RoundToInt(dmg), Palette.EnemySecondary);
+            FeelManager.Instance?.SpawnFloatingText(transform.position, "-" + Mathf.RoundToInt(remainingDmg), Palette.EnemySecondary);
             AudioManager.Instance?.PlayHit();
             UIManager.Instance?.UpdateHealth(CurrentHp, MaxHp);
+            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, CurrentHeartRateBpm, TraumaKits);
 
             if (!(CurrentHp <= 0f)) return;
             IsDead = true;
@@ -969,9 +1065,13 @@ namespace Character
             _dashCooldownTimer = 0f;
             _invulnTimer = 0f;
             _damageFlashTimer = 0f;
+            _armorCooldownTimer = 0f;
+            _smoothedBpm = 74f;
+            CurrentHeartRateBpm = 74;
             _timeSinceLastDamage = 10f;
             IsRegeneratingHealth = false;
             FragGrenades = 3;
+            TraumaKits = 2;
             KillStreakCount = 0;
             IsUavReconActive = false;
             MortarStrikeCharges = 0;
@@ -986,6 +1086,8 @@ namespace Character
             var save = SaveManager.EnsureInstance();
             MaxHp = baseMaxHp + save.Data.armorRank * 20f;
             CurrentHp = MaxHp;
+            MaxArmor = 50f + save.Data.armorRank * 15f;
+            CurrentArmor = MaxArmor;
 
             if (characterController != null)
             {
@@ -1011,10 +1113,11 @@ namespace Character
         private void SyncHud()
         {
             UIManager.Instance?.UpdateHealth(CurrentHp, MaxHp);
+            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, CurrentHeartRateBpm, TraumaKits);
             UIManager.Instance?.UpdateXp(CurrentXp, XpToNextLevel, CurrentLevel);
             UIManager.Instance?.UpdateDashCooldown(1f);
             UIManager.Instance?.RefreshWeaponBar();
-            UIManager.Instance?.UpdateEquipmentHud(FragGrenades, MortarStrikeCharges, KillStreakCount, IsUavReconActive, IsRegeneratingHealth);
+            UIManager.Instance?.UpdateEquipmentHud(FragGrenades, MortarStrikeCharges, KillStreakCount, IsUavReconActive, IsRegeneratingHealth, TraumaKits);
             UIManager.Instance?.UpdateDamageVignette(0f);
         }
 

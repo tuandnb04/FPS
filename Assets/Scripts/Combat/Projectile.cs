@@ -134,7 +134,7 @@ namespace Combat
                             var player = hit.collider.GetComponentInParent<PlayerController>();
                             if (player != null)
                             {
-                                player.TakeDamage(_damage);
+                                player.TakeDamage(_damage, hit.point - transform.forward * 6f);
                                 VFXManager.Instance?.Play(VfxKind.HitSpark, hit.point, _projectileTint);
                                 Release();
                                 return;
@@ -257,7 +257,7 @@ namespace Combat
                 var wasDead = enemy.IsDead;
                 var dir = enemy.transform.position - center;
                 dir.y = 0f;
-                enemy.ApplyDamage(_damage, enemy.transform.position + Vector3.up * 0.8f, dir.sqrMagnitude > 0.001f ? dir.normalized : transform.forward, _isCrit);
+                enemy.ApplyDamage(_damage, enemy.transform.position + Vector3.up * 0.8f, dir.sqrMagnitude > 0.001f ? dir.normalized : transform.forward, _isCrit, isExplosive: true);
                 if (!wasDead && enemy.IsDead)
                 {
                     anyKill = true;

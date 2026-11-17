@@ -52,7 +52,23 @@ namespace Character
         {
             get
             {
-                return _members.Count(t => t != null && !t.IsDowned);
+                return _members.Count(t => t != null && !t.IsDowned && !t.IsKia);
+            }
+        }
+
+        public int AliveRosterCount
+        {
+            get
+            {
+                return _members.Count(t => t != null && !t.IsKia);
+            }
+        }
+
+        public int DownedCount
+        {
+            get
+            {
+                return _members.Count(t => t != null && t.IsDowned && !t.IsKia);
             }
         }
 
@@ -137,7 +153,7 @@ namespace Character
         public void SetOrder(SquadOrder order, bool quiet = false)
         {
             CurrentOrder = order;
-            foreach (var t in _members.Where(t => t != null))
+            foreach (var t in _members.Where(t => t != null && !t.IsKia))
             {
                 if (order == SquadOrder.Hold) t.CaptureHoldAnchor();
                 else t.ClearHoldAnchor();
@@ -145,15 +161,45 @@ namespace Character
 
             UIManager.Instance?.UpdateSquadOrderUI(order);
 
-            if (quiet) return;
+            if (quiet || AliveRosterCount <= 0) return;
             AudioManager.Instance?.PlayUIClick();
             var msg = order switch
             {
-                SquadOrder.Follow => "Copy, Nomad! Vanguard-09 falling into diamond formation on Lead.",
-                SquadOrder.Hold => "Holding perimeter lane! Establishing interlocking crossfire.",
-                _ => "Stack up and breach! Suppressing Ironward positions ahead!"
+                SquadOrder.Follow => "Closing diamond formation on Lead.",
+                SquadOrder.Hold => "Locking perimeter firing sectors.",
+                _ => "Stacking up — weapons free ahead."
             };
             StoryDirector.NotifySquadOrder(msg);
+        }
+
+        public bool TryPatchNearestDownedMember(Vector3 origin, float radius)
+        {
+            var rSq = radius * radius;
+            SquadMemberController best = null;
+            var bestDist = float.MaxValue;
+            foreach (var m in _members)
+            {
+                if (m == null || m.IsKia || !m.IsDowned) continue;
+                var d = m.transform.position - origin;
+                d.y = 0f;
+                if (d.sqrMagnitude <= rSq && d.sqrMagnitude < bestDist)
+                {
+                    bestDist = d.sqrMagnitude;
+                    best = m;
+                }
+            }
+            return best != null && best.ApplyEmergencyTraumaPatch();
+        }
+
+        public void MarkMemberKiaByTag(string roleTag, bool broadcastRadio = true)
+        {
+            foreach (var m in _members)
+            {
+                if (m != null && m.RoleTag == roleTag)
+                {
+                    m.MarkKilledInAction(broadcastRadio);
+                }
+            }
         }
 
         public void EnsureSquadSpawned()
@@ -184,6 +230,7 @@ namespace Character
         public void PlaceSquadFormation(Vector3 leadPos, Vector3 forward, bool resetHp = false)
         {
             EnsureSquadSpawned();
+            var save = SaveManager.EnsureInstance();
             var fwd = forward;
             fwd.y = 0f;
             if (fwd.sqrMagnitude < 0.01f) fwd = Vector3.forward;
@@ -203,6 +250,11 @@ namespace Character
                 if (_members[i] == null) continue;
                 var targetPos = leadPos + offsets[i];
                 targetPos.y = leadPos.y;
+                if (save.IsOperatorKia(_members[i].RoleTag))
+                {
+                    _members[i].ApplyPreexistingKiaState();
+                    continue;
+                }
                 if (resetHp)
                 {
                     _members[i].ResetForMission(targetPos);
@@ -217,7 +269,7 @@ namespace Character
             var rSq = radius * radius;
             foreach (var m in _members)
             {
-                if (m == null || m.IsDowned) continue;
+                if (m == null || m.IsKia || m.IsDowned) continue;
                 var d = m.transform.position - point;
                 d.y = 0f;
                 if (d.sqrMagnitude <= rSq) return true;

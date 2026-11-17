@@ -20,8 +20,8 @@ namespace Camera
 
     /// <summary>
     /// Tactically framed in-engine cutscene director handling widescreen cinema letterbox,
-    /// bottom-left green typewriter mission stamps, multi-sector flyover/orbit camera shots,
-    /// sliding perimeter blast gates, and VALKYRIE-6 Blackhawk extraction sequences.
+    /// bottom-left green typewriter mission stamps, multi-beat story camera choreography,
+    /// sliding perimeter blast gates, and mission-unique extraction/epilogue sequences.
     /// </summary>
     public sealed class CutsceneDirector : MonoBehaviour
     {
@@ -48,9 +48,7 @@ namespace Camera
         public bool IsPlaying => _activeCutscene != null;
         public CutsceneType CurrentCutscene { get; private set; }
         public bool Gate1Open { get; private set; }
-
         public bool Gate2Open { get; private set; }
-
         public bool IsEvacChopperVisible => evacChopperRoot != null && evacChopperRoot.gameObject.activeInHierarchy;
         public string CurrentStampText { get; private set; } = string.Empty;
 
@@ -164,16 +162,17 @@ namespace Camera
             _activeCutscene = null;
             AudioManager.Instance?.PlayUIClick();
 
+            var m = StoryDirector.ActiveMissionIndex;
             switch (CurrentCutscene)
             {
                 case CutsceneType.Act2GateBreach:
-                    OpenGateImmediate(1);
+                    OpenGateImmediate(m is 2 or 4 ? 2 : 1);
                     break;
                 case CutsceneType.FinalBossIntro:
                     OpenGateImmediate(1);
-                    OpenGateImmediate(2);
+                    if (m != 4) OpenGateImmediate(2);
                     break;
-                case CutsceneType.VictoryEvac when evacChopperRoot != null && StoryDirector.ActiveMissionIndex >= StoryDirector.CampaignMissionCount:
+                case CutsceneType.VictoryEvac when evacChopperRoot != null && m >= StoryDirector.CampaignMissionCount:
                     evacChopperRoot.gameObject.SetActive(true);
                     evacChopperRoot.SetPositionAndRotation(new Vector3(0f, 0.04f, 42f), Quaternion.Euler(0f, 155f, 0f));
                     _rotorSpinSpeed = 240f;
@@ -181,8 +180,6 @@ namespace Camera
                 case CutsceneType.VictoryEvac:
                 case CutsceneType.IntroInfil:
                     break;
-                default:
-                    throw new ArgumentOutOfRangeException();
             }
 
             CompleteCutsceneCleanup();
@@ -213,7 +210,7 @@ namespace Camera
                     yield return RunIntroInfilShot();
                     break;
                 case CutsceneType.Act2GateBreach:
-                    yield return RunAct2BreachShot();
+                    yield return RunMidBreachShot();
                     break;
                 case CutsceneType.FinalBossIntro:
                     yield return RunFinalBossIntroShot();
@@ -240,77 +237,41 @@ namespace Camera
 
         private IEnumerator RunIntroInfilShot()
         {
-            SquadDirector.Instance?.PlaceSquadFormation(new Vector3(0f, 0.02f, -43f), Vector3.forward, resetHp: false);
-
             var m = StoryDirector.ActiveMissionIndex;
-            var fullStamp = m switch
-            {
-                1 => "ACT I // BLACKWATER PIER\nCOASTAL CUSTOMS DOCKYARD // 21:40 HRS\nVANGUARD-09: VANCE, ROURKE, KOZLOWSKI & REYES",
-                2 => "ACT II // IRON CORRIDOR\nAMBER GORGE RAIL DEPOT // 05:12 HRS\nSPECTRE DETACHMENT // FREIGHT INTERCEPT",
-                _ => "ACT III // SILENT PEAK\nBLACKCREST ALPINE CITADEL // 23:55 HRS\nFINAL ASSAULT // PROJECT HELIOS"
-            };
-            const string speaker = "MAJ. ROURKE // IRONWOOD-1";
-            var line1 = m switch
-            {
-                1 => "Eyes up, Vanguard-09. Ironward mercenaries hold Blackwater Pier, fuel docks, and the northern railhead.",
-                2 => "Dawn clock's ticking. Ironward seized the canyon switchyard — track down Kastner's warhead cargo before tunnel exit.",
-                _ => "Last climb, Spectre. Radek's Helios array is arming above the ridge — push the courtyard and crush Apex-01."
-            };
-            var line2 = m switch
-            {
-                1 => "Stack on the customs jersey barriers! Clear the outer sentries and blow Pier Gate 1.",
-                2 => "Drop the canyon rail pickets and disarm that switchyard gate — keep heads down around the tanker cars.",
-                _ => "Cut through the citadel garrison and hit the Portcullis lock! Reyes, stand by with C4."
-            };
+            var spawnPos = PlayerController.Instance != null ? PlayerController.Instance.transform.position : new Vector3(0f, 0.02f, -43f);
+            SquadDirector.Instance?.PlaceSquadFormation(spawnPos, Vector3.forward, resetHp: false);
 
-            yield return AnimateCameraShot(
-                duration: 2.25f,
-                startPos: new Vector3(14f, 24f, 52f),
-                endPos: new Vector3(-8f, 18f, 4f),
-                startLook: new Vector3(0f, 1.5f, 18f),
-                endLook: new Vector3(0f, 1.2f, -18f),
-                startFov: 44f,
-                endFov: 48f,
-                fullStamp: fullStamp,
-                speaker: speaker,
-                caption: line1);
-
-            yield return AnimateCameraShot(
-                duration: 2.05f,
-                startPos: new Vector3(-8f, 14f, -26f),
-                endPos: new Vector3(0f, 8.2f, -51.5f),
-                startLook: new Vector3(0f, 1.0f, -38f),
-                endLook: new Vector3(0f, 1.2f, -34f),
-                startFov: 48f,
-                endFov: 52f,
-                fullStamp: fullStamp,
-                speaker: speaker,
-                caption: line2,
-                stampAlreadyTyped: true);
+            var fullStamp = StoryDirector.GetMissionTitle(m) + "\n" + StoryDirector.GetMissionSubtitle(m) + "\nVANGUARD-09 // PROTOCOL ZERO";
+            var beats = StoryDirector.GetIntroCutsceneBeats(m);
+            for (var i = 0; i < beats.Length; i++)
+            {
+                yield return PlayBeat(beats[i], fullStamp, stampAlreadyTyped: i > 0);
+            }
         }
 
-        private IEnumerator RunAct2BreachShot()
+        private IEnumerator RunMidBreachShot()
         {
-            SquadDirector.Instance?.PlaceSquadFormation(new Vector3(0f, 0.02f, -19.5f), Vector3.forward, resetHp: false);
-
             var m = StoryDirector.ActiveMissionIndex;
-            var fullStamp = m switch
+            var targetGate = m is 2 or 4 ? 2 : 1;
+            var gateLeft = targetGate == 2 ? blastGateAct2Left : blastGateAct1Left;
+            var gateRight = targetGate == 2 ? blastGateAct2Right : blastGateAct1Right;
+            var leftClosed = targetGate == 2 ? _gate2LeftClosed : _gate1LeftClosed;
+            var rightClosed = targetGate == 2 ? _gate2RightClosed : _gate1RightClosed;
+            var blastPos = m switch
             {
-                1 => "ACT I // CONTAINER YARD\nPIER SECURITY GATE: BREACHED",
-                2 => "ACT II // FREIGHT SWITCHYARD\nLOCK GATE: BREACHED",
-                _ => "ACT III // HELIOS PLAZA\nCITADEL PORTCULLIS: BREACHED"
+                1 => new Vector3(0f, 1.5f, -14f),
+                2 => new Vector3(6f, 1.6f, 32f),
+                3 => new Vector3(0f, 1.5f, -26f),
+                _ => new Vector3(0f, 1.6f, 26f)
             };
-            var speaker = m == 2 ? "KOZLOWSKI // WRAITH-2" : "CPL. REYES // SPARK-3";
-            var line = m switch
-            {
-                1 => "Fire in the hole! Pier Gate is down — Vanguard pushing into the container yard and coastal radar array!",
-                2 => "Lock blown clean! Moving into the central freight depot — rig charges on the pump valve and switch matrix!",
-                _ => "Portcullis is open! Overload both Helios capacitor pylons before Radek finishes orbital calibration!"
-            };
+
+            var fullStamp = StoryDirector.GetMissionTitle(m) + "\nBREACH CONFIRMED // SECTOR UNLOCKED";
+            var beats = StoryDirector.GetMidBreachCutsceneBeats(m);
+            var beat = beats[0];
 
             var triggeredBlast = false;
             var elapsed = 0f;
-            const float total = 3.0f;
+            var total = beat.Duration;
             while (elapsed < total)
             {
                 elapsed += Time.unscaledDeltaTime;
@@ -320,95 +281,76 @@ namespace Camera
                 if (!triggeredBlast && u >= 0.24f)
                 {
                     triggeredBlast = true;
-                    Gate1Open = true;
-                    VFXManager.Instance?.Play(VfxKind.EnemyDeath, new Vector3(0f, 1.6f, -14f), Palette.RocketOrange);
+                    if (targetGate == 2) Gate2Open = true;
+                    else Gate1Open = true;
+                    VFXManager.Instance?.Play(VfxKind.EnemyDeath, blastPos, Palette.RocketOrange);
                     FeelManager.Instance?.TriggerCameraShake(0.45f);
                     AudioManager.Instance?.PlayEnemyExplode();
                 }
 
-                var slide = u < 0.24f ? 0f : Ease.OutCubic(Mathf.Clamp01((u - 0.24f) / 0.56f)) * 6.2f;
-                SetGateTransform(blastGateAct1Left, blastGateAct1Right, _gate1LeftClosed, _gate1RightClosed, slide, u < 0.35f);
+                var slide = u < 0.24f ? 0f : Ease.OutCubic(Mathf.Clamp01((u - 0.24f) / 0.56f)) * 6.5f;
+                SetGateTransform(gateLeft, gateRight, leftClosed, rightClosed, slide, u < 0.35f);
 
-                var camPos = Vector3.Lerp(new Vector3(7.5f, 7.2f, -29.5f), new Vector3(0.0f, 9.2f, -23.0f), smooth);
-                var lookTarget = Vector3.Lerp(new Vector3(0f, 1.5f, -14.0f), new Vector3(0f, 1.8f, -2.0f), smooth);
-                ApplyCameraPose(camPos, Quaternion.LookRotation((lookTarget - camPos).normalized, Vector3.up), Mathf.Lerp(48f, 52f, smooth));
-                UpdateTypewriterUI(fullStamp, speaker, line, Mathf.Clamp01(u / 0.5f));
+                var camPos = Vector3.Lerp(beat.StartPos, beat.EndPos, smooth);
+                var lookTarget = Vector3.Lerp(beat.StartLook, beat.EndLook, smooth);
+                ApplyCameraPose(camPos, Quaternion.LookRotation((lookTarget - camPos).normalized, Vector3.up), Mathf.Lerp(beat.StartFov, beat.EndFov, smooth));
+                UpdateTypewriterUI(fullStamp, beat.Speaker, beat.Caption, Mathf.Clamp01(u / 0.5f));
                 yield return null;
             }
 
-            OpenGateImmediate(1);
+            OpenGateImmediate(targetGate);
         }
 
         private IEnumerator RunFinalBossIntroShot()
         {
-            OpenGateImmediate(1);
-            OpenGateImmediate(2);
-
             var m = StoryDirector.ActiveMissionIndex;
-            var fullStamp = m switch
-            {
-                1 => "ACT I // NORTH RAILHEAD\nHVT: CAPT. MARKO DRAGIC [SIEGE-01]",
-                2 => "ACT II // NORTH GORGE SPUR\nHVT: DIR. ELENA KASTNER [BASTION-02]",
-                _ => "ACT III // SUMMIT HELIPAD\nHVT: COL. ARTEM RADEK [APEX-01]"
-            };
-            var speaker = m switch
-            {
-                1 => "CAPT. DRAGIC // IRONWARD NET",
-                2 => "DIR. KASTNER // IRONWARD NET",
-                _ => "COL. RADEK // APEX-01 ENCRYPTED"
-            };
-            var line = m switch
-            {
-                1 => "The freight train already cleared the switch, Nomad — Siege-01 will put Vanguard-09 in the harbor!",
-                2 => "You burned my rail yard for nothing! Bastion-02 holding the tunnel while Helios climbs Blackcrest Peak!",
-                _ => "You climbed all this way for ghosts, Vance. End of the line — APEX-01 weapons free!"
-            };
+            OpenGateImmediate(1);
+            if (m != 4) OpenGateImmediate(2);
 
+            var fullStamp = StoryDirector.GetMissionTitle(m) + "\nHVT // " + StoryDirector.GetBossCallsign(4);
             AudioManager.Instance?.PlayMilestoneSting();
-            yield return AnimateCameraShot(
-                duration: 2.9f,
-                startPos: new Vector3(-13f, 8.8f, 29f),
-                endPos: new Vector3(11f, 9.6f, 34f),
-                startLook: new Vector3(0f, 1.4f, 42f),
-                endLook: new Vector3(0f, 1.6f, 43f),
-                startFov: 44f,
-                endFov: 50f,
-                fullStamp: fullStamp,
-                speaker: speaker,
-                caption: line);
+
+            var beats = StoryDirector.GetBossCutsceneBeats(m);
+            for (var i = 0; i < beats.Length; i++)
+            {
+                yield return PlayBeat(beats[i], fullStamp, stampAlreadyTyped: i > 0);
+            }
         }
 
         private IEnumerator RunVictoryEvacShot()
         {
+            var m = StoryDirector.ActiveMissionIndex;
             OpenGateImmediate(1);
+            if (m != 4) OpenGateImmediate(2);
+
+            if (m < StoryDirector.CampaignMissionCount)
+            {
+                var exfilStamp = m switch
+                {
+                    1 => "ACT I EXFIL // WRAITH-2 (KOZLOWSKI) K.I.A.\nBROKEN ARROW SHELLING ON PIER NORTH",
+                    2 => "ACT II EXFIL // SPARK-3 (REYES) K.I.A.\nNORTH TUNNEL BULKHEAD COLLAPSE",
+                    _ => "ACT III EXFIL // IRONWOOD-1 (ROURKE) K.I.A.\nSUB-LEVEL HALON CONTAINMENT SEAL"
+                };
+                var (speaker, line, sPos, ePos, sLook, eLook) = m switch
+                {
+                    1 => ("SGT. VANCE // NOMAD-1", "Gunboat clear! Marek's beacon just flatlined at the EW tower—Broken Arrow erased his post!",
+                        new Vector3(4f, 7.5f, 34f), new Vector3(24f, 11f, 54f), new Vector3(16f, 1.2f, 46f), new Vector3(0f, 2.0f, 34f)),
+                    2 => ("SGT. VANCE // NOMAD-1", "Bulkhead dropped behind us—Reyes triggered the lock from inside the gorge fire! Move out, Rourke!",
+                        new Vector3(-4f, 8.0f, 34f), new Vector3(12f, 10.5f, 52f), new Vector3(8f, 1.2f, 48f), new Vector3(8f, 1.8f, 58f)),
+                    _ => ("MAJ. ROURKE // IRONWOOD-1", "Lift's away, Julian... Chest seal's leaking Halon. Carry the blackout ledger up the mountain and finish Chen's war...",
+                        new Vector3(-10f, 7.8f, 28f), new Vector3(10f, 10.8f, 49f), new Vector3(0f, 1.2f, 40f), new Vector3(0f, 2.2f, 52f))
+                };
+
+                VFXManager.Instance?.Play(VfxKind.EnemyDeath, sLook + Vector3.up * 0.6f, Palette.RocketOrange);
+                FeelManager.Instance?.TriggerCameraShake(0.35f);
+                yield return AnimateCameraShot(3.0f, sPos, ePos, sLook, eLook, 48f, 54f, exfilStamp, speaker, line);
+                yield break;
+            }
+
+            // ACT IV CLIMAX: Blackhawk VALKYRIE-6 Touchdown & Sole Survivor Epilogue
             OpenGateImmediate(2);
             PlayerController.Instance?.TeleportTo(new Vector3(-1.4f, 0.02f, 35.5f));
             SquadDirector.Instance?.PlaceSquadFormation(new Vector3(-1.0f, 0.02f, 34.8f), Vector3.forward, resetHp: false);
-
-            var m = StoryDirector.ActiveMissionIndex;
-            if (m < StoryDirector.CampaignMissionCount)
-            {
-                var exfilStamp = m == 1
-                    ? "ACT I COMPLETE // BLACKWATER PIER SECURED\nMANIFEST DECRYPTED -> IRON CORRIDOR NORTH"
-                    : "ACT II COMPLETE // IRON CORRIDOR CLEARED\nNEXT VECTOR -> BLACKCREST CITADEL SUMMIT";
-                var speaker12 = m == 1 ? "DIR. CHEN // AEGIS-ACTUAL" : "MAJ. ROURKE // IRONWOOD-1";
-                var line12 = m == 1
-                    ? "Cargo log cracked! Three Helios warheads left north by rail — inserting Vanguard-09 into Iron Corridor Canyon!"
-                    : "Gorge tunnel's open and Radek's uplink pinged Blackcrest Peak! Lock weapons and push to the summit!";
-
-                yield return AnimateCameraShot(
-                    duration: 2.4f,
-                    startPos: new Vector3(-8f, 6.2f, 28f),
-                    endPos: new Vector3(6f, 9.5f, 49f),
-                    startLook: new Vector3(0f, 1.2f, 36f),
-                    endLook: new Vector3(0f, 2.0f, 54f),
-                    startFov: 48f,
-                    endFov: 54f,
-                    fullStamp: exfilStamp,
-                    speaker: speaker12,
-                    caption: line12);
-                yield break;
-            }
 
             if (evacChopperRoot != null)
             {
@@ -416,9 +358,14 @@ namespace Camera
             }
             _rotorSpinSpeed = 980f;
 
-            const string fullStamp = "OPERATION COMPLETE // PROJECT HELIOS DESTROYED\nVALKYRIE-6 BLACKHAWK TOUCHDOWN";
-            const string speaker = "MAJ. ROURKE // IRONWOOD-1";
-            const string line = "Helios array cold, Radek down! Everyone aboard Valkyrie-6 — Spectre Detachment going home!";
+            var isBroadcast = SaveManager.EnsureInstance().LastEndingChoice == CampaignEndingKind.BroadcastBlackout;
+            var fullStamp = isBroadcast
+                ? "ENDING A // BLACKOUT LEDGER BROADCAST\nVALKYRIE-6 // SOLE OPERATOR EVAC"
+                : "ENDING B // PROTOCOL ZERO SEALED\nVALKYRIE-6 // CLASSIFIED DEBRIEF";
+            var line1 = isBroadcast
+                ? "Valkyrie-6 on the deck, Sergeant! Every AEGIS black frequency is blowing up—get aboard before hunter teams close the ridge!"
+                : "Pad clear, Nomad-1. Satellite uplink dark, zero leaks confirmed. Boarding Valkyrie-6 alone.";
+            var speaker1 = "VALKYRIE-6 // PILOT";
 
             var startFlight = new Vector3(-16f, 24f, 68f);
             var hoverPoint = new Vector3(0f, 5.2f, 44f);
@@ -426,7 +373,7 @@ namespace Camera
 
             var dustPlayed = false;
             var elapsed = 0f;
-            const float total = 4.3f;
+            const float total = 4.6f;
             while (elapsed < total)
             {
                 elapsed += Time.unscaledDeltaTime;
@@ -462,11 +409,34 @@ namespace Camera
                 var lookTarget = new Vector3(0f, 1.8f, 42f);
                 var camPos = lookTarget + camOffset;
                 ApplyCameraPose(camPos, Quaternion.LookRotation((lookTarget - camPos).normalized, Vector3.up), 46f);
-                UpdateTypewriterUI(fullStamp, speaker, line, Mathf.Clamp01(u / 0.45f));
+
+                var activeSpeaker = u < 0.55f ? speaker1 : "SGT. VANCE // NOMAD-1";
+                var activeLine = u < 0.55f
+                    ? line1
+                    : (isBroadcast
+                        ? "Kozlowski, Reyes, Rourke, Daniel—your names just went out to the world. I'm ready for whatever hunts me down below."
+                        : "Three empty seats on this bird. Nobody gets what Karst-4 cost us—just three folded flags.");
+                UpdateTypewriterUI(fullStamp, activeSpeaker, activeLine, Mathf.Clamp01(u / 0.45f));
                 yield return null;
             }
 
             _rotorSpinSpeed = 260f;
+        }
+
+        private IEnumerator PlayBeat(CutsceneBeat beat, string fullStamp, bool stampAlreadyTyped)
+        {
+            yield return AnimateCameraShot(
+                beat.Duration,
+                beat.StartPos,
+                beat.EndPos,
+                beat.StartLook,
+                beat.EndLook,
+                beat.StartFov,
+                beat.EndFov,
+                fullStamp,
+                beat.Speaker,
+                beat.Caption,
+                stampAlreadyTyped);
         }
 
         private IEnumerator AnimateCameraShot(
@@ -534,12 +504,10 @@ namespace Camera
             }
 
             if (right == null) return;
+            right.position = rightClosed + new Vector3(openDistance, 0f, 0f);
+            foreach (var col in right.GetComponentsInChildren<Collider>())
             {
-                right.position = rightClosed + new Vector3(openDistance, 0f, 0f);
-                foreach (var col in right.GetComponentsInChildren<Collider>())
-                {
-                    col.enabled = collidersEnabled;
-                }
+                col.enabled = collidersEnabled;
             }
         }
     }

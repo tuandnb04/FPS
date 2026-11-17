@@ -15,8 +15,9 @@ using UnityEngine.Serialization;
 namespace Enemies
 {
     /// <summary>
-    /// Pooled Multi-Mission Campaign Director managing sector garrisons, armored IFV encounters,
-    /// interactive C4 breach & sabotage objectives, Extraction LZ, and tactical supply drops.
+    /// Pooled Multi-Mission Campaign Director managing mission-unique walkable zones,
+    /// asymmetric garrisons, holdout waves, collectible Field Intel terminals,
+    /// orbital/environmental hazards, and bespoke 5-stage campaign flows across 4 distinct maps.
     /// </summary>
     public sealed class EnemySpawner : MonoBehaviour
     {
@@ -25,15 +26,6 @@ namespace Enemies
 
         [Header("Campaign Mission Identity")]
         [SerializeField] private int missionIndex = 1;
-
-        [Header("Campaign Sector Bounds")]
-        [SerializeField] private float sector1HalfWidth = 25.0f;
-        [SerializeField] private float sector2HalfWidth = 34.5f;
-        [SerializeField] private float sector3HalfWidth = 26.5f;
-        [SerializeField] private float compoundMinZ = -49.5f;
-        [SerializeField] private float sector1MaxZ = -17.0f;
-        [SerializeField] private float sector2MaxZ = 19.0f;
-        [SerializeField] private float sector3MaxZ = 52.0f;
 
         [Header("Blender Custom Meshes (Assigned by SceneSetupBuilder)")]
         [SerializeField] private Mesh chaserTorsoMesh;
@@ -60,7 +52,8 @@ namespace Enemies
         private readonly List<EnemyController> _activeEnemies = new();
         private readonly List<PickupItem> _activePickups = new();
         private readonly List<GameObject> _activeHazards = new();
-        private readonly List<CampaignObjectiveNode> _objectiveNodes = new(4);
+        private readonly List<CampaignObjectiveNode> _objectiveNodes = new(6);
+        private readonly List<WalkableZoneRect> _walkableZones = new(8);
 
         private Transform _enemyPoolRoot;
         private Transform _pickupPoolRoot;
@@ -72,18 +65,23 @@ namespace Enemies
         private Material _enemyWeaponMat;
         private Material _bossArmorMat;
         private Material _bossTrimMat;
+        private Material _bossShieldMat;
         private Material _pickupMat;
         private Material _hazardRingMat;
         private Material _objectiveTerminalMat;
         private Material _objectiveC4Mat;
+        private Material _intelTerminalMat;
 
-        private int _stage1KillTarget = 8;
+        private int _stage1KillTarget = 6;
         private int _stage1KillsProgress;
         private int _remainingReinforcements;
         private float _reinforcementTimer;
         private float _stageBeatTimer;
+        private float _spirePulseTimer;
         private bool _transitionPending;
-        private bool _stage2BossCleared;
+        private bool _stage1GatePrompted;
+        private bool _vaultHoldoutTriggered;
+        private bool _evacHoldoutTriggered;
 
         public int MissionIndex => missionIndex;
 
@@ -93,18 +91,17 @@ namespace Enemies
         }
 
         public int CurrentStage { get; private set; } = 1;
-
-        public int CurrentWave => CurrentStage; // Compatibility alias for SaveManager / legacy hooks
+        public int CurrentWave => CurrentStage;
         public int ActiveEnemyCount => _activeEnemies.Count;
         public IReadOnlyList<EnemyController> ActiveEnemies => _activeEnemies;
         public IReadOnlyList<CampaignObjectiveNode> ObjectiveNodes => _objectiveNodes;
-        public CampaignObjectiveNode Gate1BreachNode { get; private set; }
 
-        public CampaignObjectiveNode FuelValveNode { get; private set; }
-
-        public CampaignObjectiveNode RadarTerminalNode { get; private set; }
-
-        public CampaignObjectiveNode HelipadLzNode { get; private set; }
+        public CampaignObjectiveNode PrimaryBreachNode { get; private set; }
+        public CampaignObjectiveNode WestWingNode { get; private set; }
+        public CampaignObjectiveNode EastWingNode { get; private set; }
+        public CampaignObjectiveNode ExfilNode { get; private set; }
+        public CampaignObjectiveNode IntelNodeA { get; private set; }
+        public CampaignObjectiveNode IntelNodeB { get; private set; }
 
         public int SabotageCompletedCount { get; private set; }
 
@@ -150,7 +147,8 @@ namespace Enemies
                 return;
             }
             Instance = this;
-            StoryDirector.ActiveMissionIndex = Mathf.Clamp(missionIndex, 1, StoryDirector.CampaignMissionCount);
+            missionIndex = Mathf.Clamp(missionIndex, 1, StoryDirector.CampaignMissionCount);
+            StoryDirector.ActiveMissionIndex = missionIndex;
 
             _enemyPoolRoot = new GameObject("EnemyPoolRoot").transform;
             _enemyPoolRoot.SetParent(transform, false);
@@ -164,15 +162,32 @@ namespace Enemies
             _objectiveRoot = new GameObject("CampaignObjectivesRoot").transform;
             _objectiveRoot.SetParent(transform, false);
 
-            _enemyPrimaryMat = Palette.CreateLitMaterial("Mat_EnemyChassisRuntime", Palette.EnemyPrimary, 0.20f, 0.36f);
+            var enemyColor = missionIndex switch
+            {
+                2 => Palette.FromHex("#7B4028"),
+                3 => Palette.FromHex("#3F4954"),
+                4 => Palette.FromHex("#2E313A"),
+                _ => Palette.EnemyPrimary
+            };
+            var bossColor = missionIndex switch
+            {
+                2 => Palette.FromHex("#503A2C"),
+                3 => Palette.FromHex("#443528"),
+                4 => Palette.FromHex("#232A38"),
+                _ => Palette.GuardTowerDark
+            };
+
+            _enemyPrimaryMat = Palette.CreateLitMaterial("Mat_EnemyChassisRuntime", enemyColor, 0.20f, 0.36f);
             _enemySecondaryMat = Palette.CreateLitMaterial("Mat_EnemyVisorRuntime", Palette.Props, 0.35f, 0.40f);
             _enemyWeaponMat = Palette.CreateLitMaterial("Mat_EnemyWeaponRuntime", Palette.Gunmetal, 0.78f, 0.56f);
-            _bossArmorMat = Palette.CreateLitMaterial("Mat_BossChassisRuntime", Palette.GuardTowerDark, 0.36f, 0.42f);
+            _bossArmorMat = Palette.CreateLitMaterial("Mat_BossChassisRuntime", bossColor, 0.38f, 0.44f);
             _bossTrimMat = Palette.CreateLitMaterial("Mat_BossTrimRuntime", Palette.Gunmetal, 0.55f, 0.48f);
+            _bossShieldMat = Palette.CreateParticleMaterial("Mat_BossShieldRingRuntime", UISpriteFactory.GetTelegraphRingTexture());
             _pickupMat = Palette.CreateLitMaterial("Mat_PickupCoreRuntime", Palette.Accent, 0.25f, 0.45f);
             _hazardRingMat = Palette.CreateParticleMaterial("Mat_HazardRingRuntime", UISpriteFactory.GetTelegraphRingTexture());
             _objectiveTerminalMat = Palette.CreateLitMaterial("Mat_ObjectiveTermRuntime", Palette.GuardTowerDark, 0.45f, 0.45f);
             _objectiveC4Mat = Palette.CreateLitMaterial("Mat_ObjectiveC4Runtime", Palette.C4Amber, 0.20f, 0.35f, true, 1.35f);
+            _intelTerminalMat = Palette.CreateLitMaterial("Mat_IntelTermRuntime", Palette.M3HeliosCoreCyan, 0.30f, 0.48f, true, 1.15f);
 
             _enemyPool = new ObjectPool<EnemyController>(
                 createFunc: CreateEnemyRig,
@@ -181,7 +196,7 @@ namespace Enemies
                 actionOnDestroy: e => { if (e != null) Destroy(e.gameObject); },
                 collectionCheck: false,
                 defaultCapacity: 14,
-                maxSize: 36
+                maxSize: 38
             );
 
             _pickupPool = new ObjectPool<PickupItem>(
@@ -194,6 +209,7 @@ namespace Enemies
                 maxSize: 48
             );
 
+            ConfigureMissionWalkableZones();
             EnsureObjectiveNodesBuilt();
         }
 
@@ -205,10 +221,55 @@ namespace Enemies
             }
         }
 
+        private void ConfigureMissionWalkableZones()
+        {
+            _walkableZones.Clear();
+            switch (missionIndex)
+            {
+                case 1:
+                    // Mission 1: South Checkpoint -> Y-Split Twin Piers over Water + Cross Bridge -> North Quay
+                    _walkableZones.Add(new WalkableZoneRect(-22.8f, 22.8f, -50.8f, -14.2f, 1)); // South Apron
+                    _walkableZones.Add(new WalkableZoneRect(-36.8f, 36.8f, -15.5f, -5.2f, 3));  // Pier Y-Split Apron
+                    _walkableZones.Add(new WalkableZoneRect(-36.8f, -10.8f, -15.5f, 24.8f, 3)); // West Fuel Pier
+                    _walkableZones.Add(new WalkableZoneRect(10.8f, 36.8f, -15.5f, 24.8f, 3));   // East Radar Pier
+                    _walkableZones.Add(new WalkableZoneRect(-13.5f, 13.5f, 12.6f, 24.8f, 3));   // Cross-Pier Causeway Bridge
+                    _walkableZones.Add(new WalkableZoneRect(-26.8f, 26.8f, 23.5f, 52.8f, 4));   // North Quay & Boat Exfil
+                    break;
+
+                case 2:
+                    // Mission 2: SW Canyon Entry -> Dual Track Lanes flanking Train #774 + Overpass Crossings + Side Pockets -> NE Tunnel
+                    _walkableZones.Add(new WalkableZoneRect(-32.8f, 4.8f, -52.8f, -19.5f, 1));   // SW Canyon Entry
+                    _walkableZones.Add(new WalkableZoneRect(-21.2f, -3.6f, -21.5f, 32.8f, 2));   // West Track Lane
+                    _walkableZones.Add(new WalkableZoneRect(3.6f, 21.2f, -21.5f, 32.8f, 2));     // East Track Lane
+                    _walkableZones.Add(new WalkableZoneRect(-19.5f, 19.5f, -6.2f, -0.5f, 2));    // South Train Gap Crossing
+                    _walkableZones.Add(new WalkableZoneRect(-19.5f, 19.5f, 9.5f, 16.5f, 2));     // North Train Coupling Crossing
+                    _walkableZones.Add(new WalkableZoneRect(-39.2f, -18.5f, -8.5f, 16.5f, 2));   // West Switch Alcove
+                    _walkableZones.Add(new WalkableZoneRect(18.5f, 39.2f, -12.5f, 12.5f, 2));    // East Switch Alcove
+                    _walkableZones.Add(new WalkableZoneRect(-13.2f, 26.8f, 31.2f, 56.8f, 4));    // NE Gorge Boss & Tunnel
+                    break;
+
+                case 3:
+                    // Mission 3: South Airlock -> Central Security Atrium + West Server Vault + East Turbine Hall -> North Command Deck
+                    _walkableZones.Add(new WalkableZoneRect(-13.8f, 13.8f, -50.8f, -25.8f, 1));  // South Airlock
+                    _walkableZones.Add(new WalkableZoneRect(-17.8f, 17.8f, -26.5f, 16.5f, 2));   // Central Security Atrium
+                    _walkableZones.Add(new WalkableZoneRect(-41.2f, -15.5f, -16.8f, 10.8f, 2));  // West Server Vault
+                    _walkableZones.Add(new WalkableZoneRect(15.5f, 41.2f, -16.8f, 10.8f, 3));    // East Turbine Hall
+                    _walkableZones.Add(new WalkableZoneRect(-20.8f, 20.8f, 15.2f, 50.8f, 4));    // North Command Deck & Lift
+                    break;
+
+                default:
+                    // Mission 4: South Alpine Bridge -> Wide Octagonal Citadel Courtyard -> North Summit Helipad
+                    _walkableZones.Add(new WalkableZoneRect(-9.2f, 9.2f, -52.8f, -25.5f, 1));    // South Alpine Bridge
+                    _walkableZones.Add(new WalkableZoneRect(-38.8f, 38.8f, -26.5f, 26.5f, 2));   // Citadel Courtyard Plateau
+                    _walkableZones.Add(new WalkableZoneRect(-20.8f, 20.8f, 24.5f, 52.8f, 5));    // North Summit Helipad
+                    break;
+            }
+        }
+
         private void EnsureObjectiveNodesBuilt()
         {
             if (_objectiveRoot == null) return;
-            if (_objectiveNodes.Count == 4 && sabotageTerminalMesh == null) return;
+            if (_objectiveNodes.Count == 6 && sabotageTerminalMesh == null) return;
 
             for (var i = _objectiveNodes.Count - 1; i >= 0; i--)
             {
@@ -216,25 +277,83 @@ namespace Enemies
             }
             _objectiveNodes.Clear();
 
-            Gate1BreachNode = CreateObjectiveNode(
-                "Obj_Gate1_Breach", ObjectiveNodeKind.GateC4Breach,
-                StoryDirector.GetObjectiveNodeTitle(missionIndex, 0),
-                new Vector3(0f, 0f, -17.5f), 3.3f, 1.55f, true);
+            var intelA = GetMissionIntelEntry(missionIndex, 0);
+            var intelB = GetMissionIntelEntry(missionIndex, 1);
 
-            FuelValveNode = CreateObjectiveNode(
-                "Obj_S2_FuelValve", ObjectiveNodeKind.FuelValveSabotage,
-                StoryDirector.GetObjectiveNodeTitle(missionIndex, 1),
-                new Vector3(-16.5f, 0f, -1.2f), 3.4f, 1.65f, true);
+            switch (missionIndex)
+            {
+                case 1:
+                    PrimaryBreachNode = CreateObjectiveNode("Obj_M1_Gate1", ObjectiveNodeKind.GateC4Breach,
+                        StoryDirector.GetObjectiveNodeTitle(1, 0), new Vector3(0f, 0f, -16.8f), 3.2f, 1.55f, true);
+                    WestWingNode = CreateObjectiveNode("Obj_M1_WestFuel", ObjectiveNodeKind.FuelValveSabotage,
+                        StoryDirector.GetObjectiveNodeTitle(1, 1), new Vector3(-24.0f, 0f, 8.0f), 3.4f, 1.65f, true);
+                    EastWingNode = CreateObjectiveNode("Obj_M1_EastRadar", ObjectiveNodeKind.RadarSabotage,
+                        StoryDirector.GetObjectiveNodeTitle(1, 2), new Vector3(24.0f, 0f, 8.0f), 3.4f, 1.65f, true);
+                    ExfilNode = CreateObjectiveNode("Obj_M1_BoatExfil", ObjectiveNodeKind.BoatExfilDock,
+                        StoryDirector.GetObjectiveNodeTitle(1, 3), new Vector3(18.0f, 0f, 47.0f), 4.0f, 1.25f, false);
+                    IntelNodeA = CreateObjectiveNode("Obj_M1_IntelA", ObjectiveNodeKind.IntelTerminal,
+                        intelA.NodeTitle, new Vector3(-31.5f, 0f, -4.5f), 2.5f, 0.75f, false, null, intelA.Id);
+                    IntelNodeB = CreateObjectiveNode("Obj_M1_IntelB", ObjectiveNodeKind.IntelTerminal,
+                        intelB.NodeTitle, new Vector3(31.5f, 0f, 18.0f), 2.5f, 0.75f, false, null, intelB.Id);
+                    break;
 
-            RadarTerminalNode = CreateObjectiveNode(
-                "Obj_S2_RadarTerminal", ObjectiveNodeKind.RadarSabotage,
-                StoryDirector.GetObjectiveNodeTitle(missionIndex, 2),
-                new Vector3(21.5f, 0f, 1.5f), 3.4f, 1.65f, true);
+                case 2:
+                    PrimaryBreachNode = CreateObjectiveNode("Obj_M2_TrainCoupling", ObjectiveNodeKind.GateC4Breach,
+                        StoryDirector.GetObjectiveNodeTitle(2, 0), new Vector3(0f, 0f, 13.5f), 3.3f, 1.65f, true);
+                    WestWingNode = CreateObjectiveNode("Obj_M2_WestSwitch", ObjectiveNodeKind.RailSwitchLever,
+                        StoryDirector.GetObjectiveNodeTitle(2, 1), new Vector3(-32.0f, 0f, 4.0f), 3.3f, 1.45f, false);
+                    EastWingNode = CreateObjectiveNode("Obj_M2_EastSwitch", ObjectiveNodeKind.RailSwitchLever,
+                        StoryDirector.GetObjectiveNodeTitle(2, 2), new Vector3(32.0f, 0f, 0.0f), 3.3f, 1.45f, false);
+                    ExfilNode = CreateObjectiveNode("Obj_M2_TunnelPortal", ObjectiveNodeKind.TunnelBreachExit,
+                        StoryDirector.GetObjectiveNodeTitle(2, 3), new Vector3(8.0f, 0f, 52.0f), 4.0f, 1.15f, false);
+                    IntelNodeA = CreateObjectiveNode("Obj_M2_IntelA", ObjectiveNodeKind.IntelTerminal,
+                        intelA.NodeTitle, new Vector3(-28.5f, 0f, -27.5f), 2.5f, 0.75f, false, null, intelA.Id);
+                    IntelNodeB = CreateObjectiveNode("Obj_M2_IntelB", ObjectiveNodeKind.IntelTerminal,
+                        intelB.NodeTitle, new Vector3(34.5f, 0f, 9.0f), 2.5f, 0.75f, false, null, intelB.Id);
+                    break;
 
-            HelipadLzNode = CreateObjectiveNode(
-                "Obj_S3_HelipadLZ", ObjectiveNodeKind.HelipadEvacLZ,
-                StoryDirector.GetObjectiveNodeTitle(missionIndex, 3),
-                new Vector3(0f, 0f, 42.0f), 4.2f, 1.10f, false);
+                case 3:
+                    PrimaryBreachNode = CreateObjectiveNode("Obj_M3_AirlockC4", ObjectiveNodeKind.GateC4Breach,
+                        StoryDirector.GetObjectiveNodeTitle(3, 0), new Vector3(0f, 0f, -28.5f), 3.2f, 1.50f, true);
+                    WestWingNode = CreateObjectiveNode("Obj_M3_ServerHoldout", ObjectiveNodeKind.ServerHackHoldout,
+                        StoryDirector.GetObjectiveNodeTitle(3, 1), new Vector3(-31.0f, 0f, -3.0f), 4.6f, 6.50f, false, HandleHoldoutStarted);
+                    EastWingNode = CreateObjectiveNode("Obj_M3_EastTurbine", ObjectiveNodeKind.FuelValveSabotage,
+                        StoryDirector.GetObjectiveNodeTitle(3, 2), new Vector3(31.0f, 0f, -3.0f), 3.4f, 1.65f, true);
+                    ExfilNode = CreateObjectiveNode("Obj_M3_FreightLift", ObjectiveNodeKind.FreightLiftExit,
+                        StoryDirector.GetObjectiveNodeTitle(3, 3), new Vector3(0f, 0f, 45.0f), 4.0f, 1.25f, false);
+                    IntelNodeA = CreateObjectiveNode("Obj_M3_IntelA", ObjectiveNodeKind.IntelTerminal,
+                        intelA.NodeTitle, new Vector3(-37.0f, 0f, 7.5f), 2.5f, 0.75f, false, null, intelA.Id);
+                    IntelNodeB = CreateObjectiveNode("Obj_M3_IntelB", ObjectiveNodeKind.IntelTerminal,
+                        intelB.NodeTitle, new Vector3(37.0f, 0f, -12.5f), 2.5f, 0.75f, false, null, intelB.Id);
+                    break;
+
+                default:
+                    PrimaryBreachNode = CreateObjectiveNode("Obj_M4_CoreKillSwitch", ObjectiveNodeKind.CoreShutdownConsole,
+                        StoryDirector.GetObjectiveNodeTitle(4, 0), new Vector3(0f, 0f, -8.5f), 3.4f, 1.75f, false);
+                    WestWingNode = CreateObjectiveNode("Obj_M4_WestPylon", ObjectiveNodeKind.HeliosPylonOverload,
+                        StoryDirector.GetObjectiveNodeTitle(4, 1), new Vector3(-31.0f, 0f, 2.0f), 3.6f, 1.70f, true);
+                    EastWingNode = CreateObjectiveNode("Obj_M4_EastPylon", ObjectiveNodeKind.HeliosPylonOverload,
+                        StoryDirector.GetObjectiveNodeTitle(4, 2), new Vector3(31.0f, 0f, 2.0f), 3.6f, 1.70f, true);
+                    ExfilNode = CreateObjectiveNode("Obj_M4_ValkyrieLZ", ObjectiveNodeKind.HelipadEvacLZ,
+                        StoryDirector.GetObjectiveNodeTitle(4, 3), new Vector3(0f, 0f, 42.0f), 4.6f, 3.60f, false, HandleHoldoutStarted);
+                    IntelNodeA = CreateObjectiveNode("Obj_M4_IntelA", ObjectiveNodeKind.IntelTerminal,
+                        intelA.NodeTitle, new Vector3(-31.0f, 0f, -18.5f), 2.5f, 0.75f, false, null, intelA.Id);
+                    IntelNodeB = CreateObjectiveNode("Obj_M4_IntelB", ObjectiveNodeKind.IntelTerminal,
+                        intelB.NodeTitle, new Vector3(31.0f, 0f, 18.5f), 2.5f, 0.75f, false, null, intelB.Id);
+                    break;
+            }
+        }
+
+        private static IntelLogEntry GetMissionIntelEntry(int mIdx, int slotIndex)
+        {
+            var found = 0;
+            foreach (var entry in StoryDirector.IntelCatalog)
+            {
+                if (entry.MissionIndex != mIdx) continue;
+                if (found == slotIndex) return entry;
+                found++;
+            }
+            return StoryDirector.IntelCatalog[0];
         }
 
         private CampaignObjectiveNode CreateObjectiveNode(
@@ -244,12 +363,15 @@ namespace Enemies
             Vector3 pos,
             float radius,
             float armSeconds,
-            bool explode)
+            bool explode,
+            System.Action<CampaignObjectiveNode> onStarted = null,
+            string intelId = "")
         {
             var go = new GameObject(goName);
             go.transform.SetParent(_objectiveRoot, false);
             var node = go.AddComponent<CampaignObjectiveNode>();
-            node.Configure(kind, title, pos, radius, armSeconds, explode, sabotageTerminalMesh, c4ChargeMesh, _objectiveTerminalMat, _objectiveC4Mat, HandleObjectiveCompleted);
+            var mat = kind == ObjectiveNodeKind.IntelTerminal ? _intelTerminalMat : _objectiveTerminalMat;
+            node.Configure(kind, title, pos, radius, armSeconds, explode, sabotageTerminalMesh, c4ChargeMesh, mat, _objectiveC4Mat, HandleObjectiveCompleted, onStarted, intelId);
             _objectiveNodes.Add(node);
             return node;
         }
@@ -349,6 +471,37 @@ namespace Enemies
             bossMuzzleTip.transform.localPosition = new Vector3(0f, 0.02f, 1.52f);
             bossGroup.SetActive(false);
 
+            // Volkov Reactive Riot Shield Ring
+            var shieldGo = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            shieldGo.name = "BossShieldRing";
+            shieldGo.transform.SetParent(root.transform, false);
+            shieldGo.transform.localPosition = new Vector3(0f, 0.08f, 0f);
+            shieldGo.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            shieldGo.transform.localScale = new Vector3(3.2f, 3.2f, 1f);
+            var sc = shieldGo.GetComponent<Collider>();
+            if (sc != null) Destroy(sc);
+            var smr = shieldGo.GetComponent<MeshRenderer>();
+            if (smr != null)
+            {
+                smr.sharedMaterial = _bossShieldMat;
+                smr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                var smpb = new MaterialPropertyBlock();
+                smpb.SetColor(Color1, Palette.C4Amber);
+                smr.SetPropertyBlock(smpb);
+            }
+            shieldGo.SetActive(false);
+
+            // Goliath Railgun Laser Telegraph Line
+            var laserGo = new GameObject("RailLaserTelegraph");
+            laserGo.transform.SetParent(root.transform, false);
+            var lr = laserGo.AddComponent<LineRenderer>();
+            lr.positionCount = 2;
+            lr.startWidth = 0.12f;
+            lr.endWidth = 0.06f;
+            lr.useWorldSpace = true;
+            lr.material = _hazardRingMat;
+            lr.enabled = false;
+
             motion.BindPivots(visualRoot.transform, headPivot.transform, leftArmPivot, rightArmPivot, leftLegPivot.transform, rightLegPivot.transform, reactorPivot.transform);
             motion.BindWeaponArmIk(leftElbowPivot, rightElbowPivot, weaponAnchor.transform, ak74LeftGrip, ak74RightGrip);
             ctrl.BindComponents(
@@ -357,7 +510,7 @@ namespace Enemies
                 leftArmPivot, rightArmPivot, weaponAnchor.transform,
                 ak74Obj, ak74LeftGrip, ak74RightGrip, ak74Muzzle,
                 pkmObj, pkmLeftGrip, pkmRightGrip, pkmMuzzle,
-                bossMuzzleTip.transform);
+                bossMuzzleTip.transform, shieldGo, lr);
 
             root.SetActive(false);
             return ctrl;
@@ -508,36 +661,35 @@ namespace Enemies
             EnsureObjectiveNodesBuilt();
             _transitionPending = false;
             _stageBeatTimer = 0f;
+            _stage1GatePrompted = false;
             CurrentStage = Mathf.Clamp(stageNum, 1, StoryDirector.FinalCampaignStage);
 
-            if (CurrentStage >= 3)
+            if (CurrentStage >= 2 && (missionIndex == 2 || missionIndex == 4))
             {
                 CutsceneDirector.Instance?.OpenGateImmediate(1);
             }
-            if (CurrentStage >= 5)
+            if (CurrentStage >= 3 && (missionIndex == 1 || missionIndex == 3))
+            {
+                CutsceneDirector.Instance?.OpenGateImmediate(1);
+            }
+            if ((CurrentStage >= 4 && missionIndex != 4) || (CurrentStage >= 5 && missionIndex == 4))
             {
                 CutsceneDirector.Instance?.OpenGateImmediate(2);
             }
 
-            switch (CurrentStage)
+            switch (missionIndex)
             {
                 case 1:
-                    SetupStage1CheckpointGarrison();
+                    SetupMission1Stage(CurrentStage);
                     break;
                 case 2:
-                    SetupStage2WatchdogAndGateC4();
+                    SetupMission2Stage(CurrentStage);
                     break;
                 case 3:
-                    SetupStage3FuelAndRadarSabotage();
+                    SetupMission3Stage(CurrentStage);
                     break;
-                case 4:
-                    SetupStage4WardenAndGate2();
-                    break;
-                case 5:
-                    SetupStage5FinalBossSector();
-                    break;
-                case 6:
-                    SetupStage6ExtractionLz();
+                default:
+                    SetupMission4Stage(CurrentStage);
                     break;
             }
 
@@ -548,179 +700,284 @@ namespace Enemies
             SyncMissionHud();
         }
 
-        private void SetupStage1CheckpointGarrison()
+        private void SetupMission1Stage(int stage)
         {
-            Gate1BreachNode?.SetState(false, false);
-            FuelValveNode?.SetState(false, false);
-            RadarTerminalNode?.SetState(false, false);
-            HelipadLzNode?.SetState(false, false);
-
-            Vector3[] sentries = missionIndex switch
+            switch (stage)
             {
-                2 => new[]
-                {
-                    new Vector3(-7.5f, 0f, -35.0f),
-                    new Vector3(7.5f, 0f, -35.0f),
-                    new Vector3(-9.5f, 0f, -26.0f),
-                    new Vector3(9.5f, 0f, -26.0f),
-                    new Vector3(-16.0f, 0f, -29.5f),
-                    new Vector3(16.0f, 0f, -29.5f),
-                    new Vector3(-3.2f, 0f, -20.5f),
-                    new Vector3(3.2f, 0f, -20.5f)
-                },
-                3 => new[]
-                {
-                    new Vector3(-6.2f, 0f, -34.5f),
-                    new Vector3(6.2f, 0f, -34.5f),
-                    new Vector3(-10.5f, 0f, -27.5f),
-                    new Vector3(10.5f, 0f, -27.5f),
-                    new Vector3(-15.5f, 0f, -24.0f),
-                    new Vector3(15.5f, 0f, -24.0f),
-                    new Vector3(-2.6f, 0f, -20.0f),
-                    new Vector3(2.6f, 0f, -20.0f)
-                },
-                _ => new[]
-                {
-                    new Vector3(-5.8f, 0f, -34.0f),
-                    new Vector3(5.8f, 0f, -34.0f),
-                    new Vector3(-8.0f, 0f, -26.5f),
-                    new Vector3(8.0f, 0f, -26.5f),
-                    new Vector3(-13.5f, 0f, -29.0f),
-                    new Vector3(13.0f, 0f, -27.5f),
-                    new Vector3(-2.4f, 0f, -20.5f),
-                    new Vector3(2.4f, 0f, -20.5f)
-                }
-            };
+                case 1:
+                    ResetMainNodes();
+                    UnlockUncollectedIntel();
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-7.0f, 0f, -34f), new Vector3(7.0f, 0f, -34f),
+                        new Vector3(-11.5f, 0f, -26f), new Vector3(11.5f, 0f, -26f),
+                        new Vector3(-3.0f, 0f, -21f), new Vector3(3.0f, 0f, -21f)
+                    }, heavyIndices: new[] { 4 }, alertedCount: 4);
+                    break;
+                case 2:
+                    PrimaryBreachNode?.SetState(true, false);
+                    StoryDirector.NotifyGate1C4Ready();
+                    UIManager.Instance?.ShowMilestoneBanner("GATE CLEAR // PLANT C4 AT " + StoryDirector.GetObjectiveNodeTitle(1, 0));
+                    break;
+                case 3:
+                    SabotageCompletedCount = 0;
+                    PrimaryBreachNode?.SetState(false, true);
+                    WestWingNode?.SetState(true, false);
+                    EastWingNode?.SetState(true, false);
+                    UnlockUncollectedIntel();
+                    _remainingReinforcements = 2;
+                    _reinforcementTimer = 8.0f;
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-22f, 0f, -4f), new Vector3(-28f, 0f, 5f), new Vector3(-18f, 0f, 14f),
+                        new Vector3(22f, 0f, -4f), new Vector3(28f, 0f, 5f), new Vector3(18f, 0f, 14f),
+                        new Vector3(0f, 0f, 18.5f)
+                    }, heavyIndices: new[] { 1, 4 }, alertedCount: 0);
+                    break;
+                case 4:
+                    CutsceneDirector.Instance?.OpenGateImmediate(2);
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-11f, 0f, 34f), new Vector3(11f, 0f, 34f),
+                        new Vector3(-15f, 0f, 44f), new Vector3(15f, 0f, 44f)
+                    }, heavyIndices: new[] { 2 }, alertedCount: 4);
+                    SpawnBossAt(new Vector3(0f, 0f, 40f));
+                    ShowBossMilestone();
+                    break;
+                case 5:
+                    ExfilNode?.SetState(true, false);
+                    UIManager.Instance?.ShowMilestoneBanner("PURGE INBOUND // SPRINT TO GUNBOAT DOCK!");
+                    break;
+            }
+        }
 
+        private void SetupMission2Stage(int stage)
+        {
+            switch (stage)
+            {
+                case 1:
+                    ResetMainNodes();
+                    UnlockUncollectedIntel();
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-22f, 0f, -36f), new Vector3(-8f, 0f, -35f),
+                        new Vector3(-25f, 0f, -28f), new Vector3(-14f, 0f, -26f),
+                        new Vector3(-4f, 0f, -24f), new Vector3(-10f, 0f, -22f),
+                        new Vector3(-20f, 0f, -23f)
+                    }, heavyIndices: new[] { 3, 5 }, alertedCount: 4);
+                    break;
+                case 2:
+                    SabotageCompletedCount = 0;
+                    WestWingNode?.SetState(true, false);
+                    EastWingNode?.SetState(true, false);
+                    UnlockUncollectedIntel();
+                    CutsceneDirector.Instance?.OpenGateImmediate(1);
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-12f, 0f, -10f), new Vector3(-29f, 0f, 0f), new Vector3(-12f, 0f, 18f),
+                        new Vector3(12f, 0f, -10f), new Vector3(29f, 0f, -4f), new Vector3(12f, 0f, 18f),
+                        new Vector3(-11f, 0f, 4f), new Vector3(11f, 0f, 8f)
+                    }, heavyIndices: new[] { 1, 4, 7 }, alertedCount: 2);
+                    break;
+                case 3:
+                    PrimaryBreachNode?.SetState(true, false);
+                    UIManager.Instance?.ShowMilestoneBanner("SWITCHES LOCKED // PLANT C4 ON TRAIN #774!");
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-9f, 0f, 21f), new Vector3(9f, 0f, 21f)
+                    }, heavyIndices: new[] { 1 }, alertedCount: 2);
+                    break;
+                case 4:
+                    CutsceneDirector.Instance?.OpenGateImmediate(2);
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-6f, 0f, 38f), new Vector3(20f, 0f, 38f),
+                        new Vector3(18f, 0f, 48f)
+                    }, heavyIndices: new[] { 1 }, alertedCount: 3);
+                    SpawnBossAt(new Vector3(8f, 0f, 43f));
+                    ShowBossMilestone();
+                    break;
+                case 5:
+                    ExfilNode?.SetState(true, false);
+                    UIManager.Instance?.ShowMilestoneBanner("VOLKOV EXPOSED // BREACH NORTH GORGE TUNNEL!");
+                    break;
+            }
+        }
+
+        private void SetupMission3Stage(int stage)
+        {
+            switch (stage)
+            {
+                case 1:
+                    ResetMainNodes();
+                    UnlockUncollectedIntel();
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-8f, 0f, -38f), new Vector3(8f, 0f, -38f),
+                        new Vector3(-6f, 0f, -31f), new Vector3(6f, 0f, -31f),
+                        new Vector3(0f, 0f, -33f), new Vector3(0f, 0f, -29f)
+                    }, heavyIndices: new[] { 4 }, alertedCount: 4);
+                    break;
+                case 2:
+                    _vaultHoldoutTriggered = false;
+                    PrimaryBreachNode?.SetState(false, true);
+                    WestWingNode?.SetState(true, false);
+                    UnlockUncollectedIntel();
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-9f, 0f, -15f), new Vector3(9f, 0f, -15f),
+                        new Vector3(-11f, 0f, 4f), new Vector3(-24f, 0f, -6f),
+                        new Vector3(-29f, 0f, 4f), new Vector3(-35f, 0f, -8f)
+                    }, heavyIndices: new[] { 2, 4 }, alertedCount: 2);
+                    break;
+                case 3:
+                    EastWingNode?.SetState(true, false);
+                    UnlockUncollectedIntel();
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(9f, 0f, -6f), new Vector3(24f, 0f, -2f),
+                        new Vector3(31f, 0f, 5f), new Vector3(34f, 0f, -9f),
+                        new Vector3(11f, 0f, 8f)
+                    }, heavyIndices: new[] { 1, 3 }, alertedCount: 2);
+                    break;
+                case 4:
+                    CutsceneDirector.Instance?.OpenGateImmediate(2);
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-11f, 0f, 25f), new Vector3(11f, 0f, 25f),
+                        new Vector3(-14f, 0f, 36f), new Vector3(14f, 0f, 36f)
+                    }, heavyIndices: new[] { 2 }, alertedCount: 4);
+                    SpawnBossAt(new Vector3(0f, 0f, 32f));
+                    ShowBossMilestone();
+                    break;
+                case 5:
+                    ExfilNode?.SetState(true, false);
+                    UIManager.Instance?.ShowMilestoneBanner("AEGIS NET RESTORED // BOARD FREIGHT LIFT!");
+                    break;
+            }
+        }
+
+        private void SetupMission4Stage(int stage)
+        {
+            switch (stage)
+            {
+                case 1:
+                    ResetMainNodes();
+                    UnlockUncollectedIntel();
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-5.5f, 0f, -40f), new Vector3(5.5f, 0f, -40f),
+                        new Vector3(-6.0f, 0f, -33f), new Vector3(6.0f, 0f, -33f),
+                        new Vector3(-3.5f, 0f, -28f), new Vector3(3.5f, 0f, -28f)
+                    }, heavyIndices: new[] { 4, 5 }, alertedCount: 6);
+                    break;
+                case 2:
+                    SabotageCompletedCount = 0;
+                    _spirePulseTimer = 4.5f;
+                    WestWingNode?.SetState(true, false);
+                    EastWingNode?.SetState(true, false);
+                    UnlockUncollectedIntel();
+                    CutsceneDirector.Instance?.OpenGateImmediate(1);
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-16f, 0f, -12f), new Vector3(-29f, 0f, -4f), new Vector3(-26f, 0f, 10f),
+                        new Vector3(16f, 0f, -12f), new Vector3(29f, 0f, -4f), new Vector3(26f, 0f, 10f),
+                        new Vector3(0f, 0f, 15f)
+                    }, heavyIndices: new[] { 1, 4, 6 }, alertedCount: 2);
+                    break;
+                case 3:
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-13f, 0f, 8f), new Vector3(13f, 0f, 8f),
+                        new Vector3(-16f, 0f, 20f), new Vector3(16f, 0f, 20f)
+                    }, heavyIndices: new[] { 2, 3 }, alertedCount: 4);
+                    SpawnBossAt(new Vector3(0f, 0f, 14f));
+                    ShowBossMilestone();
+                    break;
+                case 4:
+                    PrimaryBreachNode?.SetState(true, false);
+                    UIManager.Instance?.ShowMilestoneBanner("RADEK DOWN // HIT HELIOS KILL-SWITCH AT SPIRE!");
+                    break;
+                case 5:
+                    _evacHoldoutTriggered = false;
+                    CutsceneDirector.Instance?.OpenGateImmediate(2);
+                    ExfilNode?.SetState(true, false);
+                    UIManager.Instance?.ShowMilestoneBanner("VALKYRIE-6 INBOUND // POP FLARE & HOLD LZ!");
+                    break;
+            }
+        }
+
+        private void ResetMainNodes()
+        {
+            PrimaryBreachNode?.SetState(false, false);
+            WestWingNode?.SetState(false, false);
+            EastWingNode?.SetState(false, false);
+            ExfilNode?.SetState(false, false);
+        }
+
+        private void UnlockUncollectedIntel()
+        {
+            if (IntelNodeA != null && !IntelNodeA.IsCompleted) IntelNodeA.SetState(true, false);
+            if (IntelNodeB != null && !IntelNodeB.IsCompleted) IntelNodeB.SetState(true, false);
+        }
+
+        private void SpawnFormation(Vector3[] positions, int[] heavyIndices, int alertedCount)
+        {
             _stage1KillsProgress = 0;
-            _stage1KillTarget = sentries.Length;
-            _remainingReinforcements = 0;
-
-            for (var i = 0; i < sentries.Length; i++)
+            _stage1KillTarget = positions.Length;
+            var heavies = new HashSet<int>(heavyIndices);
+            for (var i = 0; i < positions.Length; i++)
             {
-                var makeHeavy = i == 5 || (missionIndex >= 2 && i == 4);
-                var e = SpawnEnemyAt(makeHeavy ? EnemyArchetype.Heavy : EnemyArchetype.Chaser, sentries[i]);
+                var arch = heavies.Contains(i) ? EnemyArchetype.Heavy : EnemyArchetype.Chaser;
+                var e = SpawnEnemyAt(arch, positions[i]);
                 e.transform.rotation = Quaternion.LookRotation(Vector3.back, Vector3.up);
-                e.SetGarrisonAlert(i < 4);
+                e.SetGarrisonAlert(i < alertedCount, 28f);
             }
         }
 
-        private void SetupStage2WatchdogAndGateC4()
+        private void ShowBossMilestone()
         {
-            _stage2BossCleared = false;
-            Gate1BreachNode?.SetState(false, false);
-            _remainingReinforcements = 0;
-
-            SpawnEnemyAt(EnemyArchetype.Chaser, new Vector3(-6.5f, 0f, -22.5f)).SetGarrisonAlert(true, 45f);
-            SpawnEnemyAt(EnemyArchetype.Chaser, new Vector3(6.5f, 0f, -22.5f)).SetGarrisonAlert(true, 45f);
-            SpawnEnemyAt(EnemyArchetype.Heavy, new Vector3(0f, 0f, -25.0f)).SetGarrisonAlert(true, 45f);
-
-            SpawnBossAt(new Vector3(0f, 0f, -20.5f));
             StoryDirector.NotifyBossSpawned(CurrentStage);
-            UIManager.Instance?.ShowMilestoneBanner("THREAT // " + StoryDirector.GetBossCallsign(CurrentStage));
-        }
-
-        private void SetupStage3FuelAndRadarSabotage()
-        {
-            SabotageCompletedCount = 0;
-            Gate1BreachNode?.SetState(false, true);
-            FuelValveNode?.SetState(true, false);
-            RadarTerminalNode?.SetState(true, false);
-            HelipadLzNode?.SetState(false, false);
-            _remainingReinforcements = 3;
-            _reinforcementTimer = 6.5f;
-
-            Vector3[] rifles = missionIndex switch
-            {
-                2 => new[]
-                {
-                    new Vector3(-9.5f, 0f, -6.5f),
-                    new Vector3(-22.5f, 0f, 3.5f),
-                    new Vector3(-4.0f, 0f, 4.5f),
-                    new Vector3(5.5f, 0f, -4.5f),
-                    new Vector3(22.0f, 0f, -4.5f),
-                    new Vector3(9.5f, 0f, 7.5f)
-                },
-                3 => new[]
-                {
-                    new Vector3(-13.5f, 0f, -6.0f),
-                    new Vector3(-19.5f, 0f, 5.5f),
-                    new Vector3(-6.0f, 0f, 3.5f),
-                    new Vector3(6.5f, 0f, -3.5f),
-                    new Vector3(19.0f, 0f, -5.0f),
-                    new Vector3(23.5f, 0f, 7.0f)
-                },
-                _ => new[]
-                {
-                    new Vector3(-16.0f, 0f, -7.5f),
-                    new Vector3(-18.5f, 0f, 3.5f),
-                    new Vector3(-6.0f, 0f, 2.5f),
-                    new Vector3(7.0f, 0f, -3.5f),
-                    new Vector3(17.5f, 0f, -4.5f),
-                    new Vector3(23.5f, 0f, 6.0f)
-                }
-            };
-            Vector3[] heavies =
-            {
-                new(-21.0f, 0f, 0.5f),
-                new(18.5f, 0f, 4.5f),
-                new(0.0f, 0f, 11.0f)
-            };
-
-            foreach (var t in rifles)
-            {
-                var e = SpawnEnemyAt(EnemyArchetype.Chaser, t);
-                e.transform.rotation = Quaternion.LookRotation(Vector3.back, Vector3.up);
-                e.SetGarrisonAlert(false, 22f);
-            }
-            foreach (var t in heavies)
-            {
-                var h = SpawnEnemyAt(EnemyArchetype.Heavy, t);
-                h.transform.rotation = Quaternion.LookRotation(Vector3.back, Vector3.up);
-                h.SetGarrisonAlert(false, 23f);
-            }
-        }
-
-        private void SetupStage4WardenAndGate2()
-        {
-            _remainingReinforcements = 0;
-            foreach (var t in _activeEnemies.Where(t => t != null))
-            {
-                t.SetGarrisonAlert(true, 64f);
-            }
-
-            SpawnEnemyAt(EnemyArchetype.Heavy, new Vector3(-7.5f, 0f, 14.5f)).SetGarrisonAlert(true, 55f);
-            SpawnEnemyAt(EnemyArchetype.Chaser, new Vector3(7.5f, 0f, 14.5f)).SetGarrisonAlert(true, 55f);
-            SpawnBossAt(new Vector3(0f, 0f, 15.5f));
-            StoryDirector.NotifyBossSpawned(CurrentStage);
-            UIManager.Instance?.ShowMilestoneBanner("THREAT // " + StoryDirector.GetBossCallsign(CurrentStage));
-        }
-
-        private void SetupStage5FinalBossSector()
-        {
-            _remainingReinforcements = 0;
-            CutsceneDirector.Instance?.OpenGateImmediate(2);
-
-            SpawnEnemyAt(EnemyArchetype.Chaser, new Vector3(-9.5f, 0f, 29.0f)).SetGarrisonAlert(true, 55f);
-            SpawnEnemyAt(EnemyArchetype.Chaser, new Vector3(9.5f, 0f, 29.0f)).SetGarrisonAlert(true, 55f);
-            SpawnEnemyAt(EnemyArchetype.Heavy, new Vector3(-11.5f, 0f, 36.5f)).SetGarrisonAlert(true, 55f);
-            SpawnEnemyAt(EnemyArchetype.Heavy, new Vector3(11.5f, 0f, 36.5f)).SetGarrisonAlert(true, 55f);
-
-            SpawnBossAt(new Vector3(0f, 0f, 42.0f));
-            StoryDirector.NotifyBossSpawned(CurrentStage);
-            UIManager.Instance?.ShowMilestoneBanner("FINAL TARGET // " + StoryDirector.GetBossCallsign(5));
-
+            UIManager.Instance?.ShowMilestoneBanner("HVT // " + StoryDirector.GetBossCallsign(CurrentStage));
             if (GameManager.Instance != null && GameManager.Instance.CurrentState == GameState.Playing)
             {
                 GameManager.Instance.TriggerCutscene(CutsceneType.FinalBossIntro);
             }
         }
 
-        private void SetupStage6ExtractionLz()
+        private void HandleHoldoutStarted(CampaignObjectiveNode node)
         {
-            _remainingReinforcements = 0;
-            HelipadLzNode?.SetState(true, false);
-            UIManager.Instance?.ShowMilestoneBanner("REACH " + StoryDirector.GetObjectiveNodeTitle(missionIndex, 3) + "!");
+            if (missionIndex == 3 && node == WestWingNode && !_vaultHoldoutTriggered)
+            {
+                _vaultHoldoutTriggered = true;
+                _remainingReinforcements = 4;
+                _reinforcementTimer = 1.6f;
+                StoryDirector.NotifyVaultHoldoutStarted();
+                UIManager.Instance?.ShowMilestoneBanner("DECRYPTING // HOLD WEST SERVER VAULT!");
+            }
+            else if (missionIndex == 4 && node == ExfilNode && !_evacHoldoutTriggered)
+            {
+                _evacHoldoutTriggered = true;
+                var isBroadcast = GameManager.Instance != null && GameManager.Instance.ActiveEndingChoice == CampaignEndingKind.BroadcastBlackout;
+                if (isBroadcast)
+                {
+                    UIManager.Instance?.TriggerThreatWarning("!! BLACKOUT UPLINK LIVE — AEGIS CLEANER TEAMS CONVERGING !!", 3.2f);
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-13f, 0f, 34f), new Vector3(13f, 0f, 34f),
+                        new Vector3(-16f, 0f, 41f), new Vector3(16f, 0f, 41f),
+                        new Vector3(-14f, 0f, 48f), new Vector3(14f, 0f, 48f)
+                    }, heavyIndices: new[] { 2, 3 }, alertedCount: 6);
+                }
+                else
+                {
+                    SpawnFormation(new[]
+                    {
+                        new Vector3(-11f, 0f, 34f), new Vector3(11f, 0f, 34f),
+                        new Vector3(-13f, 0f, 46f)
+                    }, heavyIndices: new[] { 2 }, alertedCount: 3);
+                }
+            }
         }
 
         private void Update()
@@ -733,152 +990,327 @@ namespace Enemies
             var dt = Time.deltaTime;
             if (dt <= 0f) return;
 
-            if (CurrentStage == 3 && _remainingReinforcements > 0)
+            // Reinforcements during M1 Pier Sabotage & M3 Server Vault Holdout
+            if (_remainingReinforcements > 0)
             {
                 _reinforcementTimer -= dt;
                 if (_reinforcementTimer <= 0f && _activeEnemies.Count < 10)
                 {
                     _remainingReinforcements--;
-                    _reinforcementTimer = 6.0f;
-                    var esc = SpawnEnemyAt(_remainingReinforcements == 0 ? EnemyArchetype.Heavy : EnemyArchetype.Chaser, new Vector3(Random.Range(-6f, 6f), 0f, 16.5f));
-                    esc.SetGarrisonAlert(true, 55f);
+                    _reinforcementTimer = missionIndex == 3 ? 2.4f : 7.5f;
+                    var spawnPos = missionIndex == 3
+                        ? new Vector3(-14f, 0f, UnityEngine.Random.Range(-7f, 4f))
+                        : new Vector3(UnityEngine.Random.Range(-10f, 10f), 0f, 18f);
+                    var esc = SpawnEnemyAt(_remainingReinforcements == 0 ? EnemyArchetype.Heavy : EnemyArchetype.Chaser, spawnPos);
+                    esc.SetGarrisonAlert(true, 60f);
                 }
             }
 
-            switch (CurrentStage)
+            // Mission 4 Central HELIOS Spire environmental pulse hazard during Stage 2
+            if (missionIndex == 4 && CurrentStage == 2 && PlayerController.Instance != null && !PlayerController.Instance.IsDead)
             {
-                // Stage advancement checks based on Campaign Objectives rather than arcade wave counters
-                case 1 when _activeEnemies.Count == 0:
+                _spirePulseTimer -= dt;
+                if (_spirePulseTimer <= 0f)
                 {
-                    _stageBeatTimer += dt;
-                    if (_stageBeatTimer >= 0.85f)
-                    {
-                        _stageBeatTimer = 0f;
-                        BeginCampaignStage(2);
-                    }
-
-                    break;
+                    _spirePulseTimer = 5.4f;
+                    SpawnHazardTelegraph(PlayerController.Instance.transform.position, 2.4f, 18f);
                 }
-                case 2 when !_stage2BossCleared && _activeEnemies.Count == 0:
-                    _stage2BossCleared = true;
-                    Gate1BreachNode?.SetState(true, false);
-                    StoryDirector.NotifyGate1C4Ready();
-                    UIManager.Instance?.ShowMilestoneBanner("GATE CLEAR // PLANT C4 AT " + StoryDirector.GetObjectiveNodeTitle(missionIndex, 0));
-                    SyncMissionHud();
-                    break;
-                case 4 when _activeEnemies.Count == 0:
-                {
-                    _stageBeatTimer += dt;
-                    if (_stageBeatTimer >= 0.9f)
-                    {
-                        _stageBeatTimer = 0f;
-                        _transitionPending = true;
-                        CutsceneDirector.Instance?.OpenGateImmediate(2);
-                        var g2Center = new Vector3(0f, 1.6f, 22f);
-                        VFXManager.Instance?.Play(VfxKind.EnemyDeath, g2Center, Palette.RocketOrange);
-                        FeelManager.Instance?.TriggerCameraShake(0.38f);
-                        AudioManager.Instance?.PlayEnemyExplode();
-                        PlayerController.Instance?.AddFragGrenades(1);
-                        BeginCampaignStage(5);
-                    }
+            }
 
+            // Stage completion checks per mission
+            switch (missionIndex)
+            {
+                case 1:
+                    UpdateMission1Progression(dt);
                     break;
+                case 2:
+                    UpdateMission2Progression(dt);
+                    break;
+                case 3:
+                    UpdateMission3Progression(dt);
+                    break;
+                default:
+                    UpdateMission4Progression(dt);
+                    break;
+            }
+        }
+
+        private void UpdateMission1Progression(float dt)
+        {
+            if (CurrentStage == 1 && _activeEnemies.Count == 0)
+            {
+                _stageBeatTimer += dt;
+                if (_stageBeatTimer >= 0.75f)
+                {
+                    _stageBeatTimer = 0f;
+                    BeginCampaignStage(2);
                 }
-                case 5 when _activeEnemies.Count == 0:
+            }
+            else if (CurrentStage == 4 && _activeEnemies.Count == 0)
+            {
+                _stageBeatTimer += dt;
+                if (_stageBeatTimer >= 0.85f)
                 {
-                    _stageBeatTimer += dt;
-                    if (_stageBeatTimer >= 0.8f)
-                    {
-                        _stageBeatTimer = 0f;
-                        BeginCampaignStage(6);
-                    }
+                    _stageBeatTimer = 0f;
+                    BeginCampaignStage(5);
+                }
+            }
+        }
 
-                    break;
+        private void UpdateMission2Progression(float dt)
+        {
+            if (CurrentStage == 1 && _activeEnemies.Count == 0)
+            {
+                _stageBeatTimer += dt;
+                if (_stageBeatTimer >= 0.75f)
+                {
+                    _stageBeatTimer = 0f;
+                    _transitionPending = true;
+                    CutsceneDirector.Instance?.OpenGateImmediate(1);
+                    VFXManager.Instance?.Play(VfxKind.EnemyDeath, new Vector3(-10f, 1.5f, -20f), Palette.RocketOrange);
+                    FeelManager.Instance?.TriggerCameraShake(0.32f);
+                    AudioManager.Instance?.PlayEnemyExplode();
+                    BeginCampaignStage(2);
+                }
+            }
+            else if (CurrentStage == 4 && _activeEnemies.Count == 0)
+            {
+                _stageBeatTimer += dt;
+                if (_stageBeatTimer >= 0.85f)
+                {
+                    _stageBeatTimer = 0f;
+                    BeginCampaignStage(5);
+                }
+            }
+        }
+
+        private void UpdateMission3Progression(float dt)
+        {
+            if (CurrentStage == 1 && !_stage1GatePrompted && _activeEnemies.Count == 0)
+            {
+                _stage1GatePrompted = true;
+                PrimaryBreachNode?.SetState(true, false);
+                StoryDirector.NotifyGate1C4Ready();
+                UIManager.Instance?.ShowMilestoneBanner("AIRLOCK CLEAR // BREACH BULKHEAD [E]");
+                SyncMissionHud();
+            }
+            else if (CurrentStage == 4 && _activeEnemies.Count == 0)
+            {
+                _stageBeatTimer += dt;
+                if (_stageBeatTimer >= 0.85f)
+                {
+                    _stageBeatTimer = 0f;
+                    BeginCampaignStage(5);
+                }
+            }
+        }
+
+        private void UpdateMission4Progression(float dt)
+        {
+            if (CurrentStage == 1 && _activeEnemies.Count == 0)
+            {
+                _stageBeatTimer += dt;
+                if (_stageBeatTimer >= 0.75f)
+                {
+                    _stageBeatTimer = 0f;
+                    _transitionPending = true;
+                    CutsceneDirector.Instance?.OpenGateImmediate(1);
+                    VFXManager.Instance?.Play(VfxKind.EnemyDeath, new Vector3(0f, 1.6f, -26f), Palette.M3HeliosCoreCyan);
+                    FeelManager.Instance?.TriggerCameraShake(0.36f);
+                    AudioManager.Instance?.PlayEnemyExplode();
+                    BeginCampaignStage(2);
+                }
+            }
+            else if (CurrentStage == 3 && _activeEnemies.Count == 0)
+            {
+                _stageBeatTimer += dt;
+                if (_stageBeatTimer >= 0.85f)
+                {
+                    _stageBeatTimer = 0f;
+                    BeginCampaignStage(4);
                 }
             }
         }
 
         private void HandleObjectiveCompleted(CampaignObjectiveNode node)
         {
-            if (node == Gate1BreachNode && CurrentStage == 2)
+            // Optional Collectible Field Intel Terminal
+            if (node.Kind == ObjectiveNodeKind.IntelTerminal)
+            {
+                foreach (var entry in StoryDirector.IntelCatalog)
+                {
+                    if (entry.Id != node.IntelId) continue;
+                    var newlyFound = SaveManager.EnsureInstance().UnlockIntelLog(entry.Id);
+                    GameManager.Instance?.AddRunCredits(newlyFound ? entry.RewardCredits : 30);
+                    StoryDirector.NotifyIntelDiscovered(entry);
+                    UIManager.Instance?.ShowMilestoneBanner($"INTEL // {entry.Header}");
+                    break;
+                }
+                return;
+            }
+
+            if (node == ExfilNode && CurrentStage == 5)
             {
                 _transitionPending = true;
-                PlayerController.Instance?.AddFragGrenades(1);
-                if (GameManager.Instance != null)
+                // Clear remaining final LZ rushers cleanly on Mission 4 extraction flare
+                for (var i = _activeEnemies.Count - 1; i >= 0; i--)
                 {
-                    GameManager.Instance.TriggerCutscene(CutsceneType.Act2GateBreach, () =>
-                    {
-                        BeginCampaignStage(3);
-                        UIManager.Instance?.ShowMilestoneBanner(StoryDirector.GetActLabel(3));
-                    });
+                    if (_activeEnemies[i] != null) _activeEnemies[i].ForceReturnToPool();
                 }
-                else
-                {
-                    BeginCampaignStage(3);
-                }
+                _activeEnemies.Clear();
+                GameManager.Instance?.CompleteCampaignVictory();
                 return;
             }
 
-            if ((node == FuelValveNode || node == RadarTerminalNode) && CurrentStage == 3)
+            switch (missionIndex)
             {
-                SabotageCompletedCount++;
-                StoryDirector.NotifySabotageProgress(SabotageCompletedCount, 2, node.DisplayTitle);
-                SyncMissionHud();
+                case 1:
+                    if (node == PrimaryBreachNode && CurrentStage == 2)
+                    {
+                        TriggerGateBreachTransition(3, "TWIN HARBOR PIERS");
+                    }
+                    else if ((node == WestWingNode || node == EastWingNode) && CurrentStage == 3)
+                    {
+                        SabotageCompletedCount++;
+                        StoryDirector.NotifySabotageProgress(SabotageCompletedCount, 2, node.DisplayTitle);
+                        SyncMissionHud();
+                        if (SabotageCompletedCount >= 2)
+                        {
+                            PlayerController.Instance?.AddFragGrenades(1);
+                            BeginCampaignStage(4);
+                        }
+                    }
+                    break;
 
-                if (SabotageCompletedCount < 2) return;
-                UIManager.Instance?.ShowMilestoneBanner("TARGETS SABOTAGED // DESTROY " + StoryDirector.GetBossCallsign(4));
-                BeginCampaignStage(4);
-                return;
+                case 2:
+                    if ((node == WestWingNode || node == EastWingNode) && CurrentStage == 2)
+                    {
+                        SabotageCompletedCount++;
+                        StoryDirector.NotifySabotageProgress(SabotageCompletedCount, 2, node.DisplayTitle);
+                        SyncMissionHud();
+                        if (SabotageCompletedCount >= 2)
+                        {
+                            BeginCampaignStage(3);
+                        }
+                    }
+                    else if (node == PrimaryBreachNode && CurrentStage == 3)
+                    {
+                        PlayerController.Instance?.AddFragGrenades(1);
+                        TriggerGateBreachTransition(4, "NORTH GORGE // GOLIATH-02");
+                    }
+                    break;
+
+                case 3:
+                    if (node == PrimaryBreachNode && CurrentStage == 1)
+                    {
+                        TriggerGateBreachTransition(2, "CENTRAL SECURITY ATRIUM");
+                    }
+                    else if (node == WestWingNode && CurrentStage == 2)
+                    {
+                        _remainingReinforcements = 0;
+                        BeginCampaignStage(3);
+                    }
+                    else if (node == EastWingNode && CurrentStage == 3)
+                    {
+                        PlayerController.Instance?.AddFragGrenades(1);
+                        BeginCampaignStage(4);
+                    }
+                    break;
+
+                default:
+                    if ((node == WestWingNode || node == EastWingNode) && CurrentStage == 2)
+                    {
+                        SabotageCompletedCount++;
+                        StoryDirector.NotifySabotageProgress(SabotageCompletedCount, 2, node.DisplayTitle);
+                        SyncMissionHud();
+                        if (SabotageCompletedCount >= 2)
+                        {
+                            PlayerController.Instance?.AddFragGrenades(1);
+                            BeginCampaignStage(3);
+                        }
+                    }
+                    else if (node == PrimaryBreachNode && CurrentStage == 4)
+                    {
+                        if (GameManager.Instance != null)
+                        {
+                            GameManager.Instance.PresentAct4CoreChoice();
+                        }
+                        else
+                        {
+                            CompleteAct4CoreDecision(CampaignEndingKind.SilentKillSwitch);
+                        }
+                    }
+                    break;
             }
+        }
 
-            if (node != HelipadLzNode || CurrentStage != 6) return;
+        public void CompleteAct4CoreDecision(CampaignEndingKind choice)
+        {
+            var banner = choice == CampaignEndingKind.BroadcastBlackout
+                ? "BLACKOUT LEDGER BROADCAST // REACH LZ VALKYRIE-6!"
+                : "SPIRE DARK // PROCEED TO LZ VALKYRIE-6";
+            TriggerGateBreachTransition(5, banner);
+        }
+
+        private void TriggerGateBreachTransition(int nextStage, string bannerText)
+        {
             _transitionPending = true;
-            GameManager.Instance?.CompleteCampaignVictory();
+            PlayerController.Instance?.AddFragGrenades(1);
+            if (GameManager.Instance != null)
+            {
+                GameManager.Instance.TriggerCutscene(CutsceneType.Act2GateBreach, () =>
+                {
+                    BeginCampaignStage(nextStage);
+                    UIManager.Instance?.ShowMilestoneBanner(bannerText);
+                });
+            }
+            else
+            {
+                BeginCampaignStage(nextStage);
+            }
         }
 
         public Vector3 GetActiveObjectiveWorldPoint()
         {
-            switch (CurrentStage)
+            if (PrimaryBreachNode != null && PrimaryBreachNode.IsUnlocked) return PrimaryBreachNode.transform.position;
+            var westAvail = WestWingNode != null && WestWingNode.IsUnlocked;
+            var eastAvail = EastWingNode != null && EastWingNode.IsUnlocked;
+            if (westAvail && eastAvail && PlayerController.Instance != null)
             {
-                case 2 when Gate1BreachNode != null && Gate1BreachNode.IsUnlocked:
-                    return Gate1BreachNode.transform.position;
-                case 3:
-                {
-                    var fuelAvail = FuelValveNode != null && FuelValveNode.IsUnlocked;
-                    var radarAvail = RadarTerminalNode != null && RadarTerminalNode.IsUnlocked;
-                    switch (fuelAvail)
-                    {
-                        case true when radarAvail && PlayerController.Instance != null:
-                        {
-                            var dFuel = (FuelValveNode.transform.position - PlayerController.Instance.transform.position).sqrMagnitude;
-                            var dRad = (RadarTerminalNode.transform.position - PlayerController.Instance.transform.position).sqrMagnitude;
-                            return dFuel <= dRad ? FuelValveNode.transform.position : RadarTerminalNode.transform.position;
-                        }
-                        case true:
-                            return FuelValveNode.transform.position;
-                    }
-
-                    if (radarAvail) return RadarTerminalNode.transform.position;
-                    break;
-                }
-                case 6 when HelipadLzNode != null:
-                    return HelipadLzNode.transform.position;
+                var dW = (WestWingNode.transform.position - PlayerController.Instance.transform.position).sqrMagnitude;
+                var dE = (EastWingNode.transform.position - PlayerController.Instance.transform.position).sqrMagnitude;
+                return dW <= dE ? WestWingNode.transform.position : EastWingNode.transform.position;
             }
-
-            if (_activeEnemies.Count > 0 && _activeEnemies[0] != null)
-            {
-                return _activeEnemies[0].transform.position;
-            }
-            return new Vector3(0f, 0f, CurrentStage <= 2 ? -17.5f : (CurrentStage <= 4 ? 16f : 42f));
+            if (westAvail) return WestWingNode.transform.position;
+            if (eastAvail) return EastWingNode.transform.position;
+            if (ExfilNode != null && ExfilNode.IsUnlocked) return ExfilNode.transform.position;
+            if (_activeEnemies.Count > 0 && _activeEnemies[0] != null) return _activeEnemies[0].transform.position;
+            return Vector3.zero;
         }
 
         public Vector3 ClampPositionToUnlockedSectors(Vector3 pos)
         {
-            var maxZ = CurrentStage <= 2 ? sector1MaxZ : (CurrentStage <= 4 ? sector2MaxZ : sector3MaxZ);
-            var z = Mathf.Clamp(pos.z, compoundMinZ, maxZ);
-            var halfW = z < -14f ? sector1HalfWidth : (z <= 22f ? sector2HalfWidth : sector3HalfWidth);
-            var x = Mathf.Clamp(pos.x, -halfW, halfW);
-            return new Vector3(x, pos.y, z);
+            if (_walkableZones.Count == 0) ConfigureMissionWalkableZones();
+
+            var bestDistSq = float.MaxValue;
+            var bestPoint = pos;
+
+            foreach (var z in _walkableZones)
+            {
+                if (!z.IsActiveForStage(CurrentStage)) continue;
+                if (z.Contains(pos)) return pos;
+
+                var clamped = z.ClampPoint(pos);
+                var dx = clamped.x - pos.x;
+                var dz = clamped.z - pos.z;
+                var dSq = dx * dx + dz * dz;
+                if (dSq < bestDistSq)
+                {
+                    bestDistSq = dSq;
+                    bestPoint = clamped;
+                }
+            }
+            return bestPoint;
         }
 
         private void SpawnBossAt(Vector3 worldPos)
@@ -904,6 +1336,15 @@ namespace Enemies
 
         public void SpawnHazardTelegraph(Vector3 worldPos, float radius, float dmg)
         {
+            if (PlayerController.Instance != null && !PlayerController.Instance.IsDead)
+            {
+                var d = worldPos - PlayerController.Instance.transform.position;
+                d.y = 0f;
+                if (d.sqrMagnitude <= 110f)
+                {
+                    UIManager.Instance?.TriggerThreatWarning("!! RWR ALERT: INCOMING ARTILLERY / ORBITAL IMPACT !!", 1.85f);
+                }
+            }
             StartCoroutine(HazardTelegraphRoutine(new Vector3(worldPos.x, 0.04f, worldPos.z), radius, dmg));
         }
 
@@ -962,7 +1403,7 @@ namespace Enemies
                 diff.y = 0f;
                 if (diff.magnitude <= radius)
                 {
-                    player.TakeDamage(dmg);
+                    player.TakeDamage(dmg, center);
                 }
             }
 
@@ -1000,19 +1441,18 @@ namespace Enemies
                     for (var i = 0; i < 4; i++)
                     {
                         var offset = Quaternion.Euler(0f, i * 90f, 0f) * Vector3.forward * 1.4f;
-                        SpawnPickupAt(PickupKind.CreditCoin, center + offset, 25);
+                        SpawnPickupAt(PickupKind.CreditCoin, center + offset, 30);
                     }
                 }
                 else
                 {
-                    // Realistic occasional Trauma IFAK & Munition Crate drops (NO glowing arcade XP gems)
                     var roll = UnityEngine.Random.value;
                     switch (roll)
                     {
-                        case < 0.22f:
+                        case < 0.24f:
                             SpawnPickupAt(PickupKind.Medkit, enemy.transform.position);
                             break;
-                        case < 0.56f:
+                        case < 0.58f:
                             SpawnPickupAt(PickupKind.CreditCoin, enemy.transform.position, enemy.Archetype == EnemyArchetype.Heavy ? 25 : 15);
                             break;
                     }
@@ -1030,7 +1470,7 @@ namespace Enemies
                 _stage1KillTarget,
                 SabotageCompletedCount,
                 2,
-                Gate1BreachNode != null && Gate1BreachNode.IsUnlocked);
+                PrimaryBreachNode != null && PrimaryBreachNode.IsUnlocked);
 
             UIManager.Instance?.UpdateMissionStatus(actTitle, _activeEnemies.Count, objText);
         }
@@ -1049,8 +1489,11 @@ namespace Enemies
             _remainingReinforcements = 0;
             _reinforcementTimer = 0f;
             _stageBeatTimer = 0f;
+            _spirePulseTimer = 4.5f;
             SabotageCompletedCount = 0;
-            _stage2BossCleared = false;
+            _stage1GatePrompted = false;
+            _vaultHoldoutTriggered = false;
+            _evacHoldoutTriggered = false;
 
             for (var i = _objectiveNodes.Count - 1; i >= 0; i--)
             {

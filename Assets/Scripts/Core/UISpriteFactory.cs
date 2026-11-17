@@ -10,6 +10,12 @@ namespace Core
     {
         private static Sprite _solidRect;
         private static Sprite _roundedRect;
+        private static Sprite _chamferPanel;
+        private static Sprite _tacticalBorder;
+        private static Sprite _radarGridRing;
+        private static Sprite _radarCone;
+        private static Sprite _hitArc;
+        private static Sprite _skullKiaIcon;
         private static Sprite _circleSprite;
         private static Sprite _ringSprite;
         private static Sprite _shieldIcon;
@@ -127,20 +133,20 @@ namespace Core
             if (_crosshairIcon != null) return _crosshairIcon;
             const int s = 64;
             var tex = CreateBlankTexture("UI_CrosshairTex", s);
+            const float mid = (s - 1) * 0.5f;
             for (var y = 0; y < s; y++)
             {
                 for (var x = 0; x < s; x++)
                 {
-                    var dx = x - s * 0.5f;
-                    var dy = y - s * 0.5f;
+                    var dx = x - mid;
+                    var dy = y - mid;
                     var r = Mathf.Sqrt(dx * dx + dy * dy);
-                    var ring = r is >= 16f and <= 20f;
-                    var horiz = Mathf.Abs(dy) <= 2f && Mathf.Abs(dx) >= 8f && Mathf.Abs(dx) <= 27f;
-                    var vert = Mathf.Abs(dx) <= 2f && Mathf.Abs(dy) >= 8f && Mathf.Abs(dy) <= 27f;
-                    var center = r <= 3f;
-                    if (ring || horiz || vert || center)
+                    var horiz = Mathf.Abs(dy) <= 1.15f && Mathf.Abs(dx) is >= 7f and <= 24f;
+                    var vert = Mathf.Abs(dx) <= 1.15f && Mathf.Abs(dy) is >= 7f and <= 24f;
+                    var center = r <= 2.0f;
+                    if (horiz || vert || center)
                     {
-                        tex.SetPixel(x, y, new Color(1f, 1f, 1f, 1f));
+                        tex.SetPixel(x, y, new Color(1f, 1f, 1f, center ? 1f : 0.92f));
                     }
                 }
             }
@@ -148,6 +154,182 @@ namespace Core
             _crosshairIcon = Sprite.Create(tex, new Rect(0, 0, s, s), new Vector2(0.5f, 0.5f), 100f);
             _crosshairIcon.name = "UI_CrosshairIcon";
             return _crosshairIcon;
+        }
+
+        public static Sprite GetChamferPanelSprite()
+        {
+            if (_chamferPanel != null) return _chamferPanel;
+            const int s = 32;
+            const int cut = 4;
+            var tex = new Texture2D(s, s, TextureFormat.RGBA32, false)
+            {
+                name = "UI_ChamferPanelTex",
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            for (var y = 0; y < s; y++)
+            {
+                for (var x = 0; x < s; x++)
+                {
+                    var dTL = x + (s - 1 - y);
+                    var dTR = (s - 1 - x) + (s - 1 - y);
+                    var dBL = x + y;
+                    var dBR = (s - 1 - x) + y;
+                    var inside = dTL >= cut && dTR >= cut && dBL >= cut && dBR >= cut;
+                    tex.SetPixel(x, y, inside ? Color.white : Palette.Transparent);
+                }
+            }
+            tex.Apply();
+            var border = new Vector4(cut + 3, cut + 3, cut + 3, cut + 3);
+            _chamferPanel = Sprite.Create(tex, new Rect(0, 0, s, s), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect, border);
+            _chamferPanel.name = "UI_ChamferPanel";
+            return _chamferPanel;
+        }
+
+        public static Sprite GetTacticalBorderSprite()
+        {
+            if (_tacticalBorder != null) return _tacticalBorder;
+            const int s = 32;
+            const int cut = 4;
+            var tex = new Texture2D(s, s, TextureFormat.RGBA32, false)
+            {
+                name = "UI_TacticalBorderTex",
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            for (var y = 0; y < s; y++)
+            {
+                for (var x = 0; x < s; x++)
+                {
+                    var dTL = x + (s - 1 - y);
+                    var dTR = (s - 1 - x) + (s - 1 - y);
+                    var dBL = x + y;
+                    var dBR = (s - 1 - x) + y;
+                    var inside = dTL >= cut && dTR >= cut && dBL >= cut && dBR >= cut;
+                    var isEdge = inside && (x <= 1 || x >= s - 2 || y <= 1 || y >= s - 2 ||
+                                            dTL <= cut + 1 || dTR <= cut + 1 || dBL <= cut + 1 || dBR <= cut + 1);
+                    tex.SetPixel(x, y, isEdge ? Color.white : Palette.Transparent);
+                }
+            }
+            tex.Apply();
+            var border = new Vector4(cut + 3, cut + 3, cut + 3, cut + 3);
+            _tacticalBorder = Sprite.Create(tex, new Rect(0, 0, s, s), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect, border);
+            _tacticalBorder.name = "UI_TacticalBorder";
+            return _tacticalBorder;
+        }
+
+        public static Sprite GetRadarGridRingSprite()
+        {
+            if (_radarGridRing != null) return _radarGridRing;
+            const int s = 128;
+            var tex = CreateBlankTexture("UI_RadarGridRingTex", s);
+            const float center = (s - 1) * 0.5f;
+            for (var y = 0; y < s; y++)
+            {
+                for (var x = 0; x < s; x++)
+                {
+                    var dx = x - center;
+                    var dy = y - center;
+                    var r = Mathf.Sqrt(dx * dx + dy * dy);
+                    var outer = Mathf.Abs(r - 59f) <= 1.1f;
+                    var inner = Mathf.Abs(r - 30f) <= 0.9f && ((x + y) % 5 != 0);
+                    var cross = (Mathf.Abs(dx) <= 0.7f || Mathf.Abs(dy) <= 0.7f) && r <= 59f && ((int)r % 6 < 3);
+                    if (outer || inner || cross)
+                    {
+                        var a = outer ? 0.52f : (inner ? 0.34f : 0.16f);
+                        tex.SetPixel(x, y, new Color(1f, 1f, 1f, a));
+                    }
+                }
+            }
+            tex.Apply();
+            _radarGridRing = Sprite.Create(tex, new Rect(0, 0, s, s), new Vector2(0.5f, 0.5f), 100f);
+            _radarGridRing.name = "UI_RadarGridRing";
+            return _radarGridRing;
+        }
+
+        public static Sprite GetRadarConeSprite()
+        {
+            if (_radarCone != null) return _radarCone;
+            const int s = 128;
+            var tex = CreateBlankTexture("UI_RadarConeTex", s);
+            const float center = (s - 1) * 0.5f;
+            for (var y = 0; y < s; y++)
+            {
+                for (var x = 0; x < s; x++)
+                {
+                    var dx = x - center;
+                    var dy = y - center;
+                    if (dy <= 0f) continue;
+                    var r = Mathf.Sqrt(dx * dx + dy * dy);
+                    if (r is < 4f or > 58f) continue;
+                    var angDeg = Mathf.Abs(Mathf.Atan2(dx, dy) * Mathf.Rad2Deg);
+                    if (angDeg > 32f) continue;
+                    var radialFade = Mathf.Clamp01(1f - r / 58f) * 0.42f;
+                    var edgeFade = Mathf.Clamp01((32f - angDeg) / 5f);
+                    tex.SetPixel(x, y, new Color(1f, 1f, 1f, radialFade * edgeFade));
+                }
+            }
+            tex.Apply();
+            _radarCone = Sprite.Create(tex, new Rect(0, 0, s, s), new Vector2(0.5f, 0.5f), 100f);
+            _radarCone.name = "UI_RadarCone";
+            return _radarCone;
+        }
+
+        public static Sprite GetHitArcSprite()
+        {
+            if (_hitArc != null) return _hitArc;
+            const int s = 128;
+            var tex = CreateBlankTexture("UI_HitArcTex", s);
+            const float center = (s - 1) * 0.5f;
+            for (var y = 0; y < s; y++)
+            {
+                for (var x = 0; x < s; x++)
+                {
+                    var dx = x - center;
+                    var dy = y - center;
+                    if (dy <= 0f) continue;
+                    var r = Mathf.Sqrt(dx * dx + dy * dy);
+                    if (r is < 44f or > 58f) continue;
+                    var angDeg = Mathf.Abs(Mathf.Atan2(dx, dy) * Mathf.Rad2Deg);
+                    if (angDeg > 36f) continue;
+                    var band = Mathf.Clamp01(1f - Mathf.Abs(r - 51f) / 7f);
+                    var sweep = Mathf.Clamp01((36f - angDeg) / 14f);
+                    tex.SetPixel(x, y, new Color(1f, 1f, 1f, band * sweep));
+                }
+            }
+            tex.Apply();
+            _hitArc = Sprite.Create(tex, new Rect(0, 0, s, s), new Vector2(0.5f, 0.5f), 100f);
+            _hitArc.name = "UI_HitArc";
+            return _hitArc;
+        }
+
+        public static Sprite GetSkullKiaIcon()
+        {
+            if (_skullKiaIcon != null) return _skullKiaIcon;
+            const int s = 32;
+            var tex = CreateBlankTexture("UI_SkullKiaTex", s);
+            for (var y = 0; y < s; y++)
+            {
+                for (var x = 0; x < s; x++)
+                {
+                    var nx = (x - 15.5f) / 12f;
+                    var ny = (y - 15.5f) / 12f;
+                    var cranium = (nx * nx + (ny - 0.15f) * (ny - 0.15f)) <= 0.68f;
+                    var jaw = Mathf.Abs(nx) <= 0.44f && ny is >= -0.78f and <= 0.05f;
+                    if (!cranium && !jaw) continue;
+                    var leftEye = ((nx + 0.30f) * (nx + 0.30f) + (ny - 0.06f) * (ny - 0.06f)) <= 0.045f;
+                    var rightEye = ((nx - 0.30f) * (nx - 0.30f) + (ny - 0.06f) * (ny - 0.06f)) <= 0.045f;
+                    var teethGap = ny < -0.45f && (x % 3 == 0);
+                    if (!leftEye && !rightEye && !teethGap)
+                    {
+                        tex.SetPixel(x, y, Color.white);
+                    }
+                }
+            }
+            tex.Apply();
+            _skullKiaIcon = Sprite.Create(tex, new Rect(0, 0, s, s), new Vector2(0.5f, 0.5f), 100f);
+            _skullKiaIcon.name = "UI_SkullKiaIcon";
+            return _skullKiaIcon;
         }
 
         public static Sprite GetRingSprite()

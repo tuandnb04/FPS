@@ -121,7 +121,7 @@ namespace Combat
                 pushDir.y = 0f;
                 var normalizedPush = pushDir.sqrMagnitude > 0.01f ? pushDir.normalized : Vector3.forward;
                 var wasDead = enemy.IsDead;
-                enemy.ApplyDamage(enemyDamage, enemy.transform.position + Vector3.up * 0.9f, normalizedPush, isCrit: true);
+                enemy.ApplyDamage(enemyDamage, enemy.transform.position + Vector3.up * 0.9f, normalizedPush, isCrit: true, isExplosive: true);
                 if (!wasDead && enemy.IsDead)
                 {
                     FeelManager.Instance?.TriggerKillFeed("VANCE", enemy.DisplayCallsign, "FUEL DRUM");
@@ -134,7 +134,7 @@ namespace Combat
             d.y = 0f;
             if (d.magnitude <= explosionRadius * 0.72f)
             {
-                player.TakeDamage(friendlyDamage);
+                player.TakeDamage(friendlyDamage, transform.position);
             }
         }
     }

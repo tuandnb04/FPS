@@ -25,6 +25,12 @@ namespace Core
 
         public int CurrentMissionIndex { get; private set; } = 1;
 
+        public int ConfirmedKillsCount => Kills;
+
+        public CampaignEndingKind ActiveEndingChoice { get; private set; } = CampaignEndingKind.None;
+
+        private static bool _preserveRosterOnNextPrepare;
+
         private int Score { get; set; }
 
         private int Kills { get; set; }
@@ -62,8 +68,9 @@ namespace Core
                 return Mathf.Clamp(spawner.MissionIndex, 1, StoryDirector.CampaignMissionCount);
             }
             var sceneName = SceneManager.GetActiveScene().name;
-            if (sceneName.Contains("Mission02", StringComparison.OrdinalIgnoreCase)) return 2;
+            if (sceneName.Contains("Mission04", StringComparison.OrdinalIgnoreCase)) return 4;
             if (sceneName.Contains("Mission03", StringComparison.OrdinalIgnoreCase)) return 3;
+            if (sceneName.Contains("Mission02", StringComparison.OrdinalIgnoreCase)) return 2;
             return 1;
         }
 
@@ -129,6 +136,7 @@ namespace Core
                 case GameState.Title:
                 case GameState.Ended:
                 case GameState.LevelUpDraft:
+                case GameState.Decision:
                     break;
                 default:
                     throw new ArgumentOutOfRangeException();
@@ -159,16 +167,26 @@ namespace Core
 
         public bool HasNextMission => CurrentMissionIndex < StoryDirector.CampaignMissionCount;
 
+        public void ResetFullCampaignRoster()
+        {
+            AudioManager.Instance?.PlayUIClick();
+            var save = SaveManager.EnsureInstance();
+            save.ResetCampaignRoster();
+            UIManager.Instance?.RefreshMissionSelectUI(CurrentMissionIndex, save.Data.highestMissionCompleted);
+        }
+
         public void SelectTitleMission(int missionIndex)
         {
             var target = Mathf.Clamp(missionIndex, 1, StoryDirector.CampaignMissionCount);
             AudioManager.Instance?.PlayUIClick();
             SaveManager.SelectedMissionIndex = target;
 
+            var save = SaveManager.EnsureInstance();
+            save.SyncRosterForActEntry(target, preserveExistingLosses: false);
+
             if (target == CurrentMissionIndex)
             {
                 StoryDirector.ActiveMissionIndex = target;
-                var save = SaveManager.EnsureInstance();
                 UIManager.Instance?.RefreshMissionSelectUI(target, save.Data.highestMissionCompleted);
                 return;
             }
@@ -177,6 +195,7 @@ namespace Core
             SaveManager.PendingCarryScore = 0;
             SaveManager.PendingCarryKills = 0;
             SaveManager.PendingCarryCredits = 0;
+            _preserveRosterOnNextPrepare = false;
             Time.timeScale = 1f;
             SceneManager.LoadScene(StoryDirector.GetMissionSceneName(target));
         }
@@ -191,6 +210,7 @@ namespace Core
 
             AudioManager.Instance?.PlayUIClick();
             var nextIndex = CurrentMissionIndex + 1;
+            _preserveRosterOnNextPrepare = true;
             SaveManager.SelectedMissionIndex = nextIndex;
             SaveManager.PendingAutoDeploy = true;
             SaveManager.PendingCarryScore = Score;
@@ -233,6 +253,12 @@ namespace Core
         private void PrepareFreshMissionState(int carryScore, int carryKills, int carryCredits)
         {
             StoryDirector.ActiveMissionIndex = CurrentMissionIndex;
+            ActiveEndingChoice = CampaignEndingKind.None;
+
+            var save = SaveManager.EnsureInstance();
+            save.SyncRosterForActEntry(CurrentMissionIndex, _preserveRosterOnNextPrepare);
+            _preserveRosterOnNextPrepare = false;
+
             AudioManager.Instance?.SetPausedDucking(false);
             FeelManager.Instance?.CancelHitStop();
             FeelManager.Instance?.ClearAllFloatingText();
@@ -242,13 +268,13 @@ namespace Core
             SquadDirector.Instance?.ResetSquadForMission();
             StoryDirector.ResetCampaignRun();
             UIManager.Instance?.HideRadioCommsImmediate();
+            UIManager.Instance?.ResetMissionClock();
 
             Score = Mathf.Max(0, carryScore);
             Kills = Mathf.Max(0, carryKills);
             RunCreditsEarned = Mathf.Max(0, carryCredits);
             Time.timeScale = 1f;
 
-            var save = SaveManager.EnsureInstance();
             UIManager.Instance?.UpdateScore(Score, HighScore);
             UIManager.Instance?.UpdateCredits(save.Data.credits, RunCreditsEarned);
             UIManager.Instance?.RefreshWeaponBar();
@@ -354,9 +380,36 @@ namespace Core
             }
         }
 
+        public void PresentAct4CoreChoice()
+        {
+            if (CurrentState == GameState.Ended || CurrentState == GameState.Decision) return;
+            AudioManager.Instance?.PlayUIClick();
+            AudioManager.Instance?.SetPausedDucking(true);
+            FeelManager.Instance?.CancelHitStop();
+            Time.timeScale = 0f;
+            CurrentState = GameState.Decision;
+            UIManager.Instance?.TransitionToState(GameState.Decision);
+        }
+
+        public void ResolveAct4CoreChoice(CampaignEndingKind choice)
+        {
+            if (CurrentState != GameState.Decision && CurrentState != GameState.Playing) return;
+            ActiveEndingChoice = choice;
+            SaveManager.EnsureInstance().RecordEndingChoice(choice);
+            AudioManager.Instance?.PlayMilestoneSting();
+            AudioManager.Instance?.SetPausedDucking(false);
+
+            Time.timeScale = 1f;
+            CurrentState = GameState.Playing;
+            UIManager.Instance?.TransitionToState(GameState.Playing);
+            StoryDirector.NotifyEndingChoiceMade(choice);
+            EnemySpawner.Instance?.CompleteAct4CoreDecision(choice);
+        }
+
         public void CompleteCampaignVictory()
         {
             if (CurrentState == GameState.Ended) return;
+            ApplyActEndScriptedSacrifice();
             if (CutsceneDirector.Instance != null)
             {
                 CurrentState = GameState.Cutscene;
@@ -369,9 +422,29 @@ namespace Core
             }
         }
 
+        private void ApplyActEndScriptedSacrifice()
+        {
+            switch (CurrentMissionIndex)
+            {
+                case 1:
+                    SaveManager.EnsureInstance().MarkOperatorKia(SquadCallsigns.Recon);
+                    SquadDirector.Instance?.MarkMemberKiaByTag(SquadCallsigns.Recon, broadcastRadio: false);
+                    break;
+                case 2:
+                    SaveManager.EnsureInstance().MarkOperatorKia(SquadCallsigns.Breacher);
+                    SquadDirector.Instance?.MarkMemberKiaByTag(SquadCallsigns.Breacher, broadcastRadio: false);
+                    break;
+                case 3:
+                    SaveManager.EnsureInstance().MarkOperatorKia(SquadCallsigns.Officer);
+                    SquadDirector.Instance?.MarkMemberKiaByTag(SquadCallsigns.Officer, broadcastRadio: false);
+                    break;
+            }
+        }
+
         private void FinishCampaignVictoryImmediate()
         {
             if (CurrentState == GameState.Ended) return;
+            ApplyActEndScriptedSacrifice();
             AddRunCredits(StoryDirector.CampaignVictoryBonusCredits);
             EndMission(true);
         }

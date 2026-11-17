@@ -25,6 +25,9 @@ namespace Core
 
         public List<int> unlockedWeapons = new() { 0 };
         public List<int> unlockedSkins = new() { 0 };
+        public List<string> discoveredIntelIds = new();
+        public List<string> kiaOperators = new();
+        public int lastEndingChoice;
 
         public string checksum = string.Empty;
     }
@@ -80,6 +83,81 @@ namespace Core
                 Data.highestMissionCompleted = clamped;
                 Save();
             }
+        }
+
+        public bool IsIntelDiscovered(string intelId)
+        {
+            return !string.IsNullOrEmpty(intelId) && Data.discoveredIntelIds != null && Data.discoveredIntelIds.Contains(intelId);
+        }
+
+        public bool UnlockIntelLog(string intelId)
+        {
+            if (string.IsNullOrEmpty(intelId)) return false;
+            Data.discoveredIntelIds ??= new List<string>();
+            if (Data.discoveredIntelIds.Contains(intelId)) return false;
+            Data.discoveredIntelIds.Add(intelId);
+            Save();
+            return true;
+        }
+
+        public int DiscoveredIntelCount => Data.discoveredIntelIds != null ? Data.discoveredIntelIds.Count : 0;
+
+        public bool IsOperatorKia(string roleTag)
+        {
+            return !string.IsNullOrEmpty(roleTag) && Data.kiaOperators != null && Data.kiaOperators.Contains(roleTag);
+        }
+
+        public bool MarkOperatorKia(string roleTag)
+        {
+            if (string.IsNullOrEmpty(roleTag)) return false;
+            Data.kiaOperators ??= new List<string>();
+            if (Data.kiaOperators.Contains(roleTag)) return false;
+            Data.kiaOperators.Add(roleTag);
+            Save();
+            return true;
+        }
+
+        public int KiaCount => Data.kiaOperators != null ? Data.kiaOperators.Count : 0;
+
+        public CampaignEndingKind LastEndingChoice => (CampaignEndingKind)Mathf.Clamp(Data.lastEndingChoice, 0, 2);
+
+        public void RecordEndingChoice(CampaignEndingKind choice)
+        {
+            Data.lastEndingChoice = (int)choice;
+            Save();
+        }
+
+        public void SyncRosterForActEntry(int missionIndex, bool preserveExistingLosses)
+        {
+            Data.kiaOperators ??= new List<string>();
+            if (!preserveExistingLosses)
+            {
+                Data.kiaOperators.Clear();
+                if (missionIndex >= 2 && !Data.kiaOperators.Contains(SquadCallsigns.Recon))
+                    Data.kiaOperators.Add(SquadCallsigns.Recon);
+                if (missionIndex >= 3 && !Data.kiaOperators.Contains(SquadCallsigns.Breacher))
+                    Data.kiaOperators.Add(SquadCallsigns.Breacher);
+                if (missionIndex >= 4 && !Data.kiaOperators.Contains(SquadCallsigns.Officer))
+                    Data.kiaOperators.Add(SquadCallsigns.Officer);
+            }
+            else
+            {
+                if (missionIndex >= 2 && !Data.kiaOperators.Contains(SquadCallsigns.Recon))
+                    Data.kiaOperators.Add(SquadCallsigns.Recon);
+                if (missionIndex >= 3 && !Data.kiaOperators.Contains(SquadCallsigns.Breacher))
+                    Data.kiaOperators.Add(SquadCallsigns.Breacher);
+                if (missionIndex >= 4 && !Data.kiaOperators.Contains(SquadCallsigns.Officer))
+                    Data.kiaOperators.Add(SquadCallsigns.Officer);
+            }
+            Save();
+        }
+
+        public void ResetCampaignRoster()
+        {
+            Data.kiaOperators ??= new List<string>();
+            Data.kiaOperators.Clear();
+            Data.lastEndingChoice = 0;
+            Save();
         }
 
         private void Awake()
@@ -275,7 +353,9 @@ namespace Core
                 selectedWeapon = 0,
                 selectedSkin = 0,
                 unlockedWeapons = new List<int> { 0 },
-                unlockedSkins = new List<int> { 0 }
+                unlockedSkins = new List<int> { 0 },
+                discoveredIntelIds = new List<string>(),
+                kiaOperators = new List<string>()
             };
         }
 
@@ -286,6 +366,8 @@ namespace Core
             if (!d.unlockedWeapons.Contains(0)) d.unlockedWeapons.Add(0);
             d.unlockedSkins ??= new List<int>();
             if (!d.unlockedSkins.Contains(0)) d.unlockedSkins.Add(0);
+            d.discoveredIntelIds ??= new List<string>();
+            d.kiaOperators ??= new List<string>();
             if (!d.unlockedWeapons.Contains(d.selectedWeapon)) d.selectedWeapon = 0;
             if (!d.unlockedSkins.Contains(d.selectedSkin)) d.selectedSkin = 0;
         }
@@ -345,6 +427,21 @@ namespace Core
             {
                 foreach (var t in d.unlockedSkins)
                     sb.Append(t).Append(',');
+            }
+            if (d.discoveredIntelIds is { Count: > 0 })
+            {
+                sb.Append('|');
+                foreach (var id in d.discoveredIntelIds)
+                    sb.Append(id).Append(',');
+            }
+            if (d.kiaOperators is { Count: > 0 } || d.lastEndingChoice != 0)
+            {
+                sb.Append('|').Append(d.lastEndingChoice).Append(':');
+                if (d.kiaOperators != null)
+                {
+                    foreach (var op in d.kiaOperators)
+                        sb.Append(op).Append(',');
+                }
             }
 
             var hash = 2166136261u;

@@ -20,24 +20,28 @@ namespace UI
         Ended,
         Armory,
         LevelUpDraft,
-        Cutscene
+        Cutscene,
+        Decision
     }
 
     /// <summary>
-    /// Commercial-grade 6-state UI & Game Shell controller supporting Title, Armory Shop,
-    /// HUD (with Boss Bar, 4-Weapon Loadout, & Twin-Stick Mobile Controls), LevelUpDraft, Paused, and Ended.
+    /// Modern JSOC tactical HUD & shell controller supporting C4ISR compass/bearing telemetry,
+    /// RWR threat warnings, ballistic armor + biometrics, squad permadeath status,
+    /// Act IV moral choice modal, NVG/FLIR overlay, and K.I.A. Memorial After-Action debrief.
     /// </summary>
     public sealed class UIManager : MonoBehaviour
     {
         public static UIManager Instance { get; private set; }
 
-        private static readonly string[] WeaponNames = { "M4A1 CARBINE", "M870 SHOTGUN", "MK14 SNIPER", "RPG-7 LAUNCHER", "AN-94 ABAKAN", "VECTOR .45 SMG" };
-        private static readonly string[] WeaponShortTags = { "5.56 AUTO", "12G PUMP", "AP PIERCE", "HE ROCKET", "2X BURST", "1100 RPM" };
+        private static readonly string[] WeaponNames = { "M4A1 CARBINE", "M870 SHOTGUN", "MK14 EBR", "RPG-7 HEAT", "AN-94 ABAKAN", "VECTOR .45" };
+        private static readonly string[] WeaponBarLabels = { "M4A1", "M870", "MK14", "RPG7", "AN94", "VEC.45" };
+        private static readonly string[] WeaponShortTags = { "5.56 AUTO", "12G PUMP", "7.62 SEMI", "85MM HEAT", "2X BURST", ".45 ACP" };
+        private static readonly string[] WeaponCaliberModes = { "5.56x45 NATO · AUTO", "12 GAUGE · PUMP", "7.62x51 AP · SEMI", "85MM PG-7V · HEAT", "5.45x39 · 2X BURST", ".45 ACP · 1100 RPM" };
         private static readonly int[] WeaponCosts = { 0, 150, 300, 450, 140, 200 };
         private static readonly string[] SkinNames = { "RANGER OLIVE", "DESERT TAN", "NIGHT OPS" };
         private static readonly int[] SkinCosts = { 0, 180, 280 };
         private static readonly string[] UpgradeKeys = { "armor", "firepower", "thruster", "greed" };
-        private static readonly string[] UpgradeTitles = { "KEVLAR VEST (+20 HP)", "FMJ AMMO (+12% DMG)", "MARATHON PRO (+SPD)", "SCAVENGER (+18% CR)" };
+        private static readonly string[] UpgradeTitles = { "BALLISTIC PLATES (+HP/AR)", "AP MATCH AMMO (+12% DMG)", "ENDURANCE (+SPD)", "LOGISTICS (+18% REQ)" };
 
         [Header("Screen Groups")]
         [SerializeField] private CanvasGroup titleGroup;
@@ -46,6 +50,7 @@ namespace UI
         [SerializeField] private CanvasGroup endedGroup;
         [SerializeField] private CanvasGroup armoryGroup;
         [SerializeField] private CanvasGroup draftGroup;
+        [SerializeField] private CanvasGroup coreChoiceGroup;
 
         [Header("HUD Elements")]
         [SerializeField] private Image hpFillImage;
@@ -123,6 +128,11 @@ namespace UI
         [SerializeField] private TextMeshProUGUI intelBodyText;
         [SerializeField] private Button titleIntelButton;
         [SerializeField] private Button intelCloseButton;
+        [SerializeField] private Button[] intelTabButtons;
+        [SerializeField] private Image[] intelTabBgs;
+        [SerializeField] private TextMeshProUGUI[] intelTabLabels;
+        [SerializeField] private TextMeshProUGUI titleSubtitleText;
+        [SerializeField] private TextMeshProUGUI titleBriefText;
 
         [Header("CoD Damage Vignette & Context Prompt")]
         [SerializeField] private Image damageVignetteImage;
@@ -183,15 +193,55 @@ namespace UI
         [SerializeField] private Image[] missionSelectBgs;
         [SerializeField] private TextMeshProUGUI[] missionSelectLabels;
 
+        [Header("Modern Warfare C4ISR & Biometrics")]
+        [SerializeField] private TextMeshProUGUI compassBearingText;
+        [SerializeField] private TextMeshProUGUI gridStampText;
+        [SerializeField] private CanvasGroup rwrWarningGroup;
+        [SerializeField] private TextMeshProUGUI rwrWarningText;
+        [SerializeField] private Image armorFillImage;
+        [SerializeField] private TextMeshProUGUI armorValueText;
+        [SerializeField] private TextMeshProUGUI heartRateText;
+        [SerializeField] private Button traumaKitButton;
+        [SerializeField] private TextMeshProUGUI traumaKitText;
+        [SerializeField] private TextMeshProUGUI weaponCaliberText;
+        [SerializeField] private TextMeshProUGUI missionClockText;
+        [SerializeField] private TextMeshProUGUI intelHudCountText;
+        [SerializeField] private Image[] radioWaveformBars;
+        [SerializeField] private TextMeshProUGUI endedMemorialText;
+        [SerializeField] private TextMeshProUGUI[] titleRosterTexts;
+        [SerializeField] private Button titleResetCampaignButton;
+        [SerializeField] private Button coreChoiceBroadcastButton;
+        [SerializeField] private Button coreChoiceSilentButton;
+
+        [Header("Tactical HUD v2 Telemetry")]
+        [SerializeField] private RectTransform radarFovCone;
+        [SerializeField] private CanvasGroup hitArcGroup;
+        [SerializeField] private RectTransform hitArcRect;
+        [SerializeField] private TextMeshProUGUI crosshairReloadHintText;
+        [SerializeField] private Image[] squadKiaIcons;
+        [SerializeField] private Image[] titleActBorders;
+        [SerializeField] private TextMeshProUGUI[] titleActSubTexts;
+        [SerializeField] private Image[] titleRosterBorders;
+        [SerializeField] private Image[] titleRosterSkulls;
+        [SerializeField] private TextMeshProUGUI titleHeaderMetaText;
+        [SerializeField] private TextMeshProUGUI titleLoadoutPreviewText;
+        [SerializeField] private TextMeshProUGUI ammoWeaponNameText;
+
         private Coroutine _hpTween;
         private Coroutine _xpTween;
         private Coroutine _transitionTween;
         private Coroutine _milestoneRoutine;
         private Coroutine _radioRoutine;
+        private readonly Queue<RadioLine> _radioQueue = new();
+        private int _activeIntelTab;
         private bool _touchDashQueued;
         private float _hitmarkerTimer;
         private float _hitmarkerDuration = 0.12f;
+        private float _hitArcTimer;
         private float _killFeedClearTimer;
+        private float _rwrTimer;
+        private float _missionElapsedSeconds;
+        private float _reticleBloom;
         private readonly string[] _killFeedLines = new string[3];
         private int _killFeedCursor;
         private List<RogueliteSkillInfo> _currentDraftOptions = new();
@@ -383,17 +433,42 @@ namespace UI
             Image[] missionBgs,
             TextMeshProUGUI[] missionLbls,
             Button nextMissionBtn,
-            TextMeshProUGUI nextMissionTxt)
+            TextMeshProUGUI nextMissionTxt,
+            TextMeshProUGUI subTxt = null,
+            TextMeshProUGUI briefTxt = null)
         {
             missionSelectButtons = missionBtns;
             missionSelectBgs = missionBgs;
             missionSelectLabels = missionLbls;
             endedNextMissionButton = nextMissionBtn;
             endedNextMissionText = nextMissionTxt;
+            titleSubtitleText = subTxt;
+            titleBriefText = briefTxt;
+        }
+
+        public void BindIntelTabWidgets(Button[] tabButtons, Image[] tabBgs, TextMeshProUGUI[] tabLabels)
+        {
+            intelTabButtons = tabButtons;
+            intelTabBgs = tabBgs;
+            intelTabLabels = tabLabels;
         }
 
         public void RefreshMissionSelectUI(int activeMission, int clearedCount)
         {
+            if (titleSubtitleText != null)
+            {
+                titleSubtitleText.text = StoryDirector.GetMissionTitle(activeMission) + "  //  " + StoryDirector.GetMissionSubtitle(activeMission);
+            }
+            if (titleBriefText != null)
+            {
+                titleBriefText.text = StoryDirector.GetMissionTitleBrief(activeMission);
+            }
+            if (gridStampText != null)
+            {
+                gridStampText.text = StoryDirector.GetMissionGridStamp(activeMission);
+            }
+            RefreshTitleRoster();
+            RefreshTitleLoadoutSummary();
             if (missionSelectButtons == null) return;
             for (var i = 0; i < missionSelectButtons.Length; i++)
             {
@@ -403,20 +478,180 @@ namespace UI
                 if (missionSelectBgs != null && i < missionSelectBgs.Length && missionSelectBgs[i] != null)
                 {
                     missionSelectBgs[i].color = selected
+                        ? Palette.WithAlpha(Palette.FromHex("#342412"), 0.95f)
+                        : (cleared ? Palette.WithAlpha(Palette.FromHex("#142B1F"), 0.95f) : Palette.WithAlpha(Palette.SecondaryButtonBg, 0.95f));
+                }
+                if (titleActBorders != null && i < titleActBorders.Length && titleActBorders[i] != null)
+                {
+                    titleActBorders[i].color = selected
                         ? Palette.Accent
-                        : (cleared ? Palette.WithAlpha(Palette.HealthGreen, 0.25f) : Palette.SecondaryButtonBg);
+                        : (cleared ? Palette.HealthGreen : Palette.WithAlpha(Palette.CharacterSecondary, 0.28f));
                 }
                 if (missionSelectLabels != null && i < missionSelectLabels.Length && missionSelectLabels[i] != null)
                 {
-                    var shortTitle = idx switch
-                    {
-                        1 => "ACT I: PIER",
-                        2 => "ACT II: DEPOT",
-                        _ => "ACT III: PEAK"
-                    };
-                    missionSelectLabels[i].text = cleared ? shortTitle + " [CLR]" : shortTitle;
-                    missionSelectLabels[i].color = selected ? Palette.Shadow : Palette.CharacterSecondary;
+                    var shortTitle = StoryDirector.GetMissionShortTab(idx);
+                    missionSelectLabels[i].text = selected ? shortTitle + "  //  SELECTED" : (cleared ? shortTitle + "  //  CLEARED" : shortTitle);
+                    missionSelectLabels[i].color = selected ? Palette.Accent : (cleared ? Palette.HealthGreen : Palette.CharacterSecondary);
                 }
+                if (titleActSubTexts != null && i < titleActSubTexts.Length && titleActSubTexts[i] != null)
+                {
+                    titleActSubTexts[i].text = StoryDirector.GetMissionGridStamp(idx);
+                    titleActSubTexts[i].color = selected ? Palette.CharacterSecondary : Palette.MutedText;
+                }
+            }
+        }
+
+        public void BindModernWarfareWidgets(
+            TextMeshProUGUI compassTxt,
+            TextMeshProUGUI gridTxt,
+            CanvasGroup rwrGroup,
+            TextMeshProUGUI rwrTxt,
+            Image armorFill,
+            TextMeshProUGUI armorTxt,
+            TextMeshProUGUI bpmTxt,
+            Button traumaBtn,
+            TextMeshProUGUI traumaTxt,
+            TextMeshProUGUI wpnCaliberTxt,
+            TextMeshProUGUI clockTxt,
+            TextMeshProUGUI intelCountTxt,
+            Image[] waveBars,
+            TextMeshProUGUI memorialTxt,
+            TextMeshProUGUI[] rosterTxts,
+            Button resetRosterBtn,
+            CanvasGroup choiceGroup,
+            Button choiceBroadcastBtn,
+            Button choiceSilentBtn)
+        {
+            compassBearingText = compassTxt;
+            gridStampText = gridTxt;
+            rwrWarningGroup = rwrGroup;
+            rwrWarningText = rwrTxt;
+            armorFillImage = armorFill;
+            armorValueText = armorTxt;
+            heartRateText = bpmTxt;
+            traumaKitButton = traumaBtn;
+            traumaKitText = traumaTxt;
+            weaponCaliberText = wpnCaliberTxt;
+            missionClockText = clockTxt;
+            intelHudCountText = intelCountTxt;
+            radioWaveformBars = waveBars;
+            endedMemorialText = memorialTxt;
+            titleRosterTexts = rosterTxts;
+            titleResetCampaignButton = resetRosterBtn;
+            coreChoiceGroup = choiceGroup;
+            coreChoiceBroadcastButton = choiceBroadcastBtn;
+            coreChoiceSilentButton = choiceSilentBtn;
+
+            if (rwrWarningGroup != null)
+            {
+                rwrWarningGroup.alpha = 0f;
+                rwrWarningGroup.blocksRaycasts = false;
+                rwrWarningGroup.interactable = false;
+            }
+            if (coreChoiceGroup != null)
+            {
+                SetGroupState(coreChoiceGroup, 0f);
+            }
+            RefreshTitleRoster();
+        }
+
+        public void BindTacticalV2Widgets(
+            RectTransform radarCone,
+            CanvasGroup directionalHitGroup,
+            RectTransform directionalHitRect,
+            TextMeshProUGUI reloadHintTxt,
+            Image[] sqKiaIcons,
+            Image[] actBorders,
+            TextMeshProUGUI[] actSubTxts,
+            Image[] rosterBorders,
+            Image[] rosterSkulls,
+            TextMeshProUGUI headerMetaTxt,
+            TextMeshProUGUI loadoutPreviewTxt,
+            TextMeshProUGUI ammoWpnNameTxt)
+        {
+            radarFovCone = radarCone;
+            hitArcGroup = directionalHitGroup;
+            hitArcRect = directionalHitRect;
+            crosshairReloadHintText = reloadHintTxt;
+            squadKiaIcons = sqKiaIcons;
+            titleActBorders = actBorders;
+            titleActSubTexts = actSubTxts;
+            titleRosterBorders = rosterBorders;
+            titleRosterSkulls = rosterSkulls;
+            titleHeaderMetaText = headerMetaTxt;
+            titleLoadoutPreviewText = loadoutPreviewTxt;
+            ammoWeaponNameText = ammoWpnNameTxt;
+
+            if (hitArcGroup != null)
+            {
+                hitArcGroup.alpha = 0f;
+                hitArcGroup.interactable = false;
+                hitArcGroup.blocksRaycasts = false;
+            }
+            if (crosshairReloadHintText != null)
+            {
+                crosshairReloadHintText.gameObject.SetActive(false);
+            }
+            RefreshTitleRoster();
+            RefreshTitleLoadoutSummary();
+        }
+
+        public void RefreshTitleRoster()
+        {
+            if (titleRosterTexts == null || titleRosterTexts.Length < 4) return;
+            var save = SaveManager.EnsureInstance();
+            var act = GameManager.Instance != null ? GameManager.Instance.CurrentMissionIndex : StoryDirector.ActiveMissionIndex;
+
+            bool IsDeadForDisplay(string tag, int minCanonicalAct) => save.IsOperatorKia(tag) || act >= minCanonicalAct;
+
+            var entries = new[]
+            {
+                ("[NOMAD-1] VANCE", "FIRETEAM LEAD · ASSAULT", false),
+                ("[IRONWOOD-1] ROURKE", "PLATOON NCO · HEAVY", IsDeadForDisplay(SquadCallsigns.Officer, 4)),
+                ("[WRAITH-2] KOZLOWSKI", "RECON / OVERWATCH", IsDeadForDisplay(SquadCallsigns.Recon, 2)),
+                ("[SPARK-3] REYES", "BREACHER / EOD", IsDeadForDisplay(SquadCallsigns.Breacher, 3))
+            };
+            for (var i = 0; i < 4; i++)
+            {
+                var dead = entries[i].Item3;
+                var accent = dead ? Palette.EnemySecondary : (i == 0 ? Palette.HealthGreen : Palette.SquadBlue);
+                if (titleRosterTexts[i] != null)
+                {
+                    titleRosterTexts[i].text = dead
+                        ? $"{entries[i].Item1}\n{entries[i].Item2}  //  K.I.A."
+                        : $"{entries[i].Item1}\n{entries[i].Item2}  //  ACTIVE";
+                    titleRosterTexts[i].color = dead ? Palette.EnemySecondary : Palette.CharacterSecondary;
+                }
+                if (titleRosterBorders != null && i < titleRosterBorders.Length && titleRosterBorders[i] != null)
+                {
+                    titleRosterBorders[i].color = Palette.WithAlpha(accent, dead ? 0.85f : 0.65f);
+                }
+                if (titleRosterSkulls != null && i < titleRosterSkulls.Length && titleRosterSkulls[i] != null)
+                {
+                    titleRosterSkulls[i].enabled = dead;
+                    titleRosterSkulls[i].color = Palette.EnemySecondary;
+                }
+            }
+        }
+
+        private void RefreshTitleLoadoutSummary()
+        {
+            var save = SaveManager.EnsureInstance();
+            var d = save.Data;
+            var wpnIdx = Mathf.Clamp(d.selectedWeapon, 0, WeaponNames.Length - 1);
+            var skinIdx = Mathf.Clamp(d.selectedSkin, 0, SkinNames.Length - 1);
+            if (titleLoadoutPreviewText != null)
+            {
+                titleLoadoutPreviewText.text = $"LOADOUT: {WeaponNames[wpnIdx]} ({WeaponCaliberModes[wpnIdx]})   |   RIG: {SkinNames[skinIdx]}";
+            }
+            if (titleHeaderMetaText != null)
+            {
+                var act = GameManager.Instance != null ? GameManager.Instance.CurrentMissionIndex : StoryDirector.ActiveMissionIndex;
+                var kia = save.KiaCount;
+                if (act >= 2 && !save.IsOperatorKia(SquadCallsigns.Recon)) kia++;
+                if (act >= 3 && !save.IsOperatorKia(SquadCallsigns.Breacher)) kia++;
+                if (act >= 4 && !save.IsOperatorKia(SquadCallsigns.Officer)) kia++;
+                titleHeaderMetaText.text = $"BLACKBOX: {save.DiscoveredIntelCount}/{StoryDirector.IntelCatalog.Length}   ·   KIA: {Mathf.Clamp(kia, 0, 3)}/3";
             }
         }
 
@@ -534,11 +769,14 @@ namespace UI
         {
             StoryDirector.OnRadioTransmission -= HandleRadioTransmission;
             StoryDirector.OnRadioTransmission += HandleRadioTransmission;
+            StoryDirector.OnRadioConversation -= HandleRadioConversation;
+            StoryDirector.OnRadioConversation += HandleRadioConversation;
         }
 
         private void OnDisable()
         {
             StoryDirector.OnRadioTransmission -= HandleRadioTransmission;
+            StoryDirector.OnRadioConversation -= HandleRadioConversation;
         }
 
         private void Start()
@@ -657,6 +895,16 @@ namespace UI
                 intelCloseButton.onClick.RemoveAllListeners();
                 intelCloseButton.onClick.AddListener(CloseIntel);
             }
+            if (intelTabButtons != null)
+            {
+                for (var i = 0; i < intelTabButtons.Length; i++)
+                {
+                    var tabIdx = i;
+                    if (intelTabButtons[i] == null) continue;
+                    intelTabButtons[i].onClick.RemoveAllListeners();
+                    intelTabButtons[i].onClick.AddListener(() => SelectIntelTab(tabIdx));
+                }
+            }
 
             if (touchDashButton != null)
             {
@@ -696,6 +944,30 @@ namespace UI
             {
                 strikeButton.onClick.RemoveAllListeners();
                 strikeButton.onClick.AddListener(() => PlayerController.Instance?.TryCallMortarStrike());
+            }
+
+            if (traumaKitButton != null)
+            {
+                traumaKitButton.onClick.RemoveAllListeners();
+                traumaKitButton.onClick.AddListener(() => PlayerController.Instance?.TryUseTraumaKit());
+            }
+
+            if (titleResetCampaignButton != null)
+            {
+                titleResetCampaignButton.onClick.RemoveAllListeners();
+                titleResetCampaignButton.onClick.AddListener(() => GameManager.Instance?.ResetFullCampaignRoster());
+            }
+
+            if (coreChoiceBroadcastButton != null)
+            {
+                coreChoiceBroadcastButton.onClick.RemoveAllListeners();
+                coreChoiceBroadcastButton.onClick.AddListener(() => GameManager.Instance?.ResolveAct4CoreChoice(CampaignEndingKind.BroadcastBlackout));
+            }
+
+            if (coreChoiceSilentButton != null)
+            {
+                coreChoiceSilentButton.onClick.RemoveAllListeners();
+                coreChoiceSilentButton.onClick.AddListener(() => GameManager.Instance?.ResolveAct4CoreChoice(CampaignEndingKind.SilentKillSwitch));
             }
 
             if (upgradeButtons != null)
@@ -822,9 +1094,11 @@ namespace UI
         private void Update()
         {
             var unscaledDt = Time.unscaledDeltaTime;
+            _reticleBloom = Mathf.MoveTowards(_reticleBloom, 0f, unscaledDt * 2.8f);
             if (crosshairRect != null)
             {
-                var showCrosshair = !ShouldShowMobileControls() && hudGroup != null && hudGroup.alpha > 0.5f && Mouse.current != null;
+                var showCrosshair = !ShouldShowMobileControls() && hudGroup != null && hudGroup.alpha > 0.5f && Mouse.current != null &&
+                                    (GameManager.Instance == null || GameManager.Instance.CurrentState == GameState.Playing);
                 if (crosshairRect.gameObject.activeSelf != showCrosshair)
                 {
                     crosshairRect.gameObject.SetActive(showCrosshair);
@@ -832,7 +1106,28 @@ namespace UI
                 if (showCrosshair)
                 {
                     crosshairRect.position = Mouse.current.position.ReadValue();
+                    var s = 1f + _reticleBloom * 0.45f;
+                    crosshairRect.localScale = new Vector3(s, s, 1f);
+                    if (crosshairReloadHintText != null)
+                    {
+                        crosshairReloadHintText.rectTransform.position = crosshairRect.position + new Vector3(0f, -34f, 0f);
+                    }
                 }
+                else if (crosshairReloadHintText != null && crosshairReloadHintText.gameObject.activeSelf)
+                {
+                    crosshairReloadHintText.gameObject.SetActive(false);
+                }
+            }
+
+            if (_hitArcTimer > 0f && hitArcGroup != null)
+            {
+                _hitArcTimer = Mathf.Max(0f, _hitArcTimer - unscaledDt);
+                var t = Mathf.Clamp01(_hitArcTimer / 0.72f);
+                hitArcGroup.alpha = t * (0.78f + 0.22f * Mathf.Sin(Time.unscaledTime * 20f));
+            }
+            else if (hitArcGroup != null && hitArcGroup.alpha > 0.001f)
+            {
+                hitArcGroup.alpha = 0f;
             }
 
             if (_hitmarkerTimer > 0f && hitmarkerGroup != null)
@@ -846,6 +1141,23 @@ namespace UI
                 }
             }
 
+            if (_rwrTimer > 0f && rwrWarningGroup != null)
+            {
+                _rwrTimer = Mathf.Max(0f, _rwrTimer - unscaledDt);
+                var pulse = 0.72f + 0.28f * Mathf.Sin(Time.unscaledTime * 16f);
+                rwrWarningGroup.alpha = _rwrTimer > 0.01f ? Mathf.Clamp01(_rwrTimer / 0.35f) * pulse : 0f;
+            }
+
+            if (radioWaveformBars != null && radioCommsGroup != null && radioCommsGroup.alpha > 0.15f)
+            {
+                for (var i = 0; i < radioWaveformBars.Length; i++)
+                {
+                    if (radioWaveformBars[i] == null) continue;
+                    var wave = 0.28f + 0.72f * Mathf.Abs(Mathf.Sin(Time.unscaledTime * (7.5f + i * 2.1f) + i * 1.1f));
+                    radioWaveformBars[i].rectTransform.localScale = new Vector3(1f, wave, 1f);
+                }
+            }
+
             if (_killFeedClearTimer > 0f)
             {
                 _killFeedClearTimer -= unscaledDt;
@@ -856,8 +1168,108 @@ namespace UI
             }
 
             if (hudGroup == null || !(hudGroup.alpha > 0.1f)) return;
+            if (GameManager.Instance == null || GameManager.Instance.CurrentState == GameState.Playing)
+            {
+                _missionElapsedSeconds += Time.deltaTime;
+                UpdateCompassAndClock();
+            }
             UpdateSquadRosterHud();
             UpdateTacticalRadar();
+        }
+
+        public void ResetMissionClock()
+        {
+            _missionElapsedSeconds = 0f;
+            _rwrTimer = 0f;
+            _hitArcTimer = 0f;
+            if (rwrWarningGroup != null) rwrWarningGroup.alpha = 0f;
+            if (hitArcGroup != null) hitArcGroup.alpha = 0f;
+        }
+
+        public void ShowDirectionalHit(Vector3 sourceWorldPos)
+        {
+            if (hitArcGroup == null || hitArcRect == null || PlayerController.Instance == null) return;
+            var delta = sourceWorldPos - PlayerController.Instance.transform.position;
+            delta.y = 0f;
+            if (delta.sqrMagnitude < 0.05f) return;
+
+            var cam = UnityEngine.Camera.main;
+            var camForward = cam != null ? Vector3.ProjectOnPlane(cam.transform.forward, Vector3.up).normalized : Vector3.forward;
+            var camRight = cam != null ? Vector3.ProjectOnPlane(cam.transform.right, Vector3.up).normalized : Vector3.right;
+            if (camForward.sqrMagnitude < 0.01f) camForward = Vector3.forward;
+            if (camRight.sqrMagnitude < 0.01f) camRight = Vector3.right;
+
+            var x = Vector3.Dot(delta.normalized, camRight);
+            var y = Vector3.Dot(delta.normalized, camForward);
+            var uiZDeg = -Mathf.Atan2(x, y) * Mathf.Rad2Deg;
+            hitArcRect.localRotation = Quaternion.Euler(0f, 0f, uiZDeg);
+            _hitArcTimer = 0.72f;
+            hitArcGroup.alpha = 1f;
+        }
+
+        public void AddReticleBloom(float amount)
+        {
+            _reticleBloom = Mathf.Clamp(_reticleBloom + amount, 0f, 1f);
+        }
+
+        public void TriggerThreatWarning(string alertMessage, float holdSeconds = 2.4f)
+        {
+            if (rwrWarningGroup == null || rwrWarningText == null) return;
+            rwrWarningText.text = alertMessage;
+            _rwrTimer = Mathf.Max(_rwrTimer, holdSeconds);
+            rwrWarningGroup.alpha = 1f;
+        }
+
+        private void UpdateCompassAndClock()
+        {
+            var player = PlayerController.Instance;
+            if (compassBearingText != null && player != null)
+            {
+                var heading = Mathf.Repeat(player.transform.eulerAngles.y, 360f);
+                var hInt = Mathf.RoundToInt(heading) % 360;
+                var card = HeadingCardinal(hInt);
+                var left = (hInt + 345) % 360;
+                var right = (hInt + 15) % 360;
+                if (Enemies.EnemySpawner.Instance != null)
+                {
+                    var obj = Enemies.EnemySpawner.Instance.GetActiveObjectiveWorldPoint();
+                    var delta = obj - player.transform.position;
+                    delta.y = 0f;
+                    var distM = Mathf.RoundToInt(delta.magnitude);
+                    var objAngle = Mathf.Repeat(Mathf.Atan2(delta.x, delta.z) * Mathf.Rad2Deg, 360f);
+                    compassBearingText.text = $"{left:000}°  ·  [ {hInt:000}° {card} ]  ·  {right:000}°   |   WP {Mathf.RoundToInt(objAngle) % 360:000}° ({distM}M)";
+                }
+                else
+                {
+                    compassBearingText.text = $"{left:000}°  ·  [ {hInt:000}° {card} ]  ·  {right:000}°";
+                }
+            }
+
+            if (missionClockText != null)
+            {
+                var secTotal = Mathf.FloorToInt(_missionElapsedSeconds);
+                var mins = secTotal / 60;
+                var secs = secTotal % 60;
+                missionClockText.text = $"T+{mins:00}:{secs:00}";
+            }
+
+            if (intelHudCountText != null)
+            {
+                var save = SaveManager.EnsureInstance();
+                intelHudCountText.text = $"BLACKBOX // {save.DiscoveredIntelCount}/{StoryDirector.IntelCatalog.Length}";
+            }
+        }
+
+        private static string HeadingCardinal(int deg)
+        {
+            if (deg < 23 || deg >= 338) return "N";
+            if (deg < 68) return "NE";
+            if (deg < 113) return "E";
+            if (deg < 158) return "SE";
+            if (deg < 203) return "S";
+            if (deg < 248) return "SW";
+            if (deg < 293) return "W";
+            return "NW";
         }
 
         public void ApplyImmediateState(GameState state)
@@ -874,10 +1286,15 @@ namespace UI
             SetGroupState(endedGroup, state == GameState.Ended ? 1f : 0f);
             SetGroupState(armoryGroup, state == GameState.Armory ? 1f : 0f);
             SetGroupState(draftGroup, state == GameState.LevelUpDraft ? 1f : 0f);
+            SetGroupState(coreChoiceGroup, state == GameState.Decision ? 1f : 0f);
             SetGroupState(intelGroup, 0f);
             if (milestoneBannerGroup != null)
             {
                 milestoneBannerGroup.alpha = 0f;
+            }
+            if (rwrWarningGroup != null && state != GameState.Playing)
+            {
+                rwrWarningGroup.alpha = 0f;
             }
             if (state != GameState.Playing)
             {
@@ -885,18 +1302,34 @@ namespace UI
                 UpdateDamageVignette(0f);
                 UpdateContextPrompt(string.Empty);
                 RadarEnemyActiveCount = 0;
+                _hitArcTimer = 0f;
+                if (hitArcGroup != null) hitArcGroup.alpha = 0f;
+                if (crosshairReloadHintText != null) crosshairReloadHintText.gameObject.SetActive(false);
             }
             if (state != GameState.Cutscene)
             {
                 HideCutsceneOverlayImmediate();
             }
-            HideBossHp();
+            if (state == GameState.Title)
+            {
+                RefreshTitleRoster();
+                RefreshTitleLoadoutSummary();
+            }
+            if (state == GameState.Title || state == GameState.Ended)
+            {
+                HideBossHp();
+            }
         }
 
         public void TransitionToState(GameState state)
         {
             SetGroupState(intelGroup, 0f);
             RefreshPlatformControls();
+            if (state == GameState.Title)
+            {
+                RefreshTitleRoster();
+                RefreshTitleLoadoutSummary();
+            }
             if (_transitionTween != null)
             {
                 StopCoroutine(_transitionTween);
@@ -912,6 +1345,7 @@ namespace UI
             var sEnded = endedGroup != null ? endedGroup.alpha : 0f;
             var sArmory = armoryGroup != null ? armoryGroup.alpha : 0f;
             var sDraft = draftGroup != null ? draftGroup.alpha : 0f;
+            var sChoice = coreChoiceGroup != null ? coreChoiceGroup.alpha : 0f;
 
             var eTitle = target == GameState.Title ? 1f : 0f;
             var eHud = target == GameState.Playing ? 1f : 0f;
@@ -919,6 +1353,7 @@ namespace UI
             var eEnded = target == GameState.Ended ? 1f : 0f;
             var eArmory = target == GameState.Armory ? 1f : 0f;
             var eDraft = target == GameState.LevelUpDraft ? 1f : 0f;
+            var eChoice = target == GameState.Decision ? 1f : 0f;
 
             SetGroupInteractable(titleGroup, eTitle > 0.5f);
             SetGroupInteractable(hudGroup, eHud > 0.5f);
@@ -926,6 +1361,7 @@ namespace UI
             SetGroupInteractable(endedGroup, eEnded > 0.5f);
             SetGroupInteractable(armoryGroup, eArmory > 0.5f);
             SetGroupInteractable(draftGroup, eDraft > 0.5f);
+            SetGroupInteractable(coreChoiceGroup, eChoice > 0.5f);
 
             yield return Ease.Tween(0.25f, t =>
             {
@@ -936,6 +1372,7 @@ namespace UI
                 if (endedGroup != null) endedGroup.alpha = Mathf.Lerp(sEnded, eEnded, e);
                 if (armoryGroup != null) armoryGroup.alpha = Mathf.Lerp(sArmory, eArmory, e);
                 if (draftGroup != null) draftGroup.alpha = Mathf.Lerp(sDraft, eDraft, e);
+                if (coreChoiceGroup != null) coreChoiceGroup.alpha = Mathf.Lerp(sChoice, eChoice, e);
             }, Ease.Linear, unscaled: true);
 
             SetGroupState(titleGroup, eTitle);
@@ -944,6 +1381,7 @@ namespace UI
             SetGroupState(endedGroup, eEnded);
             SetGroupState(armoryGroup, eArmory);
             SetGroupState(draftGroup, eDraft);
+            SetGroupState(coreChoiceGroup, eChoice);
             _transitionTween = null;
         }
 
@@ -1031,7 +1469,7 @@ namespace UI
             }
         }
 
-        public void UpdateEquipmentHud(int fragCount, int mortarCharges, int streak, bool uavOnline, bool isRegen)
+        public void UpdateEquipmentHud(int fragCount, int mortarCharges, int streak, bool uavOnline, bool isRegen, int traumaKits = -1)
         {
             if (fragCountText != null)
             {
@@ -1041,22 +1479,27 @@ namespace UI
             if (strikeStatusText != null)
             {
                 strikeStatusText.text = mortarCharges > 0
-                    ? ("[F] MORTAR x" + mortarCharges + " RDY")
-                    : ("[F] MORTAR (" + Mathf.Min(streak, 5) + "/5)");
+                    ? ("[F] 155MM x" + mortarCharges)
+                    : ("[F] 155MM (" + Mathf.Min(streak, 5) + "/5)");
                 strikeStatusText.color = mortarCharges > 0 ? Palette.HealthGreen : Palette.MutedText;
+            }
+            if (traumaKits >= 0 && traumaKitText != null)
+            {
+                traumaKitText.text = "[Q] PLATE x" + traumaKits;
+                traumaKitText.color = traumaKits > 0 ? Palette.M3HeliosCoreCyan : Palette.MutedText;
             }
             if (streakText != null)
             {
                 streakText.text = uavOnline
-                    ? ("STREAK " + streak + " // UAV LIVE")
-                    : ("STREAK " + streak + " // UAV 3K");
+                    ? "REAPER-04 // ALT 4,200M"
+                    : ("ISR TASKING // " + Mathf.Min(streak, 3) + "/3 KIA");
                 streakText.color = uavOnline ? Palette.RadarGreen : Palette.CharacterSecondary;
             }
             if (levelText != null)
             {
                 levelText.text = uavOnline
-                    ? ("UAV RECON // " + streak + " KILLS")
-                    : (mortarCharges > 0 ? ("STRIKE READY // " + streak + " KILLS") : ("KILLSTREAK // " + streak + " KILLS"));
+                    ? ("ISR OVERWATCH // " + streak + " KIA")
+                    : (mortarCharges > 0 ? ("155MM CAS READY // " + streak + " KIA") : ("TAC-RECON // " + streak + " KIA"));
                 levelText.color = mortarCharges > 0 ? Palette.HealthGreen : (uavOnline ? Palette.RadarGreen : Palette.Accent);
             }
             if (xpFillImage != null)
@@ -1071,12 +1514,39 @@ namespace UI
             }
             if (radarUavStatusText != null)
             {
-                radarUavStatusText.text = uavOnline ? "UAV SWEEP // LIVE" : StoryDirector.GetMissionTitle(StoryDirector.ActiveMissionIndex);
+                radarUavStatusText.text = uavOnline ? "ISR LOCK // LIVE" : "ATAK // GRID 38T";
                 radarUavStatusText.color = uavOnline ? Palette.RadarGreen : Palette.MutedText;
             }
             if (hpFillImage != null && isRegen)
             {
                 hpFillImage.color = Palette.HealthGreen;
+            }
+        }
+
+        public void UpdateOperatorVitals(float currentHp, float maxHp, float currentArmor, float maxArmor, int bpm, int traumaKits)
+        {
+            if (armorFillImage != null)
+            {
+                armorFillImage.fillAmount = maxArmor > 0f ? Mathf.Clamp01(currentArmor / maxArmor) : 0f;
+                armorFillImage.color = currentArmor <= 0.1f ? Palette.EnemySecondary : Palette.M3HeliosCoreCyan;
+            }
+            if (armorValueText != null)
+            {
+                armorValueText.text = currentArmor > 0.1f
+                    ? $"PLATES {Mathf.CeilToInt(currentArmor)}/{Mathf.RoundToInt(maxArmor)}"
+                    : "PLATES CRACKED [Q]";
+                armorValueText.color = currentArmor > 0.1f ? Palette.M3HeliosCoreCyan : Palette.EnemySecondary;
+            }
+            if (heartRateText != null)
+            {
+                var status = bpm >= 130 ? "STRESS" : (bpm >= 102 ? "ELEVATED" : "NOMINAL");
+                heartRateText.text = $"{bpm} BPM // {status}";
+                heartRateText.color = bpm >= 130 ? Palette.EnemySecondary : (bpm >= 102 ? Palette.C4Amber : Palette.HealthGreen);
+            }
+            if (traumaKitText != null)
+            {
+                traumaKitText.text = "[Q] PLATE x" + traumaKits;
+                traumaKitText.color = traumaKits > 0 ? Palette.M3HeliosCoreCyan : Palette.MutedText;
             }
         }
 
@@ -1136,15 +1606,36 @@ namespace UI
         public void UpdateAmmoHud(int currentMag, int magCapacity, bool isReloading, float reloadProgress)
         {
             CurrentAmmoText = isReloading ? "RELOADING..." : (currentMag + " // INF");
+            var lowMag = !isReloading && currentMag <= Mathf.Max(2, magCapacity / 4);
             if (ammoHudText != null)
             {
-                ammoHudText.text = isReloading ? ("RELOADING  " + Mathf.RoundToInt(reloadProgress * 100f) + "%") : (currentMag + " / " + magCapacity + "  [R]");
-                ammoHudText.color = isReloading ? Palette.C4Amber : (currentMag <= Mathf.Max(2, magCapacity / 5) ? Palette.EnemySecondary : Palette.CharacterSecondary);
+                ammoHudText.text = isReloading
+                    ? ("RELOADING  " + Mathf.RoundToInt(reloadProgress * 100f) + "%")
+                    : ($"{currentMag:00} / {magCapacity:00}  [R]");
+                ammoHudText.color = isReloading ? Palette.C4Amber : (lowMag ? Palette.EnemySecondary : Palette.CharacterSecondary);
+            }
+
+            if (ammoWeaponNameText != null)
+            {
+                var save = SaveManager.EnsureInstance();
+                var wIdx = Mathf.Clamp(save.Data.selectedWeapon, 0, WeaponNames.Length - 1);
+                ammoWeaponNameText.text = WeaponNames[wIdx];
+            }
+
+            if (crosshairReloadHintText != null)
+            {
+                var showHint = (isReloading || lowMag) && crosshairRect != null && crosshairRect.gameObject.activeInHierarchy;
+                crosshairReloadHintText.gameObject.SetActive(showHint);
+                if (showHint)
+                {
+                    crosshairReloadHintText.text = isReloading ? $"RELOADING {Mathf.RoundToInt(reloadProgress * 100f)}%" : "[R] RELOAD";
+                    crosshairReloadHintText.color = isReloading ? Palette.C4Amber : Palette.EnemySecondary;
+                }
             }
 
             if (reloadProgressFill == null) return;
             reloadProgressFill.fillAmount = isReloading ? reloadProgress : (magCapacity > 0 ? (float)currentMag / magCapacity : 1f);
-            reloadProgressFill.color = isReloading ? Palette.C4Amber : Palette.Accent;
+            reloadProgressFill.color = isReloading ? Palette.C4Amber : (lowMag ? Palette.EnemySecondary : Palette.Accent);
         }
 
         public void SetNvgActive(bool active)
@@ -1156,7 +1647,7 @@ namespace UI
             }
 
             if (nvgStatusText == null) return;
-            nvgStatusText.text = active ? "[N] NVG: ON" : "[N] NVG: OFF";
+            nvgStatusText.text = active ? "[N] FLIR: ON" : "[N] FLIR: OFF";
             nvgStatusText.color = active ? Palette.NvgPhosphor : Palette.MutedText;
         }
 
@@ -1192,9 +1683,41 @@ namespace UI
             for (var i = 0; i < squadMemberBars.Length; i++)
             {
                 var hasMember = members != null && i < members.Count && members[i] != null;
-                if (!hasMember) continue;
+                if (!hasMember)
+                {
+                    if (squadKiaIcons != null && i < squadKiaIcons.Length && squadKiaIcons[i] != null)
+                    {
+                        squadKiaIcons[i].enabled = false;
+                    }
+                    continue;
+                }
 
                 var m = members[i];
+                if (squadKiaIcons != null && i < squadKiaIcons.Length && squadKiaIcons[i] != null)
+                {
+                    squadKiaIcons[i].enabled = m.IsKia;
+                    squadKiaIcons[i].color = Palette.EnemySecondary;
+                }
+                if (m.IsKia)
+                {
+                    if (squadMemberNames != null && i < squadMemberNames.Length && squadMemberNames[i] != null)
+                    {
+                        squadMemberNames[i].text = m.Callsign;
+                        squadMemberNames[i].color = Palette.WithAlpha(Palette.EnemySecondary, 0.78f);
+                    }
+                    if (squadMemberBars[i] != null)
+                    {
+                        squadMemberBars[i].fillAmount = 0f;
+                        squadMemberBars[i].color = Palette.DamageBloodRed;
+                    }
+                    if (squadMemberStatusTexts != null && i < squadMemberStatusTexts.Length && squadMemberStatusTexts[i] != null)
+                    {
+                        squadMemberStatusTexts[i].text = "K.I.A.";
+                        squadMemberStatusTexts[i].color = Palette.EnemySecondary;
+                    }
+                    continue;
+                }
+
                 if (squadMemberNames != null && i < squadMemberNames.Length && squadMemberNames[i] != null)
                 {
                     squadMemberNames[i].text = m.Callsign;
@@ -1202,16 +1725,18 @@ namespace UI
                 }
                 if (squadMemberBars[i] != null)
                 {
-                    squadMemberBars[i].fillAmount = m.MaxHp > 0f ? Mathf.Clamp01(m.CurrentHp / m.MaxHp) : 0f;
-                    squadMemberBars[i].color = m.IsDowned ? Palette.C4Amber : Palette.SquadBlue;
+                    squadMemberBars[i].fillAmount = m.IsDowned
+                        ? Mathf.Clamp01(m.BleedOutNormalized)
+                        : (m.MaxHp > 0f ? Mathf.Clamp01(m.CurrentHp / m.MaxHp) : 0f);
+                    squadMemberBars[i].color = m.IsDowned ? Palette.EnemySecondary : Palette.SquadBlue;
                 }
 
                 if (squadMemberStatusTexts == null || i >= squadMemberStatusTexts.Length ||
                     squadMemberStatusTexts[i] == null) continue;
                 squadMemberStatusTexts[i].text = m.IsDowned
-                    ? "DOWN"
+                    ? $"BLEED {Mathf.CeilToInt(m.BleedOutRemaining)}s"
                     : (Mathf.RoundToInt(100f * m.CurrentHp / Mathf.Max(1f, m.MaxHp)) + "%");
-                squadMemberStatusTexts[i].color = m.IsDowned ? Palette.C4Amber : Palette.SquadBlue;
+                squadMemberStatusTexts[i].color = m.IsDowned ? Palette.EnemySecondary : Palette.SquadBlue;
             }
         }
 
@@ -1221,14 +1746,20 @@ namespace UI
 
             var player = PlayerController.Instance;
             var playerPos = player.transform.position;
-            var radiusPx = Mathf.Min(radarContainerRect.rect.width, radarContainerRect.rect.height) * 0.5f - 10f;
+            var radiusPx = Mathf.Min(radarContainerRect.rect.width, radarContainerRect.rect.height) * 0.5f - 12f;
             if (radiusPx < 24f) radiusPx = 56f;
             const float radarWorldRange = 36f;
 
+            var facingEuler = Quaternion.Euler(0f, 0f, -player.transform.eulerAngles.y);
             if (radarPlayerChevron != null)
             {
                 radarPlayerChevron.anchoredPosition = Vector2.zero;
-                radarPlayerChevron.localRotation = Quaternion.Euler(0f, 0f, -player.transform.eulerAngles.y);
+                radarPlayerChevron.localRotation = facingEuler;
+            }
+            if (radarFovCone != null)
+            {
+                radarFovCone.anchoredPosition = Vector2.zero;
+                radarFovCone.localRotation = facingEuler;
             }
 
             if (radarSquadDots != null)
@@ -1238,13 +1769,13 @@ namespace UI
                 {
                     var dot = radarSquadDots[i];
                     if (dot == null) continue;
-                    var show = members != null && i < members.Count && members[i] != null && members[i].gameObject.activeInHierarchy;
+                    var show = members != null && i < members.Count && members[i] != null && !members[i].IsKia && members[i].gameObject.activeInHierarchy;
                     dot.gameObject.SetActive(show);
                     if (!show) continue;
 
                     var pos = MapWorldToRadar(members[i].transform.position, playerPos, radarWorldRange, radiusPx, true);
                     dot.rectTransform.anchoredPosition = pos;
-                    dot.color = members[i].IsDowned ? Palette.C4Amber : Palette.SquadBlue;
+                    dot.color = members[i].IsDowned ? Palette.EnemySecondary : Palette.SquadBlue;
                 }
             }
 
@@ -1261,7 +1792,12 @@ namespace UI
 
                     var pos = MapWorldToRadar(nodes[i].transform.position, playerPos, radarWorldRange, radiusPx, true);
                     dot.rectTransform.anchoredPosition = pos;
-                    dot.color = nodes[i].Kind == ObjectiveNodeKind.HelipadEvacLZ ? Palette.RadarGreen : Palette.C4Amber;
+                    dot.color = nodes[i].Kind switch
+                    {
+                        ObjectiveNodeKind.HelipadEvacLZ or ObjectiveNodeKind.BoatExfilDock or ObjectiveNodeKind.TunnelBreachExit or ObjectiveNodeKind.FreightLiftExit => Palette.RadarGreen,
+                        ObjectiveNodeKind.IntelTerminal => Palette.M3HeliosCoreCyan,
+                        _ => Palette.C4Amber
+                    };
                 }
             }
 
@@ -1348,16 +1884,22 @@ namespace UI
 
         public void UpdateScore(int score, int highScore)
         {
-            if (scoreText != null) scoreText.text = score.ToString("N0") + " PTS";
-            if (titleHighScoreText != null) titleHighScoreText.text = "HIGH SCORE // " + highScore.ToString("N0");
+            if (scoreText != null)
+            {
+                var kills = GameManager.Instance != null ? GameManager.Instance.ConfirmedKillsCount : 0;
+                scoreText.text = kills > 0 ? $"CONFIRMED // {kills} KIA" : "OP-SCORE // " + score.ToString("N0");
+            }
+            if (titleHighScoreText != null) titleHighScoreText.text = "PEAK RATING // " + highScore.ToString("N0");
+            RefreshTitleLoadoutSummary();
         }
 
         public void UpdateCredits(int totalCredits, int runEarned)
         {
-            if (titleCreditsText != null) titleCreditsText.text = "FUNDS // " + totalCredits.ToString("N0") + " CR";
+            if (titleCreditsText != null) titleCreditsText.text = "REQUISITION // " + totalCredits.ToString("N0") + " CR";
             if (armoryCreditsText != null) armoryCreditsText.text = totalCredits.ToString("N0") + " CR";
-            if (hudCreditsText != null) hudCreditsText.text = totalCredits.ToString("N0") + " CR";
-            if (endedCreditsText != null) endedCreditsText.text = "EARNED +" + runEarned + " CR   |   FUNDS: " + totalCredits.ToString("N0") + " CR";
+            if (hudCreditsText != null) hudCreditsText.text = "REQ // " + totalCredits.ToString("N0") + " CR";
+            if (endedCreditsText != null) endedCreditsText.text = "REQUISITION +" + runEarned + " CR   |   FUNDS: " + totalCredits.ToString("N0") + " CR";
+            RefreshTitleLoadoutSummary();
         }
 
         public void UpdateBossHp(float current, float max, string label)
@@ -1365,7 +1907,7 @@ namespace UI
             if (bossBarRoot == null) return;
             bossBarRoot.gameObject.SetActive(true);
             if (bossHpFillImage != null) bossHpFillImage.fillAmount = max > 0f ? Mathf.Clamp01(current / max) : 0f;
-            if (bossNameText != null) bossNameText.text = label;
+            if (bossNameText != null) bossNameText.text = "HVT LOCK // " + label;
             if (bossHpText != null) bossHpText.text = Mathf.CeilToInt(current) + " / " + Mathf.RoundToInt(max);
         }
 
@@ -1380,6 +1922,15 @@ namespace UI
             var save = SaveManager.EnsureInstance();
             var selected = save.Data.selectedWeapon;
 
+            if (weaponCaliberText != null && selected >= 0 && selected < WeaponCaliberModes.Length)
+            {
+                weaponCaliberText.text = WeaponCaliberModes[selected];
+            }
+            if (ammoWeaponNameText != null && selected >= 0 && selected < WeaponNames.Length)
+            {
+                ammoWeaponNameText.text = WeaponNames[selected];
+            }
+
             for (var i = 0; i < weaponSlotButtons.Length && i < WeaponNames.Length; i++)
             {
                 var unlocked = save.IsWeaponUnlocked(i);
@@ -1391,7 +1942,8 @@ namespace UI
                 if (weaponSlotLabels != null && i < weaponSlotLabels.Length && weaponSlotLabels[i] != null)
                 {
                     weaponSlotLabels[i].color = active ? Palette.Shadow : (unlocked ? Palette.CharacterSecondary : Palette.MutedText);
-                    weaponSlotLabels[i].text = unlocked ? $"[{i + 1}] {WeaponNames[i]}" : $"[{i + 1}] LOCKED";
+                    var code = i < WeaponBarLabels.Length ? WeaponBarLabels[i] : WeaponNames[i];
+                    weaponSlotLabels[i].text = unlocked ? $"[{i + 1}]\n{code}" : $"[{i + 1}]\nLOCK";
                 }
                 if (weaponSlotButtons[i] != null)
                 {
@@ -1406,7 +1958,8 @@ namespace UI
             var d = save.Data;
 
             if (armoryCreditsText != null) armoryCreditsText.text = d.credits.ToString("N0") + " CR";
-            if (titleCreditsText != null) titleCreditsText.text = "FUNDS // " + d.credits.ToString("N0") + " CR";
+            if (titleCreditsText != null) titleCreditsText.text = "REQUISITION // " + d.credits.ToString("N0") + " CR";
+            RefreshTitleLoadoutSummary();
 
             if (upgradeButtons != null)
             {
@@ -1518,28 +2071,48 @@ namespace UI
         public void PopulateEndedSummary(bool victory, int score, int highScore, int kills, int wave, bool isNewRecord)
         {
             var mission = StoryDirector.ActiveMissionIndex;
+            var save = SaveManager.EnsureInstance();
             var hasNext = victory && (GameManager.Instance != null ? GameManager.Instance.HasNextMission : mission < StoryDirector.CampaignMissionCount);
             if (endedTitleText != null)
             {
-                endedTitleText.text = victory
-                    ? (hasNext ? $"ACT 0{mission} COMPLETE // SECTOR SECURED" : "CAMPAIGN VICTORY // PROJECT HELIOS STOPPED")
-                    : $"K.I.A. // MISSION 0{mission} FAILED";
-                endedTitleText.color = victory ? Palette.HealthGreen : Palette.EnemySecondary;
+                if (!victory)
+                {
+                    endedTitleText.text = $"UNIT WIPED // ACT 0{mission} M.I.A.";
+                    endedTitleText.color = Palette.EnemySecondary;
+                }
+                else if (hasNext)
+                {
+                    endedTitleText.text = $"ACT 0{mission} CLEARED // EXTRACTION AT COST";
+                    endedTitleText.color = Palette.C4Amber;
+                }
+                else
+                {
+                    endedTitleText.text = save.LastEndingChoice == CampaignEndingKind.BroadcastBlackout
+                        ? "ENDING A // SCORCHED BLACKOUT BROADCAST"
+                        : "ENDING B // SILENT PROTOCOL SEALED";
+                    endedTitleText.color = save.LastEndingChoice == CampaignEndingKind.BroadcastBlackout ? Palette.HealthGreen : Palette.C4Amber;
+                }
             }
             if (endedAccentStripe != null)
             {
-                endedAccentStripe.color = victory ? Palette.HealthGreen : Palette.EnemySecondary;
+                endedAccentStripe.color = victory ? Palette.C4Amber : Palette.EnemySecondary;
             }
             if (endedScoreText != null) endedScoreText.text = score.ToString("N0") + " PTS";
-            if (endedBestText != null) endedBestText.text = isNewRecord ? "NEW RECORD // " + highScore.ToString("N0") : "BEST // " + highScore.ToString("N0");
-            if (endedStatsText != null) endedStatsText.text = $"MISSION 0{mission}/{StoryDirector.CampaignMissionCount}   |   ELIMINATIONS: {kills}   |   STAGE: {wave}/{StoryDirector.FinalCampaignStage}";
+            if (endedBestText != null) endedBestText.text = isNewRecord ? "PEAK RECORD // " + highScore.ToString("N0") : "PEAK RECORD // " + highScore.ToString("N0");
+            if (endedStatsText != null) endedStatsText.text = $"ACT 0{mission}/{StoryDirector.CampaignMissionCount}   |   HOSTILES KIA: {kills}   |   VANGUARD KIA: {save.KiaCount}/3";
             if (endedNarrativeText != null) endedNarrativeText.text = StoryDirector.GetEndedDebrief(victory, wave, kills);
+            if (endedMemorialText != null) endedMemorialText.text = StoryDirector.BuildMemorialRollText(victory);
             if (endedNextMissionButton != null)
             {
                 endedNextMissionButton.gameObject.SetActive(hasNext);
                 if (hasNext && endedNextMissionText != null)
                 {
-                    endedNextMissionText.text = mission == 1 ? "NEXT: ACT II ->" : "NEXT: ACT III ->";
+                    endedNextMissionText.text = mission switch
+                    {
+                        1 => "DEPLOY: ACT II ->",
+                        2 => "DEPLOY: ACT III ->",
+                        _ => "DEPLOY: ACT IV ->"
+                    };
                 }
             }
         }
@@ -1547,13 +2120,34 @@ namespace UI
         private void OpenIntel()
         {
             AudioManager.Instance?.PlayUIClick();
+            SelectIntelTab(_activeIntelTab, quiet: true);
+            SetGroupState(titleGroup, 0f);
+            SetGroupState(intelGroup, 1f);
+        }
+
+        public void SelectIntelTab(int tabIndex, bool quiet = false)
+        {
+            _activeIntelTab = Mathf.Clamp(tabIndex, 0, 2);
+            if (!quiet) AudioManager.Instance?.PlayUIClick();
             if (intelBodyText != null)
             {
                 var bestWave = SaveManager.EnsureInstance().Data.highestWave;
-                intelBodyText.text = StoryDirector.BuildIntelDossierText(bestWave);
+                intelBodyText.text = StoryDirector.BuildIntelDossierTabText(_activeIntelTab, bestWave);
             }
-            SetGroupState(titleGroup, 0f);
-            SetGroupState(intelGroup, 1f);
+            if (intelTabBgs != null)
+            {
+                for (var i = 0; i < intelTabBgs.Length; i++)
+                {
+                    if (intelTabBgs[i] != null)
+                    {
+                        intelTabBgs[i].color = i == _activeIntelTab ? Palette.Accent : Palette.SecondaryButtonBg;
+                    }
+                    if (intelTabLabels != null && i < intelTabLabels.Length && intelTabLabels[i] != null)
+                    {
+                        intelTabLabels[i].color = i == _activeIntelTab ? Palette.Shadow : Palette.CharacterSecondary;
+                    }
+                }
+            }
         }
 
         private void CloseIntel()
@@ -1568,6 +2162,7 @@ namespace UI
 
         public void HideRadioCommsImmediate()
         {
+            _radioQueue.Clear();
             if (_radioRoutine != null)
             {
                 StopCoroutine(_radioRoutine);
@@ -1582,32 +2177,85 @@ namespace UI
 
         private void HandleRadioTransmission(string callsign, string channel, string body)
         {
-            LastDisplayedRadioCallsign = callsign;
-            LastDisplayedRadioBody = body;
-            if (radioCommsGroup == null) return;
+            var faction = StoryDirector.LastFaction;
+            if (callsign.Contains("DRAGIC") || callsign.Contains("KASTNER")) faction = SpeakerFaction.Hostile;
+            else if (callsign.Contains("VOLKOV")) faction = SpeakerFaction.Traitor;
+            else if (callsign.Contains("RADEK")) faction = SpeakerFaction.ApexBoss;
+            else if (callsign.Contains("CHEN")) faction = SpeakerFaction.Command;
 
-            if (radioCallsignText != null) radioCallsignText.text = callsign + " // " + channel;
-            if (radioBodyText != null) radioBodyText.text = body;
-            if (radioAccentStripe != null)
-            {
-                var hostile = callsign.Contains("DRAGIC") || callsign.Contains("KASTNER") || callsign.Contains("RADEK");
-                radioAccentStripe.color = hostile ? Palette.EnemySecondary : Palette.Accent;
-            }
-
-            if (_radioRoutine != null) StopCoroutine(_radioRoutine);
-            _radioRoutine = StartCoroutine(RadioCommsRoutine());
+            _radioQueue.Clear();
+            _radioQueue.Enqueue(new RadioLine(callsign, channel, body, faction, 4.6f));
+            StartRadioQueueRunner();
         }
 
-        private IEnumerator RadioCommsRoutine()
+        private void HandleRadioConversation(RadioLine[] lines)
         {
-            AudioManager.Instance?.PlayRadioChirp();
-            var startAlpha = radioCommsGroup != null ? radioCommsGroup.alpha : 0f;
-            yield return Ease.Tween(0.18f, t =>
+            if (lines == null || lines.Length == 0) return;
+            _radioQueue.Clear();
+            foreach (var line in lines)
             {
-                if (radioCommsGroup != null) radioCommsGroup.alpha = Mathf.Lerp(startAlpha, 1f, Ease.OutCubic(t));
-            }, Ease.Linear, unscaled: false);
+                _radioQueue.Enqueue(line);
+            }
+            StartRadioQueueRunner();
+        }
 
-            yield return Ease.GetWait(5.2f);
+        private void StartRadioQueueRunner()
+        {
+            if (radioCommsGroup == null)
+            {
+                if (_radioQueue.Count > 0)
+                {
+                    var head = _radioQueue.Peek();
+                    LastDisplayedRadioCallsign = head.Callsign;
+                    LastDisplayedRadioBody = head.Body;
+                }
+                return;
+            }
+            if (_radioRoutine != null) StopCoroutine(_radioRoutine);
+            _radioRoutine = StartCoroutine(RadioCommsQueueRoutine());
+        }
+
+        private static Color GetFactionColor(SpeakerFaction faction)
+        {
+            return faction switch
+            {
+                SpeakerFaction.Command => Palette.RadarGreen,
+                SpeakerFaction.Hostile => Palette.EnemySecondary,
+                SpeakerFaction.Traitor => Palette.C4Amber,
+                SpeakerFaction.ApexBoss => Palette.BossPurple,
+                _ => Palette.SquadBlue
+            };
+        }
+
+        private IEnumerator RadioCommsQueueRoutine()
+        {
+            while (_radioQueue.Count > 0)
+            {
+                var line = _radioQueue.Dequeue();
+                LastDisplayedRadioCallsign = line.Callsign;
+                LastDisplayedRadioBody = line.Body;
+
+                var col = GetFactionColor(line.Faction);
+                if (radioCallsignText != null)
+                {
+                    radioCallsignText.text = line.Callsign + " // " + line.Channel;
+                    radioCallsignText.color = col;
+                }
+                if (radioBodyText != null) radioBodyText.text = line.Body;
+                if (radioAccentStripe != null) radioAccentStripe.color = col;
+
+                AudioManager.Instance?.PlayRadioChirp();
+                var startAlpha = radioCommsGroup != null ? radioCommsGroup.alpha : 0f;
+                if (startAlpha < 0.95f)
+                {
+                    yield return Ease.Tween(0.18f, t =>
+                    {
+                        if (radioCommsGroup != null) radioCommsGroup.alpha = Mathf.Lerp(startAlpha, 1f, Ease.OutCubic(t));
+                    }, Ease.Linear, unscaled: false);
+                }
+
+                yield return Ease.GetWait(line.HoldSeconds);
+            }
 
             yield return Ease.Tween(0.35f, t =>
             {

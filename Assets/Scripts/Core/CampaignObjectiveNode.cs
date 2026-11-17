@@ -13,12 +13,20 @@ namespace Core
         GateC4Breach,
         FuelValveSabotage,
         RadarSabotage,
-        HelipadEvacLZ
+        HelipadEvacLZ,
+        RailSwitchLever,
+        ServerHackHoldout,
+        HeliosPylonOverload,
+        CoreShutdownConsole,
+        IntelTerminal,
+        BoatExfilDock,
+        TunnelBreachExit,
+        FreightLiftExit
     }
 
     /// <summary>
-    /// Interactive 3D campaign objective node (C4 gate breach, Fuel Valve / EW Radar sabotage,
-    /// or Extraction LZ flare zone). Supports stand-in-zone arming, [E] boost, and Vanguard-09 buddy assist.
+    /// Interactive 3D campaign objective node supporting C4 gate/train breaches, rail diverter switches,
+    /// mainframe decryption holdout defenses, HELIOS pylon overloads, collectible Intel Terminals, and mission exfil points.
     /// </summary>
     public sealed class CampaignObjectiveNode : MonoBehaviour
     {
@@ -34,11 +42,15 @@ namespace Core
         private MaterialPropertyBlock _mpb;
 
         private float _currentProgress;
+        private bool _holdStartedNotified;
         private Action<CampaignObjectiveNode> _onCompletedCallback;
+        private Action<CampaignObjectiveNode> _onStartedCallback;
 
         public ObjectiveNodeKind Kind { get; private set; }
 
         public string DisplayTitle { get; private set; } = "PLANT C4";
+
+        public string IntelId { get; private set; } = string.Empty;
 
         public bool IsUnlocked { get; private set; }
 
@@ -57,14 +69,18 @@ namespace Core
             Mesh c4Mesh,
             Material hardwareMat,
             Material accentMat,
-            Action<CampaignObjectiveNode> onComplete)
+            Action<CampaignObjectiveNode> onComplete,
+            Action<CampaignObjectiveNode> onStarted = null,
+            string intelId = "")
         {
             Kind = nodeKind;
             DisplayTitle = title;
+            IntelId = intelId ?? string.Empty;
             _interactRadius = radius;
             _requiredDuration = armSeconds;
             _detonateOnComplete = explodeOnFinish;
             _onCompletedCallback = onComplete;
+            _onStartedCallback = onStarted;
             transform.position = new Vector3(worldPos.x, 0f, worldPos.z);
 
             BuildVisuals(terminalMesh, c4Mesh, hardwareMat, accentMat);
@@ -78,7 +94,8 @@ namespace Core
                 Destroy(transform.GetChild(i).gameObject);
             }
 
-            if (Kind != ObjectiveNodeKind.HelipadEvacLZ)
+            var isGroundZoneOnly = Kind is ObjectiveNodeKind.HelipadEvacLZ or ObjectiveNodeKind.BoatExfilDock or ObjectiveNodeKind.TunnelBreachExit or ObjectiveNodeKind.FreightLiftExit;
+            if (!isGroundZoneOnly)
             {
                 if (terminalMesh != null)
                 {
@@ -88,6 +105,10 @@ namespace Core
                     mf.sharedMesh = terminalMesh;
                     var mr = _terminalVisual.AddComponent<MeshRenderer>();
                     mr.sharedMaterial = hardwareMat;
+                    if (Kind == ObjectiveNodeKind.IntelTerminal)
+                    {
+                        _terminalVisual.transform.localScale = Vector3.one * 0.85f;
+                    }
                 }
                 else
                 {
@@ -101,7 +122,7 @@ namespace Core
                     _terminalVisual.GetComponent<MeshRenderer>().sharedMaterial = hardwareMat;
                 }
 
-                if (c4Mesh != null)
+                if (c4Mesh != null && Kind != ObjectiveNodeKind.IntelTerminal)
                 {
                     _c4ChargeVisual = new GameObject("PlantedC4");
                     _c4ChargeVisual.transform.SetParent(transform, false);
@@ -137,6 +158,7 @@ namespace Core
         {
             IsUnlocked = unlocked;
             IsCompleted = completed;
+            _holdStartedNotified = false;
             _currentProgress = completed ? _requiredDuration : 0f;
 
             if (_zoneRingTransform != null)
@@ -169,18 +191,27 @@ namespace Core
 
             var diff = player.transform.position - transform.position;
             diff.y = 0f;
-            var playerInside = diff.magnitude <= _interactRadius;
+            var dist = diff.magnitude;
+            var playerInside = dist <= _interactRadius;
 
             var squadAssist = SquadDirector.Instance != null && SquadDirector.Instance.HasStandingMemberNear(transform.position, _interactRadius + 1.2f);
             var interactBoost = Keyboard.current != null && Keyboard.current.eKey.isPressed;
 
             if (playerInside)
             {
-                var rate = 1f + (squadAssist ? 0.55f : 0f) + (interactBoost ? 1.1f : 0f);
+                if (!_holdStartedNotified)
+                {
+                    _holdStartedNotified = true;
+                    _onStartedCallback?.Invoke(this);
+                }
+
+                var boostBonus = Kind == ObjectiveNodeKind.ServerHackHoldout ? (interactBoost ? 0.35f : 0f) : (interactBoost ? 1.1f : 0f);
+                var assistBonus = squadAssist ? (Kind == ObjectiveNodeKind.ServerHackHoldout ? 0.25f : 0.55f) : 0f;
+                var rate = 1f + assistBonus + boostBonus;
                 _currentProgress = Mathf.Min(_requiredDuration, _currentProgress + dt * rate);
 
                 var pct = Mathf.RoundToInt(ProgressNormalized * 100f);
-                var verb = Kind == ObjectiveNodeKind.HelipadEvacLZ ? "SIGNALING EVAC-6" : "ARMING C4";
+                var verb = GetInteractionVerb();
                 UIManager.Instance?.UpdateContextPrompt($"{verb} [{pct}%]  ·  HOLD [E] BOOST");
 
                 if (_currentProgress >= _requiredDuration)
@@ -189,14 +220,19 @@ namespace Core
                     return;
                 }
             }
-            else if (diff.magnitude <= _interactRadius + 3.0f)
+            else if (dist <= _interactRadius + 3.2f)
             {
-                UIManager.Instance?.UpdateContextPrompt($"MOVE TO {DisplayTitle}");
-                _currentProgress = Mathf.Max(0f, _currentProgress - dt * 0.4f);
+                var approachLabel = Kind == ObjectiveNodeKind.IntelTerminal
+                    ? $"[E] RECOVER INTEL // {DisplayTitle}"
+                    : $"ENTER RING: {DisplayTitle}";
+                UIManager.Instance?.UpdateContextPrompt(approachLabel);
+                var decay = Kind == ObjectiveNodeKind.ServerHackHoldout ? 0.12f : 0.4f;
+                _currentProgress = Mathf.Max(0f, _currentProgress - dt * decay);
             }
             else
             {
-                _currentProgress = Mathf.Max(0f, _currentProgress - dt * 0.6f);
+                var decay = Kind == ObjectiveNodeKind.ServerHackHoldout ? 0.12f : 0.6f;
+                _currentProgress = Mathf.Max(0f, _currentProgress - dt * decay);
             }
 
             var pulse = 0.94f + 0.06f * Mathf.Sin(Time.time * 5.2f);
@@ -205,6 +241,23 @@ namespace Core
                 _zoneRingTransform.localScale = new Vector3(_interactRadius * 2f * pulse, _interactRadius * 2f * pulse, 1f);
             }
             ApplyZoneColor(ProgressNormalized);
+        }
+
+        private string GetInteractionVerb()
+        {
+            return Kind switch
+            {
+                ObjectiveNodeKind.HelipadEvacLZ => "SIGNALING VALKYRIE-6",
+                ObjectiveNodeKind.BoatExfilDock => "BOARDING EXFIL BOAT",
+                ObjectiveNodeKind.TunnelBreachExit => "ENTERING NORTH TUNNEL",
+                ObjectiveNodeKind.FreightLiftExit => "ACTIVATING FREIGHT LIFT",
+                ObjectiveNodeKind.RailSwitchLever => "THROWING RAIL SWITCH",
+                ObjectiveNodeKind.ServerHackHoldout => "DECRYPTING MAINFRAME",
+                ObjectiveNodeKind.HeliosPylonOverload => "OVERLOADING CAPACITOR",
+                ObjectiveNodeKind.CoreShutdownConsole => "KILLING HELIOS CORE",
+                ObjectiveNodeKind.IntelTerminal => "DECRYPTING INTEL LOG",
+                _ => "ARMING C4 CHARGE"
+            };
         }
 
         private void CompleteNode()
@@ -216,21 +269,31 @@ namespace Core
             if (_c4ChargeVisual != null) _c4ChargeVisual.SetActive(true);
             UIManager.Instance?.UpdateContextPrompt(string.Empty);
 
-            if (_detonateOnComplete)
+            if (Kind == ObjectiveNodeKind.IntelTerminal)
+            {
+                var pos = transform.position + Vector3.up * 0.7f;
+                VFXManager.Instance?.Play(VfxKind.LevelUpNova, pos, Palette.M3HeliosCoreCyan);
+                AudioManager.Instance?.PlayMilestoneSting();
+                FeelManager.Instance?.SpawnFloatingText(pos + Vector3.up * 0.5f, "INTEL DECRYPTED!", Palette.M3HeliosCoreCyan);
+            }
+            else if (_detonateOnComplete)
             {
                 var blastCenter = transform.position + Vector3.up * 0.85f;
                 VFXManager.Instance?.Play(VfxKind.EnemyDeath, blastCenter, Palette.RocketOrange);
                 VFXManager.Instance?.Play(VfxKind.LevelUpNova, blastCenter, Palette.C4Amber);
                 FeelManager.Instance?.TriggerCameraShake(0.45f);
                 AudioManager.Instance?.PlayEnemyExplode();
-                FeelManager.Instance?.SpawnFloatingText(blastCenter + Vector3.up * 0.5f, "C4 DETONATED!", Palette.C4Amber);
+                var text = Kind == ObjectiveNodeKind.HeliosPylonOverload ? "PYLON OVERLOADED!" : "CHARGE DETONATED!";
+                FeelManager.Instance?.SpawnFloatingText(blastCenter + Vector3.up * 0.5f, text, Palette.C4Amber);
             }
             else
             {
                 var lzCenter = transform.position + Vector3.up * 0.5f;
                 VFXManager.Instance?.Play(VfxKind.LevelUpNova, lzCenter, Palette.RadarGreen);
                 AudioManager.Instance?.PlayMilestoneSting();
-                FeelManager.Instance?.SpawnFloatingText(lzCenter + Vector3.up * 0.6f, "EVAC FLARE POPPED!", Palette.RadarGreen);
+                var text = Kind == ObjectiveNodeKind.RailSwitchLever ? "SWITCH LOCKED!" :
+                    (Kind == ObjectiveNodeKind.ServerHackHoldout ? "AEGIS KEY DECRYPTED!" : "OBJECTIVE SECURED!");
+                FeelManager.Instance?.SpawnFloatingText(lzCenter + Vector3.up * 0.6f, text, Palette.RadarGreen);
             }
 
             _onCompletedCallback?.Invoke(this);
@@ -241,8 +304,14 @@ namespace Core
             if (_zoneRingRenderer == null) return;
             _mpb ??= new MaterialPropertyBlock();
 
-            var baseCol = Kind == ObjectiveNodeKind.HelipadEvacLZ ? Palette.RadarGreen : Palette.C4Amber;
-            var activeCol = Palette.Lerp(baseCol, Palette.HealthGreen, armProgress * 0.6f);
+            var baseCol = Kind switch
+            {
+                ObjectiveNodeKind.HelipadEvacLZ or ObjectiveNodeKind.BoatExfilDock or ObjectiveNodeKind.TunnelBreachExit or ObjectiveNodeKind.FreightLiftExit => Palette.RadarGreen,
+                ObjectiveNodeKind.IntelTerminal or ObjectiveNodeKind.HeliosPylonOverload or ObjectiveNodeKind.CoreShutdownConsole => Palette.M3HeliosCoreCyan,
+                ObjectiveNodeKind.ServerHackHoldout => Palette.SquadBlue,
+                _ => Palette.C4Amber
+            };
+            var activeCol = Palette.Lerp(baseCol, Palette.HealthGreen, armProgress * 0.65f);
             activeCol.a = 0.72f + armProgress * 0.25f;
             _zoneRingRenderer.GetPropertyBlock(_mpb);
             _mpb.SetColor(Color1, activeCol);

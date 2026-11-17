@@ -156,6 +156,7 @@ namespace Pickups
             {
                 case PickupKind.Medkit:
                     player.Heal(_healValue);
+                    player.AddArmorAndTrauma(25f, player.TraumaKits < 2 ? 1 : 0);
                     player.AddFragGrenades(1);
                     FeelManager.Instance?.OnPickupCollected(transform.position, 0, isHealth: true);
                     break;

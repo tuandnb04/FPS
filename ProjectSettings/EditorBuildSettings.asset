@@ -12,7 +12,10 @@ EditorBuildSettings:
     path: Assets/Scenes/Mission02_RailDepot.unity
     guid: 8e7ea6c37c5f51d4a9f64ec64133726c
   - enabled: 1
-    path: Assets/Scenes/Mission03_BlackcrestSummit.unity
-    guid: e5a2ad708a0df794b8047d47c95c0696
+    path: Assets/Scenes/Mission03_KestrelRelay.unity
+    guid: 6646e19a43fe4f84787f9d429c75aa1e
+  - enabled: 1
+    path: Assets/Scenes/Mission04_BlackcrestSummit.unity
+    guid: 7c9385f5538a1bf46ac1698ca652575a
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}

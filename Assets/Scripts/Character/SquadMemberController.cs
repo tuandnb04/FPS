@@ -5,6 +5,7 @@ using Enemies;
 using Feel;
 using UI;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace Character
 {
@@ -24,7 +25,8 @@ namespace Character
 
     /// <summary>
     /// AI-controlled Vanguard-09 squadmate with two-hand weapon IK, cover line-of-sight awareness,
-    /// player muzzle-lane avoidance, downed-recovery/revive state, and regenerating trauma health.
+    /// player muzzle-lane avoidance, 20-second critical bleedout requiring manual stabilization or Trauma Kit,
+    /// and irreversible K.I.A. permadeath synced to SaveManager.
     /// </summary>
     public sealed class SquadMemberController : MonoBehaviour
     {
@@ -45,9 +47,7 @@ namespace Character
         private float _hitFlashTimer;
         private float _prevYaw;
 
-        private float _reviveTimer;
-        private const float AutoStabilizeDuration = 6.5f;
-
+        private const float BleedOutMaxSeconds = 20.0f;
         private MaterialPropertyBlock _mpb;
 
         public SquadRole Role { get; private set; }
@@ -61,6 +61,14 @@ namespace Character
         public float MaxHp { get; private set; } = 150f;
 
         public bool IsDowned { get; private set; }
+
+        public bool IsKia { get; private set; }
+
+        public float BleedOutRemaining { get; private set; }
+
+        public float BleedOutNormalized => BleedOutRemaining / BleedOutMaxSeconds;
+
+        public float StabilizeProgress { get; private set; }
 
         public int ShotsFiredCount { get; private set; }
 
@@ -109,7 +117,9 @@ namespace Character
         public void ResetForMission(Vector3 spawnPos)
         {
             IsDowned = false;
-            _reviveTimer = 0f;
+            IsKia = false;
+            BleedOutRemaining = BleedOutMaxSeconds;
+            StabilizeProgress = 0f;
             CurrentHp = MaxHp;
             _timeSinceLastHit = 10f;
             _fireCooldown = 0.25f + (int)Role * 0.14f;
@@ -118,10 +128,36 @@ namespace Character
             _hitFlashTimer = 0f;
             _hasHoldAnchor = false;
             ShotsFiredCount = 0;
+            gameObject.SetActive(true);
             SetVisualCrouch(false);
             ApplyHitFlash(0f);
             Teleport(spawnPos, Quaternion.identity);
             _characterMotion?.ResetMotionState();
+        }
+
+        public void ApplyPreexistingKiaState()
+        {
+            IsDowned = false;
+            IsKia = true;
+            BleedOutRemaining = 0f;
+            StabilizeProgress = 0f;
+            CurrentHp = 0f;
+            _burstRemaining = 0;
+            gameObject.SetActive(false);
+        }
+
+        public bool ApplyEmergencyTraumaPatch()
+        {
+            if (IsKia || !IsDowned) return false;
+            IsDowned = false;
+            BleedOutRemaining = BleedOutMaxSeconds;
+            StabilizeProgress = 0f;
+            CurrentHp = MaxHp * 0.65f;
+            _timeSinceLastHit = 4f;
+            SetVisualCrouch(false);
+            FeelManager.Instance?.SpawnFloatingText(transform.position + Vector3.up * 0.85f, Callsign + " STABILIZED", Palette.HealthGreen);
+            AudioManager.Instance?.PlayPickupBlip();
+            return true;
         }
 
         public void Teleport(Vector3 pos, Quaternion rot)
@@ -152,7 +188,7 @@ namespace Character
 
         public void TakeDamage(float dmg)
         {
-            if (IsDowned || dmg <= 0f) return;
+            if (IsKia || IsDowned || dmg <= 0f) return;
             if (GameManager.Instance != null && GameManager.Instance.CurrentState != GameState.Playing) return;
 
             CurrentHp = Mathf.Max(0f, CurrentHp - dmg);
@@ -162,16 +198,19 @@ namespace Character
 
             if (!(CurrentHp <= 0f)) return;
             IsDowned = true;
-            _reviveTimer = AutoStabilizeDuration;
+            BleedOutRemaining = BleedOutMaxSeconds;
+            StabilizeProgress = 0f;
             _burstRemaining = 0;
             SetVisualCrouch(true);
             StoryDirector.NotifySquadDowned(Callsign);
-            FeelManager.Instance?.SpawnFloatingText(transform.position + Vector3.up * 0.7f, Callsign + " PINNED", Palette.C4Amber);
-            VFXManager.Instance?.Play(VfxKind.HitSpark, transform.position + Vector3.up * 0.6f, Palette.Props);
+            UIManager.Instance?.TriggerThreatWarning($"!! TRAUMA: {RoleTag} BLEEDING OUT — STABILIZE ({Mathf.RoundToInt(BleedOutMaxSeconds)}S) !!", 2.5f);
+            FeelManager.Instance?.SpawnFloatingText(transform.position + Vector3.up * 0.7f, Callsign + " BLEEDOUT!", Palette.EnemySecondary);
+            VFXManager.Instance?.Play(VfxKind.HitSpark, transform.position + Vector3.up * 0.6f, Palette.EnemySecondary);
         }
 
         private void Update()
         {
+            if (IsKia) return;
             if (GameManager.Instance == null || GameManager.Instance.CurrentState != GameState.Playing)
             {
                 _characterMotion?.StepMotion(Vector3.zero, 0f, isAimingWeapon: true);
@@ -291,25 +330,54 @@ namespace Character
 
         private void StepDownedState(PlayerController player, float dt)
         {
-            var recoveryRate = 1f;
+            var stabilizing = false;
             if (player != null && !player.IsDead)
             {
                 var d = player.transform.position - transform.position;
                 d.y = 0f;
-                if (d.magnitude <= 2.4f)
+                if (d.magnitude <= 2.8f)
                 {
-                    recoveryRate = 4.2f; // Rapid buddy revive when Vanguard steps close
+                    stabilizing = true;
+                    var eHeld = Keyboard.current != null && Keyboard.current.eKey.isPressed;
+                    StabilizeProgress += (eHeld ? 0.95f : 0.48f) * dt;
+                    UIManager.Instance?.UpdateContextPrompt($"STABILIZING {Callsign} [{Mathf.RoundToInt(Mathf.Clamp01(StabilizeProgress) * 100f)}%] — HOLD [E]");
+                    if (StabilizeProgress >= 1f)
+                    {
+                        UIManager.Instance?.UpdateContextPrompt(string.Empty);
+                        ApplyEmergencyTraumaPatch();
+                        return;
+                    }
                 }
             }
 
-            _reviveTimer -= dt * recoveryRate;
-            if (!(_reviveTimer <= 0f)) return;
+            if (stabilizing) return;
+            StabilizeProgress = Mathf.Max(0f, StabilizeProgress - 0.15f * dt);
+            BleedOutRemaining -= dt;
+            if (BleedOutRemaining > 0f) return;
+
+            MarkKilledInAction();
+        }
+
+        public void MarkKilledInAction(bool broadcastRadio = true)
+        {
+            if (IsKia) return;
+            IsKia = true;
             IsDowned = false;
-            CurrentHp = MaxHp * 0.75f;
-            _timeSinceLastHit = 5f;
-            SetVisualCrouch(false);
-            FeelManager.Instance?.SpawnFloatingText(transform.position + Vector3.up * 0.8f, Callsign + " UP!", Palette.SquadBlue);
-            AudioManager.Instance?.PlayPickupBlip();
+            BleedOutRemaining = 0f;
+            StabilizeProgress = 0f;
+            CurrentHp = 0f;
+
+            SaveManager.EnsureInstance().MarkOperatorKia(RoleTag);
+            FeelManager.Instance?.SpawnFloatingText(transform.position + Vector3.up * 0.95f, Callsign + " K.I.A.", Palette.HitmarkerCrimson);
+            FeelManager.Instance?.TriggerKillFeed("TRAUMA-NET", Callsign, "K.I.A.");
+            UIManager.Instance?.TriggerThreatWarning($"!! FLATLINE: {RoleTag} ({Callsign}) K.I.A. — SIGNAL LOST !!", 3.5f);
+            UIManager.Instance?.ShowMilestoneBanner($"{RoleTag} // {Callsign} — KILLED IN ACTION");
+            AudioManager.Instance?.PlayEnemyExplode();
+            if (broadcastRadio)
+            {
+                StoryDirector.NotifyOperatorKia(Callsign, RoleTag);
+            }
+            gameObject.SetActive(false);
         }
 
         private Vector3 ComputeDesiredAnchor(PlayerController player)
