@@ -6,6 +6,7 @@ using Core;
 using Feel;
 using UI;
 using UnityEngine;
+using UnityEngine.AI;
 using UnityEngine.InputSystem;
 
 namespace Camera
@@ -160,24 +161,30 @@ namespace Camera
             if (_activeCutscene == null) return;
             StopCoroutine(_activeCutscene);
             _activeCutscene = null;
+            AudioManager.Instance?.StopRadioVoice();
             AudioManager.Instance?.PlayUIClick();
 
             var m = StoryDirector.ActiveMissionIndex;
             switch (CurrentCutscene)
             {
                 case CutsceneType.Act2GateBreach:
-                    OpenGateImmediate(m is 2 or 4 ? 2 : 1);
+                    OpenGateImmediate(1);
                     break;
                 case CutsceneType.FinalBossIntro:
                     OpenGateImmediate(1);
                     if (m != 4) OpenGateImmediate(2);
                     break;
                 case CutsceneType.VictoryEvac when evacChopperRoot != null && m >= StoryDirector.CampaignMissionCount:
+                    OpenGateImmediate(1);
+                    OpenGateImmediate(2);
                     evacChopperRoot.gameObject.SetActive(true);
                     evacChopperRoot.SetPositionAndRotation(new Vector3(0f, 0.04f, 42f), Quaternion.Euler(0f, 155f, 0f));
                     _rotorSpinSpeed = 240f;
                     break;
                 case CutsceneType.VictoryEvac:
+                    OpenGateImmediate(1);
+                    OpenGateImmediate(2);
+                    break;
                 case CutsceneType.IntroInfil:
                     break;
             }
@@ -252,37 +259,37 @@ namespace Camera
         private IEnumerator RunMidBreachShot()
         {
             var m = StoryDirector.ActiveMissionIndex;
-            var targetGate = m is 2 or 4 ? 2 : 1;
-            var gateLeft = targetGate == 2 ? blastGateAct2Left : blastGateAct1Left;
-            var gateRight = targetGate == 2 ? blastGateAct2Right : blastGateAct1Right;
-            var leftClosed = targetGate == 2 ? _gate2LeftClosed : _gate1LeftClosed;
-            var rightClosed = targetGate == 2 ? _gate2RightClosed : _gate1RightClosed;
+            const int targetGate = 1;
+            var gateLeft = blastGateAct1Left;
+            var gateRight = blastGateAct1Right;
+            var leftClosed = _gate1LeftClosed;
+            var rightClosed = _gate1RightClosed;
             var blastPos = m switch
             {
                 1 => new Vector3(0f, 1.5f, -14f),
-                2 => new Vector3(6f, 1.6f, 32f),
+                2 => new Vector3(-14f, 1.6f, -20f),
                 3 => new Vector3(0f, 1.5f, -26f),
-                _ => new Vector3(0f, 1.6f, 26f)
+                4 => new Vector3(0f, 1.6f, -26f),
+                _ => new Vector3(0f, 1.6f, -20f)
             };
 
             var fullStamp = StoryDirector.GetMissionTitle(m) + "\nBREACH CONFIRMED // SECTOR UNLOCKED";
             var beats = StoryDirector.GetMidBreachCutsceneBeats(m);
             var beat = beats[0];
+            var total = PlayBeatVoiceAndGetDuration(beat);
 
             var triggeredBlast = false;
             var elapsed = 0f;
-            var total = beat.Duration;
             while (elapsed < total)
             {
                 elapsed += Time.unscaledDeltaTime;
-                var u = Mathf.Clamp01(elapsed / total);
+                var u = Mathf.Clamp01(elapsed / Mathf.Max(0.01f, total));
                 var smooth = Ease.InOutCubic(u);
 
                 if (!triggeredBlast && u >= 0.24f)
                 {
                     triggeredBlast = true;
-                    if (targetGate == 2) Gate2Open = true;
-                    else Gate1Open = true;
+                    Gate1Open = true;
                     VFXManager.Instance?.Play(VfxKind.EnemyDeath, blastPos, Palette.RocketOrange);
                     FeelManager.Instance?.TriggerCameraShake(0.45f);
                     AudioManager.Instance?.PlayEnemyExplode();
@@ -297,8 +304,13 @@ namespace Camera
                 UpdateTypewriterUI(fullStamp, beat.Speaker, beat.Caption, Mathf.Clamp01(u / 0.5f));
                 yield return null;
             }
+            yield return WaitForRadioVoiceFinish();
 
             OpenGateImmediate(targetGate);
+            for (var i = 1; i < beats.Length; i++)
+            {
+                yield return PlayBeat(beats[i], fullStamp, stampAlreadyTyped: true);
+            }
         }
 
         private IEnumerator RunFinalBossIntroShot()
@@ -321,7 +333,10 @@ namespace Camera
         {
             var m = StoryDirector.ActiveMissionIndex;
             OpenGateImmediate(1);
-            if (m != 4) OpenGateImmediate(2);
+            OpenGateImmediate(2);
+
+            var isBroadcast = SaveManager.EnsureInstance().LastEndingChoice == CampaignEndingKind.BroadcastBlackout;
+            var beats = StoryDirector.GetVictoryEvacBeats(m, isBroadcast);
 
             if (m < StoryDirector.CampaignMissionCount)
             {
@@ -329,26 +344,20 @@ namespace Camera
                 {
                     1 => "ACT I EXFIL // WRAITH-2 (KOZLOWSKI) K.I.A.\nBROKEN ARROW SHELLING ON PIER NORTH",
                     2 => "ACT II EXFIL // SPARK-3 (REYES) K.I.A.\nNORTH TUNNEL BULKHEAD COLLAPSE",
-                    _ => "ACT III EXFIL // IRONWOOD-1 (ROURKE) K.I.A.\nSUB-LEVEL HALON CONTAINMENT SEAL"
-                };
-                var (speaker, line, sPos, ePos, sLook, eLook) = m switch
-                {
-                    1 => ("SGT. VANCE // NOMAD-1", "Gunboat clear! Marek's beacon just flatlined at the EW tower—Broken Arrow erased his post!",
-                        new Vector3(4f, 7.5f, 34f), new Vector3(24f, 11f, 54f), new Vector3(16f, 1.2f, 46f), new Vector3(0f, 2.0f, 34f)),
-                    2 => ("SGT. VANCE // NOMAD-1", "Bulkhead dropped behind us—Reyes triggered the lock from inside the gorge fire! Move out, Rourke!",
-                        new Vector3(-4f, 8.0f, 34f), new Vector3(12f, 10.5f, 52f), new Vector3(8f, 1.2f, 48f), new Vector3(8f, 1.8f, 58f)),
-                    _ => ("MAJ. ROURKE // IRONWOOD-1", "Lift's away, Julian... Chest seal's leaking Halon. Carry the blackout ledger up the mountain and finish Chen's war...",
-                        new Vector3(-10f, 7.8f, 28f), new Vector3(10f, 10.8f, 49f), new Vector3(0f, 1.2f, 40f), new Vector3(0f, 2.2f, 52f))
+                    3 => "ACT III EXFIL // IRONWOOD-1 (ROURKE) K.I.A.\nSUB-LEVEL HALON CONTAINMENT SEAL",
+                    _ => "ACT IV EXFIL // APEX-01 SHATTERED\nCOURSE SET FOR WASHINGTON SECTOR ZERO"
                 };
 
-                VFXManager.Instance?.Play(VfxKind.EnemyDeath, sLook + Vector3.up * 0.6f, Palette.RocketOrange);
+                VFXManager.Instance?.Play(VfxKind.EnemyDeath, beats[0].StartLook + Vector3.up * 0.6f, Palette.RocketOrange);
                 FeelManager.Instance?.TriggerCameraShake(0.35f);
-                yield return AnimateCameraShot(3.0f, sPos, ePos, sLook, eLook, 48f, 54f, exfilStamp, speaker, line);
+                for (var i = 0; i < beats.Length; i++)
+                {
+                    yield return PlayBeat(beats[i], exfilStamp, stampAlreadyTyped: i > 0);
+                }
                 yield break;
             }
 
-            // ACT IV CLIMAX: Blackhawk VALKYRIE-6 Touchdown & Sole Survivor Epilogue
-            OpenGateImmediate(2);
+            // ACT V CLIMAX: Blackhawk VALKYRIE-6 Touchdown & True Campaign Finale
             PlayerController.Instance?.TeleportTo(new Vector3(-1.4f, 0.02f, 35.5f));
             SquadDirector.Instance?.PlaceSquadFormation(new Vector3(-1.0f, 0.02f, 34.8f), Vector3.forward, resetHp: false);
 
@@ -358,14 +367,15 @@ namespace Camera
             }
             _rotorSpinSpeed = 980f;
 
-            var isBroadcast = SaveManager.EnsureInstance().LastEndingChoice == CampaignEndingKind.BroadcastBlackout;
             var fullStamp = isBroadcast
                 ? "ENDING A // BLACKOUT LEDGER BROADCAST\nVALKYRIE-6 // SOLE OPERATOR EVAC"
                 : "ENDING B // PROTOCOL ZERO SEALED\nVALKYRIE-6 // CLASSIFIED DEBRIEF";
-            var line1 = isBroadcast
-                ? "Valkyrie-6 on the deck, Sergeant! Every AEGIS black frequency is blowing up—get aboard before hunter teams close the ridge!"
-                : "Pad clear, Nomad-1. Satellite uplink dark, zero leaks confirmed. Boarding Valkyrie-6 alone.";
-            var speaker1 = "VALKYRIE-6 // PILOT";
+
+            var beat0 = beats[0];
+            var beat1 = beats.Length > 1 ? beats[1] : beat0;
+            var d0 = PlayBeatVoiceAndGetDuration(beat0);
+            var d1 = beats.Length > 1 ? Mathf.Max(beat1.Duration, AudioManager.Instance != null ? AudioManager.Instance.PeekRadioClipDuration(StoryDirector.NormalizeVoiceCallsign(beat1.Speaker), beat1.Caption) : 0f) : 0f;
+            var switchedSpeaker = false;
 
             var startFlight = new Vector3(-16f, 24f, 68f);
             var hoverPoint = new Vector3(0f, 5.2f, 44f);
@@ -373,35 +383,41 @@ namespace Camera
 
             var dustPlayed = false;
             var elapsed = 0f;
-            const float total = 4.6f;
-            while (elapsed < total)
+            var total = d0 + d1;
+            while (elapsed < total || (!switchedSpeaker && AudioManager.Instance != null && AudioManager.Instance.IsRadioVoicePlaying))
             {
                 elapsed += Time.unscaledDeltaTime;
-                var u = Mathf.Clamp01(elapsed / total);
+                var u = Mathf.Clamp01(elapsed / Mathf.Max(0.1f, total));
 
                 if (evacChopperRoot != null)
                 {
                     Vector3 chopperPos;
                     Quaternion chopperRot;
-                    if (u < 0.55f)
+                    if (u < 0.52f)
                     {
-                        var f = Ease.OutCubic(u / 0.55f);
+                        var f = Ease.OutCubic(u / 0.52f);
                         chopperPos = Vector3.Lerp(startFlight, hoverPoint, f);
                         chopperRot = Quaternion.Slerp(Quaternion.Euler(14f, 145f, -12f), Quaternion.Euler(-8f, 155f, 3f), f);
                     }
                     else
                     {
-                        var f = Ease.InOutCubic((u - 0.55f) / 0.45f);
+                        var f = Ease.InOutCubic((u - 0.52f) / 0.48f);
                         chopperPos = Vector3.Lerp(hoverPoint, padPoint, f);
                         chopperRot = Quaternion.Slerp(Quaternion.Euler(-8f, 155f, 3f), Quaternion.Euler(0f, 155f, 0f), f);
                         if (!dustPlayed)
                         {
                             dustPlayed = true;
                             VFXManager.Instance?.Play(VfxKind.HitSpark, padPoint + Vector3.up * 0.25f, Palette.CoyoteTan);
-                            FeelManager.Instance?.TriggerCameraShake(0.25f);
+                            FeelManager.Instance?.TriggerCameraShake();
                         }
                     }
                     evacChopperRoot.SetPositionAndRotation(chopperPos, chopperRot);
+                }
+
+                if (!switchedSpeaker && beats.Length > 1 && elapsed >= d0 && (AudioManager.Instance == null || !AudioManager.Instance.IsRadioVoicePlaying))
+                {
+                    switchedSpeaker = true;
+                    PlayBeatVoiceAndGetDuration(beat1);
                 }
 
                 var camAngle = Mathf.Lerp(-35f, 28f, Ease.InOutCubic(u));
@@ -410,23 +426,36 @@ namespace Camera
                 var camPos = lookTarget + camOffset;
                 ApplyCameraPose(camPos, Quaternion.LookRotation((lookTarget - camPos).normalized, Vector3.up), 46f);
 
-                var activeSpeaker = u < 0.55f ? speaker1 : "SGT. VANCE // NOMAD-1";
-                var activeLine = u < 0.55f
-                    ? line1
-                    : (isBroadcast
-                        ? "Kozlowski, Reyes, Rourke, Daniel—your names just went out to the world. I'm ready for whatever hunts me down below."
-                        : "Three empty seats on this bird. Nobody gets what Karst-4 cost us—just three folded flags.");
-                UpdateTypewriterUI(fullStamp, activeSpeaker, activeLine, Mathf.Clamp01(u / 0.45f));
+                var activeBeat = !switchedSpeaker ? beat0 : beat1;
+                UpdateTypewriterUI(fullStamp, activeBeat.Speaker, activeBeat.Caption, Mathf.Clamp01(u / 0.35f));
                 yield return null;
             }
+            yield return WaitForRadioVoiceFinish();
 
             _rotorSpinSpeed = 260f;
         }
 
+        private static float PlayBeatVoiceAndGetDuration(CutsceneBeat beat)
+        {
+            var spoken = AudioManager.Instance != null
+                ? AudioManager.Instance.PlayRadioLineAudio(StoryDirector.NormalizeVoiceCallsign(beat.Speaker), beat.Caption)
+                : 0f;
+            return Mathf.Max(beat.Duration, spoken);
+        }
+
+        private static IEnumerator WaitForRadioVoiceFinish()
+        {
+            while (AudioManager.Instance != null && AudioManager.Instance.IsRadioVoicePlaying)
+            {
+                yield return null;
+            }
+        }
+
         private IEnumerator PlayBeat(CutsceneBeat beat, string fullStamp, bool stampAlreadyTyped)
         {
+            var totalDuration = PlayBeatVoiceAndGetDuration(beat);
             yield return AnimateCameraShot(
-                beat.Duration,
+                totalDuration,
                 beat.StartPos,
                 beat.EndPos,
                 beat.StartLook,
@@ -437,6 +466,7 @@ namespace Camera
                 beat.Speaker,
                 beat.Caption,
                 stampAlreadyTyped);
+            yield return WaitForRadioVoiceFinish();
         }
 
         private IEnumerator AnimateCameraShot(
@@ -494,20 +524,21 @@ namespace Camera
             float openDistance,
             bool collidersEnabled)
         {
-            if (left != null)
-            {
-                left.position = leftClosed + new Vector3(-openDistance, 0f, 0f);
-                foreach (var col in left.GetComponentsInChildren<Collider>())
-                {
-                    col.enabled = collidersEnabled;
-                }
-            }
+            ApplyGateLeafState(left, leftClosed, -openDistance, collidersEnabled);
+            ApplyGateLeafState(right, rightClosed, openDistance, collidersEnabled);
+        }
 
-            if (right == null) return;
-            right.position = rightClosed + new Vector3(openDistance, 0f, 0f);
-            foreach (var col in right.GetComponentsInChildren<Collider>())
+        private static void ApplyGateLeafState(Transform leaf, Vector3 closedPos, float xOffset, bool blocking)
+        {
+            if (leaf == null) return;
+            leaf.position = closedPos + new Vector3(xOffset, 0f, 0f);
+            foreach (var col in leaf.GetComponentsInChildren<Collider>())
             {
-                col.enabled = collidersEnabled;
+                col.enabled = blocking;
+            }
+            foreach (var obstacle in leaf.GetComponentsInChildren<NavMeshObstacle>())
+            {
+                obstacle.enabled = blocking;
             }
         }
     }

@@ -43,6 +43,7 @@ namespace Core
 
         private float _currentProgress;
         private bool _holdStartedNotified;
+        private bool _showingPrompt;
         private Action<CampaignObjectiveNode> _onCompletedCallback;
         private Action<CampaignObjectiveNode> _onStartedCallback;
 
@@ -160,6 +161,10 @@ namespace Core
             IsCompleted = completed;
             _holdStartedNotified = false;
             _currentProgress = completed ? _requiredDuration : 0f;
+            if (!unlocked || completed)
+            {
+                ClearPromptIfOwned();
+            }
 
             if (_zoneRingTransform != null)
             {
@@ -172,19 +177,37 @@ namespace Core
             ApplyZoneColor(0f);
         }
 
-        public void ForceCompleteImmediate()
+        private void OnDisable()
         {
-            if (IsCompleted) return;
-            CompleteNode();
+            ClearPromptIfOwned();
+        }
+
+        private void ClearPromptIfOwned()
+        {
+            if (!_showingPrompt) return;
+            _showingPrompt = false;
+            UIManager.Instance?.UpdateContextPrompt(string.Empty);
         }
 
         private void Update()
         {
-            if (!IsUnlocked || IsCompleted) return;
-            if (GameManager.Instance != null && GameManager.Instance.CurrentState != GameState.Playing) return;
+            if (!IsUnlocked || IsCompleted)
+            {
+                ClearPromptIfOwned();
+                return;
+            }
+            if (GameManager.Instance != null && GameManager.Instance.CurrentState != GameState.Playing)
+            {
+                ClearPromptIfOwned();
+                return;
+            }
 
             var player = PlayerController.Instance;
-            if (player == null || player.IsDead) return;
+            if (player == null || player.IsDead)
+            {
+                ClearPromptIfOwned();
+                return;
+            }
 
             var dt = Time.deltaTime;
             if (dt <= 0f) return;
@@ -212,6 +235,7 @@ namespace Core
 
                 var pct = Mathf.RoundToInt(ProgressNormalized * 100f);
                 var verb = GetInteractionVerb();
+                _showingPrompt = true;
                 UIManager.Instance?.UpdateContextPrompt($"{verb} [{pct}%]  ·  HOLD [E] BOOST");
 
                 if (_currentProgress >= _requiredDuration)
@@ -225,12 +249,14 @@ namespace Core
                 var approachLabel = Kind == ObjectiveNodeKind.IntelTerminal
                     ? $"[E] RECOVER INTEL // {DisplayTitle}"
                     : $"ENTER RING: {DisplayTitle}";
+                _showingPrompt = true;
                 UIManager.Instance?.UpdateContextPrompt(approachLabel);
                 var decay = Kind == ObjectiveNodeKind.ServerHackHoldout ? 0.12f : 0.4f;
                 _currentProgress = Mathf.Max(0f, _currentProgress - dt * decay);
             }
             else
             {
+                ClearPromptIfOwned();
                 var decay = Kind == ObjectiveNodeKind.ServerHackHoldout ? 0.12f : 0.6f;
                 _currentProgress = Mathf.Max(0f, _currentProgress - dt * decay);
             }
@@ -252,9 +278,11 @@ namespace Core
                 ObjectiveNodeKind.TunnelBreachExit => "ENTERING NORTH TUNNEL",
                 ObjectiveNodeKind.FreightLiftExit => "ACTIVATING FREIGHT LIFT",
                 ObjectiveNodeKind.RailSwitchLever => "THROWING RAIL SWITCH",
-                ObjectiveNodeKind.ServerHackHoldout => "DECRYPTING MAINFRAME",
+                ObjectiveNodeKind.ServerHackHoldout => DisplayTitle.Contains("HOLD", StringComparison.OrdinalIgnoreCase)
+                    ? "HOLDING EXTRACTION POSITION"
+                    : "DECRYPTING MAINFRAME",
                 ObjectiveNodeKind.HeliosPylonOverload => "OVERLOADING CAPACITOR",
-                ObjectiveNodeKind.CoreShutdownConsole => "KILLING HELIOS CORE",
+                ObjectiveNodeKind.CoreShutdownConsole => "ACCESSING AEON CORE",
                 ObjectiveNodeKind.IntelTerminal => "DECRYPTING INTEL LOG",
                 _ => "ARMING C4 CHARGE"
             };
@@ -267,6 +295,7 @@ namespace Core
             _currentProgress = _requiredDuration;
             if (_zoneRingTransform != null) _zoneRingTransform.gameObject.SetActive(false);
             if (_c4ChargeVisual != null) _c4ChargeVisual.SetActive(true);
+            _showingPrompt = false;
             UIManager.Instance?.UpdateContextPrompt(string.Empty);
 
             if (Kind == ObjectiveNodeKind.IntelTerminal)

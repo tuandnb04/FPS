@@ -2,13 +2,15 @@ using System.Collections.Generic;
 using System.IO;
 using Combat;
 using Core;
+using Unity.AI.Navigation;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.AI;
 using UnityEngine.ProBuilder;
 using UnityEngine.ProBuilder.MeshOperations;
 using UnityEngine.Rendering;
 
-namespace TopDownShooter.Editor
+namespace Editor
 {
     /// <summary>
     /// Procedural ProBuilder 6 architectural and prop kit generator providing unified beveled
@@ -81,6 +83,35 @@ namespace TopDownShooter.Editor
             {
                 savedCopy = Object.Instantiate(generatedMesh);
                 savedCopy.name = meshName;
+
+                var localToRoot = Matrix4x4.TRS(
+                    merged.transform.localPosition,
+                    merged.transform.localRotation,
+                    merged.transform.localScale);
+                if (localToRoot != Matrix4x4.identity)
+                {
+                    var verts = savedCopy.vertices;
+                    for (var i = 0; i < verts.Length; i++)
+                    {
+                        verts[i] = localToRoot.MultiplyPoint3x4(verts[i]);
+                    }
+                    savedCopy.vertices = verts;
+
+                    var normals = savedCopy.normals;
+                    if (normals != null && normals.Length == verts.Length)
+                    {
+                        var normRot = merged.transform.localRotation;
+                        for (var i = 0; i < normals.Length; i++)
+                        {
+                            normals[i] = (normRot * normals[i]).normalized;
+                        }
+                        savedCopy.normals = normals;
+                    }
+                    savedCopy.RecalculateBounds();
+                }
+
+                OptimizeAndCompactMesh(savedCopy);
+
                 if (File.Exists(assetPath))
                 {
                     AssetDatabase.DeleteAsset(assetPath);
@@ -135,6 +166,907 @@ namespace TopDownShooter.Editor
             parts.Add(MakeBeveledCube("LatchFrontR", new Vector3(0.07f, 0.14f, 0.05f), new Vector3(0.18f, 0.30f, 0.23f), mat, 0.008f, color: latch));
         }
 
+        public struct UnifiedArsenalMeshPack
+        {
+            public Mesh PulseRifle;
+            public Mesh Shotgun;
+            public Mesh RailgunDmr;
+            public Mesh RpgLauncher;
+            public Mesh An94;
+            public Mesh VectorSmg;
+            public Mesh M249;
+            public Mesh M32;
+            public Mesh M16A4;
+            public Mesh Xm25;
+            public Mesh Ak74;
+            public Mesh Pkm;
+            public Mesh SniperRifle;
+
+            public Mesh MagStanag;
+            public Mesh MagDmrBox;
+            public Mesh MagAkCurved;
+            public Mesh MagVectorStick;
+            public Mesh MagM249Box;
+            public Mesh MagRpgWarhead;
+            public Mesh MagM32Cylinder;
+            public Mesh ShotgunShell;
+        }
+
+        public struct WeaponMaterialPalette
+        {
+            public Material Steel;
+            public Material DarkPolymer;
+            public Material CoyoteTan;
+            public Material OliveDrab;
+            public Material Wood;
+            public Material ShotgunShellRed;
+        }
+
+        public struct EditableArsenalPrefabs
+        {
+            public GameObject[] PlayerWeaponPrefabs;
+            public GameObject[] MagazinePrefabs;
+            public Material[] WeaponMagMaterials;
+            public GameObject Ak74Prefab;
+            public GameObject PkmPrefab;
+            public GameObject SniperPrefab;
+        }
+
+        /// <summary>
+        /// Builds and saves hard-surface ProBuilder weapon, tactical gear, shield, and prop meshes
+        /// into Assets/Models/ProBuilder for runtime scene rigs.
+        /// </summary>
+        public static void BuildOrLoadExpandedKitMeshes(
+            Material referenceSingleMat,
+            out Mesh m249Mesh,
+            out Mesh m32Mesh,
+            out Mesh droppedMagMesh,
+            out Mesh riotShieldMesh,
+            out Mesh sniperRifleMesh,
+            out Mesh fieldPackMesh,
+            out Mesh armorPauldronMesh)
+        {
+            if (!AssetDatabase.IsValidFolder("Assets/Models"))
+            {
+                AssetDatabase.CreateFolder("Assets", "Models");
+            }
+            if (!AssetDatabase.IsValidFolder(SavedMeshesDir))
+            {
+                AssetDatabase.CreateFolder("Assets/Models", "ProBuilder");
+            }
+
+            m249Mesh = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Weapon_M249.asset", "PB_Weapon_M249", referenceSingleMat, BuildM249Parts);
+            m32Mesh = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Weapon_M32.asset", "PB_Weapon_M32", referenceSingleMat, BuildM32Parts);
+            droppedMagMesh = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_DroppedMagazine.asset", "PB_DroppedMagazine", referenceSingleMat, BuildDroppedMagazineParts);
+            riotShieldMesh = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_RiotShield.asset", "PB_RiotShield", referenceSingleMat, BuildRiotShieldParts);
+            sniperRifleMesh = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_SniperOpticRifle.asset", "PB_SniperOpticRifle", referenceSingleMat, BuildSniperRifleParts);
+            fieldPackMesh = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_FieldPack.asset", "PB_FieldPack", referenceSingleMat, BuildFieldPackParts);
+            armorPauldronMesh = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_ArmorPauldron.asset", "PB_ArmorPauldron", referenceSingleMat, BuildArmorPauldronParts);
+            AssetDatabase.SaveAssets();
+        }
+
+        /// <summary>
+        /// Builds and saves unified multi-tone hard-surface ProBuilder weapon receivers and
+        /// separate detachable magazine / warhead / cylinder / shell meshes for all 8 player weapons
+        /// and 3 enemy firearms so every gun shares one consistent style and supports detachable reloads.
+        /// </summary>
+        public static UnifiedArsenalMeshPack BuildOrLoadUnifiedArsenalMeshes(Material referenceSingleMat)
+        {
+            if (!AssetDatabase.IsValidFolder("Assets/Models"))
+            {
+                AssetDatabase.CreateFolder("Assets", "Models");
+            }
+            if (!AssetDatabase.IsValidFolder(SavedMeshesDir))
+            {
+                AssetDatabase.CreateFolder("Assets/Models", "ProBuilder");
+            }
+
+            var pack = new UnifiedArsenalMeshPack
+            {
+                PulseRifle = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Weapon_PulseRifle.asset", "PB_Weapon_PulseRifle", referenceSingleMat, BuildPulseRifleParts),
+                Shotgun = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Weapon_Shotgun.asset", "PB_Weapon_Shotgun", referenceSingleMat, BuildShotgunParts),
+                RailgunDmr = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Weapon_Railgun.asset", "PB_Weapon_Railgun", referenceSingleMat, BuildRailgunDmrParts),
+                RpgLauncher = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Weapon_Rocket.asset", "PB_Weapon_Rocket", referenceSingleMat, BuildRpg7LauncherParts),
+                An94 = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Weapon_AN94.asset", "PB_Weapon_AN94", referenceSingleMat, BuildAn94Parts),
+                VectorSmg = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Weapon_VectorSMG.asset", "PB_Weapon_VectorSMG", referenceSingleMat, BuildVectorSmgParts),
+                M249 = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Weapon_M249.asset", "PB_Weapon_M249", referenceSingleMat, BuildM249Parts),
+                M32 = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Weapon_M32.asset", "PB_Weapon_M32", referenceSingleMat, BuildM32Parts),
+                M16A4 = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Weapon_M16A4.asset", "PB_Weapon_M16A4", referenceSingleMat, BuildM16A4Parts),
+                Xm25 = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Weapon_XM25.asset", "PB_Weapon_XM25", referenceSingleMat, BuildXm25Parts),
+                Ak74 = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Weapon_AK74.asset", "PB_Weapon_AK74", referenceSingleMat, BuildAk74Parts),
+                Pkm = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Weapon_PKM.asset", "PB_Weapon_PKM", referenceSingleMat, BuildPkmParts),
+                SniperRifle = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_SniperOpticRifle.asset", "PB_SniperOpticRifle", referenceSingleMat, BuildSniperRifleParts),
+
+                MagStanag = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Mag_Stanag.asset", "PB_Mag_Stanag", referenceSingleMat, BuildMagStanagParts),
+                MagDmrBox = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Mag_DmrBox.asset", "PB_Mag_DmrBox", referenceSingleMat, BuildMagDmrBoxParts),
+                MagAkCurved = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Mag_AkCurved.asset", "PB_Mag_AkCurved", referenceSingleMat, BuildMagAkCurvedParts),
+                MagVectorStick = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Mag_VectorStick.asset", "PB_Mag_VectorStick", referenceSingleMat, BuildMagVectorStickParts),
+                MagM249Box = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Mag_M249Box.asset", "PB_Mag_M249Box", referenceSingleMat, BuildMagM249BoxParts),
+                MagRpgWarhead = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Mag_RpgWarhead.asset", "PB_Mag_RpgWarhead", referenceSingleMat, BuildMagRpgWarheadParts),
+                MagM32Cylinder = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Mag_M32Cylinder.asset", "PB_Mag_M32Cylinder", referenceSingleMat, BuildMagM32CylinderParts),
+                ShotgunShell = BuildAndSaveSingleSubmeshAsset(SavedMeshesDir + "/PB_Mag_ShotgunShell.asset", "PB_Mag_ShotgunShell", referenceSingleMat, BuildShotgunShellParts)
+            };
+            AssetDatabase.SaveAssets();
+            return pack;
+        }
+
+        public static EditableArsenalPrefabs BuildOrSaveEditableWeaponPrefabs(
+            UnifiedArsenalMeshPack meshes,
+            WeaponMaterialPalette mats)
+        {
+            EnsureAssetFolder("Assets/Prefabs");
+            EnsureAssetFolder("Assets/Prefabs/Weapons");
+            EnsureAssetFolder("Assets/Prefabs/Magazines");
+            EnsureAssetFolder("Assets/Models/ProBuilder/Modules");
+
+            var magMaterials = new[]
+            {
+                mats.CoyoteTan,
+                mats.ShotgunShellRed,
+                mats.Steel,
+                mats.OliveDrab,
+                mats.DarkPolymer,
+                mats.DarkPolymer,
+                mats.OliveDrab,
+                mats.Steel,
+                mats.Steel,
+                mats.OliveDrab
+            };
+
+            Mesh[] magMeshes =
+            {
+                meshes.MagStanag,
+                meshes.ShotgunShell,
+                meshes.MagDmrBox,
+                meshes.MagRpgWarhead,
+                meshes.MagAkCurved,
+                meshes.MagVectorStick,
+                meshes.MagM249Box,
+                meshes.MagM32Cylinder,
+                meshes.MagStanag,
+                meshes.MagDmrBox
+            };
+            string[] magPrefabNames =
+            {
+                "Prefab_Mag_Stanag",
+                "Prefab_Mag_ShotgunShell",
+                "Prefab_Mag_DmrBox",
+                "Prefab_Mag_RpgWarhead",
+                "Prefab_Mag_AkCurved",
+                "Prefab_Mag_VectorStick",
+                "Prefab_Mag_M249Box",
+                "Prefab_Mag_M32Cylinder",
+                "Prefab_Mag_M16Stanag",
+                "Prefab_Mag_Xm25Box"
+            };
+            var magPrefabs = new GameObject[SaveManager.WeaponCount];
+            for (var i = 0; i < SaveManager.WeaponCount; i++)
+            {
+                magPrefabs[i] = BuildAndSaveSingleMagPrefab(
+                    "Assets/Prefabs/Magazines/" + magPrefabNames[i] + ".prefab",
+                    magPrefabNames[i],
+                    magMeshes[i],
+                    magMaterials[i]);
+            }
+
+            var playerPrefabs = new GameObject[SaveManager.WeaponCount];
+            playerPrefabs[0] = BuildModularWeaponPrefab(
+                "Assets/Prefabs/Weapons/Prefab_Weapon_PulseRifle.prefab", "Weapon_PulseRifle",
+                BuildPulseRifleParts, mats, 0.65f, Vector3.zero,
+                new Vector3(0f, -0.028f, 0.165f), new Vector3(0f, -0.060f, -0.033f), new Vector3(0f, 0.020f, 0.555f),
+                meshes.MagStanag, magMaterials[0], new Vector3(0f, -0.105f, 0.080f), Vector3.zero);
+
+            playerPrefabs[1] = BuildModularWeaponPrefab(
+                "Assets/Prefabs/Weapons/Prefab_Weapon_Shotgun.prefab", "Weapon_Shotgun",
+                BuildShotgunParts, mats, 0.68f, Vector3.zero,
+                new Vector3(0f, -0.012f, 0.180f), new Vector3(0f, -0.060f, -0.055f), new Vector3(0f, 0.028f, 0.510f),
+                null, null, Vector3.zero, Vector3.zero);
+
+            playerPrefabs[2] = BuildModularWeaponPrefab(
+                "Assets/Prefabs/Weapons/Prefab_Weapon_Railgun.prefab", "Weapon_Railgun",
+                BuildRailgunDmrParts, mats, 0.66f, new Vector3(0f, 0f, -0.02f),
+                new Vector3(0f, -0.010f, 0.195f), new Vector3(0f, -0.058f, -0.052f), new Vector3(0f, 0.020f, 0.690f),
+                meshes.MagDmrBox, magMaterials[2], new Vector3(0f, -0.105f, 0.085f), Vector3.zero);
+
+            playerPrefabs[3] = BuildModularWeaponPrefab(
+                "Assets/Prefabs/Weapons/Prefab_Weapon_Rocket.prefab", "Weapon_Rocket",
+                BuildRpg7LauncherParts, mats, 0.85f, new Vector3(0.04f, 0.04f, -0.06f),
+                new Vector3(0f, -0.068f, 0.136f), new Vector3(0f, -0.068f, -0.034f), new Vector3(0f, 0.025f, 0.595f),
+                meshes.MagRpgWarhead, magMaterials[3], new Vector3(0f, 0.029f, 0.560f), Vector3.zero);
+
+            playerPrefabs[4] = BuildModularWeaponPrefab(
+                "Assets/Prefabs/Weapons/Prefab_Weapon_AN94.prefab", "Weapon_AN94",
+                BuildAn94Parts, mats, 0.66f, Vector3.zero,
+                new Vector3(0f, -0.024f, 0.180f), new Vector3(0f, -0.060f, -0.038f), new Vector3(0f, 0.017f, 0.598f),
+                meshes.MagAkCurved, magMaterials[4], new Vector3(0.008f, -0.105f, 0.085f), new Vector3(0f, 0f, 5f));
+
+            playerPrefabs[5] = BuildModularWeaponPrefab(
+                "Assets/Prefabs/Weapons/Prefab_Weapon_VectorSMG.prefab", "Weapon_VectorSMG",
+                BuildVectorSmgParts, mats, 0.65f, new Vector3(0f, 0f, 0.02f),
+                new Vector3(0f, -0.042f, 0.165f), new Vector3(0f, -0.060f, -0.032f), new Vector3(0f, 0.014f, 0.362f),
+                meshes.MagVectorStick, magMaterials[5], new Vector3(0f, -0.145f, 0.120f), Vector3.zero);
+
+            playerPrefabs[6] = BuildModularWeaponPrefab(
+                "Assets/Prefabs/Weapons/Prefab_Weapon_M249.prefab", "Weapon_M249",
+                BuildM249Parts, mats, 0.68f, Vector3.zero,
+                new Vector3(0f, -0.037f, 0.245f), new Vector3(0f, -0.075f, -0.054f), new Vector3(0f, 0.016f, 0.670f),
+                meshes.MagM249Box, magMaterials[6], new Vector3(0.025f, -0.100f, 0.120f), Vector3.zero);
+
+            playerPrefabs[7] = BuildModularWeaponPrefab(
+                "Assets/Prefabs/Weapons/Prefab_Weapon_M32.prefab", "Weapon_M32",
+                BuildM32Parts, mats, 0.72f, Vector3.zero,
+                new Vector3(0f, -0.068f, 0.223f), new Vector3(0f, -0.070f, -0.079f), new Vector3(0f, 0.023f, 0.405f),
+                meshes.MagM32Cylinder, magMaterials[7], new Vector3(0f, 0.015f, 0.060f), Vector3.zero);
+
+            playerPrefabs[8] = BuildModularWeaponPrefab(
+                "Assets/Prefabs/Weapons/Prefab_Weapon_M16A4.prefab", "Weapon_M16A4",
+                BuildM16A4Parts, mats, 0.65f, Vector3.zero,
+                new Vector3(0f, -0.042f, 0.165f), new Vector3(0f, -0.060f, -0.033f), new Vector3(0f, 0.020f, 0.640f),
+                meshes.MagStanag, magMaterials[8], new Vector3(0f, -0.105f, 0.080f), Vector3.zero);
+
+            playerPrefabs[9] = BuildModularWeaponPrefab(
+                "Assets/Prefabs/Weapons/Prefab_Weapon_XM25.prefab", "Weapon_XM25",
+                BuildXm25Parts, mats, 0.68f, Vector3.zero,
+                new Vector3(0f, -0.032f, 0.195f), new Vector3(0f, -0.060f, 0.025f), new Vector3(0f, 0.016f, 0.480f),
+                meshes.MagDmrBox, magMaterials[9], new Vector3(0f, -0.105f, -0.145f), Vector3.zero);
+
+            var ak74Prefab = BuildModularWeaponPrefab(
+                "Assets/Prefabs/Weapons/Prefab_Weapon_AK74.prefab", "EnemyWeapon_AK74",
+                BuildAk74Parts, mats, 0.65f, Vector3.zero,
+                new Vector3(0f, -0.024f, 0.175f), new Vector3(0f, -0.060f, -0.036f), new Vector3(0f, 0.015f, 0.569f),
+                meshes.MagAkCurved, mats.DarkPolymer, new Vector3(0f, -0.105f, 0.080f), new Vector3(0f, 0f, 3f));
+
+            var pkmPrefab = BuildModularWeaponPrefab(
+                "Assets/Prefabs/Weapons/Prefab_Weapon_PKM.prefab", "EnemyWeapon_PKM",
+                BuildPkmParts, mats, 0.68f, Vector3.zero,
+                new Vector3(0f, -0.026f, 0.210f), new Vector3(0f, -0.064f, -0.044f), new Vector3(0f, 0.019f, 0.656f),
+                meshes.MagM249Box, mats.OliveDrab, new Vector3(0.025f, -0.100f, 0.110f), Vector3.zero);
+
+            var sniperPrefab = BuildModularWeaponPrefab(
+                "Assets/Prefabs/Weapons/Prefab_Weapon_SniperOpticRifle.prefab", "EnemyWeapon_Sniper",
+                BuildSniperRifleParts, mats, 0.70f, Vector3.zero,
+                new Vector3(0f, -0.022f, 0.210f), new Vector3(0f, -0.070f, -0.070f), new Vector3(0f, 0.022f, 0.790f),
+                null, null, Vector3.zero, Vector3.zero);
+
+            AssetDatabase.SaveAssets();
+            return new EditableArsenalPrefabs
+            {
+                PlayerWeaponPrefabs = playerPrefabs,
+                MagazinePrefabs = magPrefabs,
+                WeaponMagMaterials = magMaterials,
+                Ak74Prefab = ak74Prefab,
+                PkmPrefab = pkmPrefab,
+                SniperPrefab = sniperPrefab
+            };
+        }
+
+        private static void EnsureAssetFolder(string folderPath)
+        {
+            if (AssetDatabase.IsValidFolder(folderPath)) return;
+            var parent = Path.GetDirectoryName(folderPath)?.Replace('\\', '/');
+            var name = Path.GetFileName(folderPath);
+            if (!string.IsNullOrEmpty(parent) && !AssetDatabase.IsValidFolder(parent))
+            {
+                EnsureAssetFolder(parent);
+            }
+            AssetDatabase.CreateFolder(parent, name);
+        }
+
+        private static Material ResolvePartMaterial(ProBuilderMesh pb, WeaponMaterialPalette pal)
+        {
+            var c = Color.white;
+            var cols = pb.colors;
+            if (cols is { Count: > 0 }) c = cols[0];
+            if (c is { r: > 0.85f, g: < 0.45f, b: < 0.40f }) return pal.ShotgunShellRed != null ? pal.ShotgunShellRed : pal.Steel;
+            if (c.g > c.r && c.g > c.b + 0.04f) return pal.OliveDrab != null ? pal.OliveDrab : pal.Steel;
+            if (c.r > c.g && c.g > c.b && c.b < 0.46f) return pal.Wood != null ? pal.Wood : pal.CoyoteTan;
+            if (c is { r: > 0.85f, g: > 0.72f, b: < 0.68f }) return pal.CoyoteTan != null ? pal.CoyoteTan : pal.Steel;
+            if (c.r < 0.65f) return pal.DarkPolymer != null ? pal.DarkPolymer : pal.Steel;
+            return pal.Steel;
+        }
+
+        private static void AssignTagAndLayerRecursive(GameObject root, string tagName, string layerName)
+        {
+            if (root == null) return;
+            var layer = string.IsNullOrEmpty(layerName) ? -1 : LayerMask.NameToLayer(layerName);
+            var transforms = root.GetComponentsInChildren<Transform>(true);
+            for (var i = 0; i < transforms.Length; i++)
+            {
+                var go = transforms[i].gameObject;
+                if (!string.IsNullOrEmpty(tagName))
+                {
+                    go.tag = tagName;
+                }
+                if (layer >= 0)
+                {
+                    go.layer = layer;
+                }
+            }
+        }
+
+        private static GameObject BuildAndSaveSingleMagPrefab(string prefabPath, string name, Mesh mesh, Material mat)
+        {
+            var go = new GameObject(name);
+            var mf = go.AddComponent<MeshFilter>();
+            mf.sharedMesh = mesh;
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = mat;
+            AssignTagAndLayerRecursive(go, "Magazine", "WeaponProp");
+            var saved = PrefabUtility.SaveAsPrefabAsset(go, prefabPath);
+            Object.DestroyImmediate(go);
+            return saved;
+        }
+
+        private static GameObject BuildModularWeaponPrefab(
+            string prefabPath,
+            string rootName,
+            SingleSubmeshPartBuilder partBuilder,
+            WeaponMaterialPalette pal,
+            float uniformScale,
+            Vector3 rootLocalPos,
+            Vector3 leftGripLocal,
+            Vector3 rightGripLocal,
+            Vector3 muzzleLocal,
+            Mesh magMesh,
+            Material magMat,
+            Vector3 magOffsetUnscaled,
+            Vector3 magEuler)
+        {
+            var container = new GameObject(rootName)
+            {
+                transform =
+                {
+                    localPosition = rootLocalPos
+                }
+            };
+
+            var partsHolder = new GameObject("ModularParts");
+            partsHolder.transform.SetParent(container.transform, false);
+            partsHolder.transform.localScale = Vector3.one * uniformScale;
+
+            var parts = new List<ProBuilderMesh>();
+            partBuilder(parts, pal.Steel);
+
+            var moduleLibPath = "Assets/Models/ProBuilder/Modules/" + rootName + "_Modules.asset";
+            if (File.Exists(moduleLibPath))
+            {
+                AssetDatabase.DeleteAsset(moduleLibPath);
+            }
+
+            var createdMainAsset = false;
+            foreach (var pb in parts)
+            {
+                if (pb == null) continue;
+                var partMat = ResolvePartMaterial(pb, pal);
+                pb.SetMaterial(pb.faces, partMat);
+                Smoothing.ApplySmoothingGroups(pb, pb.faces, DefaultSmoothAngle);
+                pb.ToMesh();
+                pb.Refresh();
+
+                var partGo = pb.gameObject;
+                var mf = partGo.GetComponent<MeshFilter>();
+                var mr = partGo.GetComponent<MeshRenderer>();
+                if (mr != null)
+                {
+                    mr.sharedMaterial = partMat;
+                    mr.shadowCastingMode = ShadowCastingMode.On;
+                }
+
+                if (mf != null && mf.sharedMesh != null)
+                {
+                    var persistentMesh = Object.Instantiate(mf.sharedMesh);
+                    persistentMesh.name = rootName + "_" + partGo.name;
+                    OptimizeAndCompactMesh(persistentMesh);
+                    if (!createdMainAsset)
+                    {
+                        AssetDatabase.CreateAsset(persistentMesh, moduleLibPath);
+                        createdMainAsset = true;
+                    }
+                    else
+                    {
+                        AssetDatabase.AddObjectToAsset(persistentMesh, moduleLibPath);
+                    }
+                    mf.sharedMesh = persistentMesh;
+                }
+
+                var lp = partGo.transform.localPosition;
+                var lr = partGo.transform.localRotation;
+                var ls = partGo.transform.localScale;
+                Object.DestroyImmediate(pb);
+                partGo.transform.SetParent(partsHolder.transform, false);
+                partGo.transform.localPosition = lp;
+                partGo.transform.localRotation = lr;
+                partGo.transform.localScale = ls;
+            }
+
+            GameObject magGo = null;
+            if (magMesh != null)
+            {
+                magGo = new GameObject("WeaponMagVisual");
+                magGo.transform.SetParent(container.transform, false);
+                magGo.transform.localPosition = magOffsetUnscaled * uniformScale;
+                magGo.transform.localRotation = Quaternion.Euler(magEuler);
+                magGo.transform.localScale = Vector3.one * uniformScale;
+                magGo.AddComponent<MeshFilter>().sharedMesh = magMesh;
+                magGo.AddComponent<MeshRenderer>().sharedMaterial = magMat != null ? magMat : pal.Steel;
+            }
+
+            var leftGrip = new GameObject("LeftHandGrip");
+            leftGrip.transform.SetParent(container.transform, false);
+            leftGrip.transform.localPosition = leftGripLocal;
+
+            var rightGrip = new GameObject("RightHandGrip");
+            rightGrip.transform.SetParent(container.transform, false);
+            rightGrip.transform.localPosition = rightGripLocal;
+
+            var muzzleTip = new GameObject("MuzzleTip");
+            muzzleTip.transform.SetParent(container.transform, false);
+            muzzleTip.transform.localPosition = muzzleLocal;
+
+            var ejectionPort = new GameObject("EjectionPort");
+            ejectionPort.transform.SetParent(container.transform, false);
+            ejectionPort.transform.localPosition = new Vector3(0.034f, 0.024f, 0.065f);
+            ejectionPort.transform.localRotation = Quaternion.Euler(0f, 18f, 0f);
+
+            AssignTagAndLayerRecursive(container, "Weapon", "WeaponProp");
+            if (magGo != null)
+            {
+                AssignTagAndLayerRecursive(magGo, "Magazine", "WeaponProp");
+            }
+
+            var savedPrefab = PrefabUtility.SaveAsPrefabAsset(container, prefabPath);
+            Object.DestroyImmediate(container);
+            return savedPrefab;
+        }
+
+        private static void AddSafeBevelPart(
+            List<ProBuilderMesh> parts,
+            string name,
+            Vector3 size,
+            Vector3 localPos,
+            Material mat,
+            Quaternion? rot = null,
+            Color? color = null)
+        {
+            var minDim = Mathf.Min(size.x, Mathf.Min(size.y, size.z));
+            var bevel = Mathf.Clamp(minDim * 0.16f, 0.0018f, 0.022f);
+            parts.Add(MakeBeveledCube(name, size, localPos, mat, bevel, rot, color));
+        }
+
+        private static void BuildM249Parts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var steel = new Color(0.84f, 0.88f, 0.92f, 1f);
+            var darkGrip = new Color(0.54f, 0.57f, 0.60f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            AddSafeBevelPart(parts, "Receiver", new Vector3(0.095f, 0.135f, 0.44f), new Vector3(0f, -0.01f, 0.04f), mat, color: steel);
+            AddSafeBevelPart(parts, "FeedTrayCover", new Vector3(0.088f, 0.032f, 0.28f), new Vector3(0f, 0.070f, 0.06f), mat, color: steel);
+            AddSafeBevelPart(parts, "FeedTopRail", new Vector3(0.034f, 0.008f, 0.23f), new Vector3(0f, 0.090f, 0.05f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "RearIronSight", new Vector3(0.028f, 0.020f, 0.028f), new Vector3(0f, 0.102f, -0.06f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "CoolingShroud", new Vector3(0.080f, 0.052f, 0.36f), new Vector3(0f, 0.030f, 0.39f), mat, color: steel);
+            AddSafeBevelPart(parts, "RibbedHandguard", new Vector3(0.086f, 0.056f, 0.30f), new Vector3(0f, -0.025f, 0.36f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "GasBlock", new Vector3(0.038f, 0.038f, 0.20f), new Vector3(0f, 0.020f, 0.54f), mat, color: steel);
+            AddSafeBevelPart(parts, "FrontSightPost", new Vector3(0.022f, 0.038f, 0.026f), new Vector3(0f, 0.066f, 0.78f), mat, color: darkGrip);
+            parts.Add(MakeCyl("HeavyBarrel", 10, 0.022f, 0.56f, new Vector3(0f, 0.024f, 0.66f), mat, rot: fwdRot, color: steel));
+            parts.Add(MakeCyl("FlashHider", 8, 0.030f, 0.09f, new Vector3(0f, 0.024f, 0.94f), mat, rot: fwdRot, color: darkGrip));
+            AddSafeBevelPart(parts, "FeedChuteLip", new Vector3(0.090f, 0.045f, 0.100f), new Vector3(0.020f, -0.040f, 0.12f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "BipodMountCollar", new Vector3(0.064f, 0.038f, 0.052f), new Vector3(0f, -0.015f, 0.55f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "BipodLegL", new Vector3(0.020f, 0.022f, 0.18f), new Vector3(-0.042f, -0.042f, 0.45f), mat, rot: Quaternion.Euler(6f, 0f, 0f), color: darkGrip);
+            AddSafeBevelPart(parts, "BipodLegR", new Vector3(0.020f, 0.022f, 0.18f), new Vector3(0.042f, -0.042f, 0.45f), mat, rot: Quaternion.Euler(6f, 0f, 0f), color: darkGrip);
+            AddSafeBevelPart(parts, "StockCollar", new Vector3(0.072f, 0.110f, 0.055f), new Vector3(0f, -0.010f, -0.18f), mat, color: darkGrip);
+            parts.Add(MakeCyl("ParaStrutTop", 8, 0.014f, 0.27f, new Vector3(0f, 0.028f, -0.30f), mat, rot: fwdRot, color: steel));
+            parts.Add(MakeCyl("ParaStrutBot", 8, 0.014f, 0.27f, new Vector3(0f, -0.048f, -0.30f), mat, rot: fwdRot, color: steel));
+            AddSafeBevelPart(parts, "ButtPad", new Vector3(0.062f, 0.145f, 0.045f), new Vector3(0f, -0.020f, -0.43f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "PistolGrip", new Vector3(0.046f, 0.135f, 0.068f), new Vector3(0f, -0.110f, -0.08f), mat, rot: Quaternion.Euler(16f, 0f, 0f), color: darkGrip);
+            AddSafeBevelPart(parts, "CarryHandleStem", new Vector3(0.018f, 0.068f, 0.022f), new Vector3(0.036f, 0.082f, 0.26f), mat, rot: Quaternion.Euler(-22f, 0f, 0f), color: steel);
+            AddSafeBevelPart(parts, "CarryHandleGrip", new Vector3(0.026f, 0.028f, 0.13f), new Vector3(0.038f, 0.114f, 0.20f), mat, rot: Quaternion.Euler(-8f, 0f, 0f), color: darkGrip);
+        }
+
+        private static void BuildM32Parts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var matte = new Color(0.76f, 0.80f, 0.84f, 1f);
+            var grip = new Color(0.52f, 0.55f, 0.58f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            AddSafeBevelPart(parts, "TopBridgeFrame", new Vector3(0.072f, 0.048f, 0.34f), new Vector3(0f, 0.108f, 0.06f), mat, color: matte);
+            parts.Add(MakeCyl("DrumHubRing", 12, 0.104f, 0.032f, new Vector3(0f, 0.015f, 0.13f), mat, rot: fwdRot, color: grip));
+            parts.Add(MakeCyl("DrumCenterPin", 8, 0.024f, 0.22f, new Vector3(0f, 0.015f, 0.06f), mat, rot: fwdRot, color: matte));
+            AddSafeBevelPart(parts, "RearQuadrantIron", new Vector3(0.030f, 0.022f, 0.032f), new Vector3(0f, 0.140f, -0.05f), mat, color: grip);
+            AddSafeBevelPart(parts, "FrontLeafIron", new Vector3(0.016f, 0.022f, 0.018f), new Vector3(0f, 0.140f, 0.20f), mat, color: grip);
+            parts.Add(MakeCyl("LaunchBarrel", 12, 0.044f, 0.38f, new Vector3(0f, 0.032f, 0.36f), mat, rot: fwdRot, color: matte));
+            parts.Add(MakeCyl("MuzzleCrown", 12, 0.054f, 0.045f, new Vector3(0f, 0.032f, 0.54f), mat, rot: fwdRot, color: grip));
+            AddSafeBevelPart(parts, "QuadRailShroud", new Vector3(0.105f, 0.095f, 0.24f), new Vector3(0f, 0.025f, 0.31f), mat, color: matte);
+            parts.Add(MakeCyl("ForegripVertical", 8, 0.024f, 0.145f, new Vector3(0f, -0.095f, 0.31f), mat, color: grip));
+            AddSafeBevelPart(parts, "RearFrameBlock", new Vector3(0.068f, 0.115f, 0.14f), new Vector3(0f, -0.005f, -0.09f), mat, color: matte);
+            AddSafeBevelPart(parts, "PistolGrip", new Vector3(0.045f, 0.135f, 0.065f), new Vector3(0f, -0.10f, -0.11f), mat, rot: Quaternion.Euler(15f, 0f, 0f), color: grip);
+            AddSafeBevelPart(parts, "TubeStock", new Vector3(0.048f, 0.055f, 0.26f), new Vector3(0f, 0.015f, -0.26f), mat, color: grip);
+            AddSafeBevelPart(parts, "ButtPlate", new Vector3(0.056f, 0.155f, 0.045f), new Vector3(0f, -0.020f, -0.39f), mat, color: grip);
+        }
+
+        private static void BuildPulseRifleParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var steel = new Color(0.84f, 0.88f, 0.92f, 1f);
+            var olive = new Color(0.68f, 0.78f, 0.56f, 1f);
+            var coyote = new Color(0.92f, 0.80f, 0.58f, 1f);
+            var darkGrip = new Color(0.52f, 0.55f, 0.58f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            AddSafeBevelPart(parts, "UpperReceiver", new Vector3(0.062f, 0.066f, 0.27f), new Vector3(0f, 0.026f, 0.01f), mat, color: olive);
+            AddSafeBevelPart(parts, "LowerReceiver", new Vector3(0.058f, 0.052f, 0.24f), new Vector3(0f, -0.024f, 0.02f), mat, color: olive);
+            AddSafeBevelPart(parts, "MagwellCollar", new Vector3(0.064f, 0.036f, 0.105f), new Vector3(0f, -0.044f, 0.080f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "TopRail", new Vector3(0.034f, 0.012f, 0.54f), new Vector3(0f, 0.062f, 0.14f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "RearFlipIron", new Vector3(0.028f, 0.032f, 0.026f), new Vector3(0f, 0.084f, -0.09f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "FrontFlipPost", new Vector3(0.022f, 0.034f, 0.024f), new Vector3(0f, 0.085f, 0.42f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "MLokHandguard", new Vector3(0.064f, 0.072f, 0.32f), new Vector3(0f, 0.022f, 0.30f), mat, color: olive);
+            AddSafeBevelPart(parts, "AngledForegrip", new Vector3(0.042f, 0.032f, 0.13f), new Vector3(0f, -0.024f, 0.26f), mat, color: coyote);
+            parts.Add(MakeCyl("CarbineBarrel", 10, 0.018f, 0.36f, new Vector3(0f, 0.031f, 0.62f), mat, rot: fwdRot, color: steel));
+            parts.Add(MakeCyl("GasBlock", 8, 0.024f, 0.048f, new Vector3(0f, 0.034f, 0.47f), mat, rot: fwdRot, color: darkGrip));
+            parts.Add(MakeCyl("BirdcageHider", 8, 0.023f, 0.075f, new Vector3(0f, 0.031f, 0.818f), mat, rot: fwdRot, color: darkGrip));
+            parts.Add(MakeCyl("BufferTube", 10, 0.024f, 0.24f, new Vector3(0f, 0.024f, -0.22f), mat, rot: fwdRot, color: darkGrip));
+            AddSafeBevelPart(parts, "SopmodStock", new Vector3(0.056f, 0.135f, 0.23f), new Vector3(0f, -0.008f, -0.32f), mat, color: coyote);
+            AddSafeBevelPart(parts, "ButtPad", new Vector3(0.060f, 0.145f, 0.032f), new Vector3(0f, -0.012f, -0.44f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "PistolGrip", new Vector3(0.044f, 0.125f, 0.062f), new Vector3(0f, -0.088f, -0.050f), mat, rot: Quaternion.Euler(18f, 0f, 0f), color: coyote);
+        }
+
+        private static void BuildM16A4Parts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var darkMetal = new Color(0.54f, 0.57f, 0.60f, 1f);
+            var steel = new Color(0.76f, 0.80f, 0.84f, 1f);
+            var darkGrip = new Color(0.50f, 0.53f, 0.56f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            AddSafeBevelPart(parts, "UpperReceiver", new Vector3(0.062f, 0.066f, 0.27f), new Vector3(0f, 0.026f, 0.01f), mat, color: darkMetal);
+            AddSafeBevelPart(parts, "LowerReceiver", new Vector3(0.058f, 0.052f, 0.24f), new Vector3(0f, -0.024f, 0.02f), mat, color: darkMetal);
+            AddSafeBevelPart(parts, "MagwellCollar", new Vector3(0.064f, 0.036f, 0.105f), new Vector3(0f, -0.044f, 0.080f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "TopRail", new Vector3(0.034f, 0.012f, 0.60f), new Vector3(0f, 0.062f, 0.20f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "CarryHandleArch", new Vector3(0.032f, 0.036f, 0.22f), new Vector3(0f, 0.092f, 0.00f), mat, color: darkMetal);
+            AddSafeBevelPart(parts, "FrontTrianglePost", new Vector3(0.024f, 0.046f, 0.040f), new Vector3(0f, 0.086f, 0.56f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "M5QuadRail", new Vector3(0.066f, 0.072f, 0.42f), new Vector3(0f, 0.022f, 0.34f), mat, color: darkGrip);
+            parts.Add(MakeCyl("VertForegrip", 8, 0.020f, 0.11f, new Vector3(0f, -0.052f, 0.25f), mat, color: darkGrip));
+            parts.Add(MakeCyl("M16LongBarrel", 10, 0.018f, 0.46f, new Vector3(0f, 0.031f, 0.72f), mat, rot: fwdRot, color: steel));
+            parts.Add(MakeCyl("BirdcageHider", 8, 0.023f, 0.075f, new Vector3(0f, 0.031f, 0.96f), mat, rot: fwdRot, color: darkGrip));
+            AddSafeBevelPart(parts, "A2FixedStock", new Vector3(0.054f, 0.125f, 0.35f), new Vector3(0f, -0.010f, -0.26f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "ButtPad", new Vector3(0.058f, 0.142f, 0.030f), new Vector3(0f, -0.014f, -0.44f), mat, color: darkMetal);
+            AddSafeBevelPart(parts, "PistolGrip", new Vector3(0.044f, 0.125f, 0.062f), new Vector3(0f, -0.088f, -0.050f), mat, rot: Quaternion.Euler(18f, 0f, 0f), color: darkGrip);
+        }
+
+        private static void BuildXm25Parts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var oliveChassis = new Color(0.66f, 0.76f, 0.54f, 1f);
+            var darkTrim = new Color(0.50f, 0.53f, 0.56f, 1f);
+            var steel = new Color(0.82f, 0.86f, 0.90f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            AddSafeBevelPart(parts, "BullpupChassis", new Vector3(0.076f, 0.098f, 0.54f), new Vector3(0f, 0.018f, 0.08f), mat, color: oliveChassis);
+            AddSafeBevelPart(parts, "RearReceiverBlock", new Vector3(0.070f, 0.118f, 0.24f), new Vector3(0f, -0.012f, -0.24f), mat, color: oliveChassis);
+            AddSafeBevelPart(parts, "RearMagwell", new Vector3(0.064f, 0.036f, 0.115f), new Vector3(0f, -0.062f, -0.145f), mat, color: darkTrim);
+            AddSafeBevelPart(parts, "ButtPad", new Vector3(0.066f, 0.145f, 0.036f), new Vector3(0f, -0.018f, -0.37f), mat, color: darkTrim);
+            AddSafeBevelPart(parts, "LaserBridge", new Vector3(0.044f, 0.036f, 0.24f), new Vector3(0f, 0.084f, 0.14f), mat, color: darkTrim);
+            AddSafeBevelPart(parts, "RangefinderHood", new Vector3(0.038f, 0.024f, 0.060f), new Vector3(0f, 0.092f, 0.28f), mat, color: oliveChassis);
+            parts.Add(MakeCyl("SmartBarrel25mm", 12, 0.026f, 0.36f, new Vector3(0f, 0.024f, 0.50f), mat, rot: fwdRot, color: steel));
+            parts.Add(MakeCyl("AirburstCollar", 12, 0.033f, 0.065f, new Vector3(0f, 0.024f, 0.68f), mat, rot: fwdRot, color: darkTrim));
+            AddSafeBevelPart(parts, "TriggerGrip", new Vector3(0.044f, 0.125f, 0.062f), new Vector3(0f, -0.084f, 0.038f), mat, rot: Quaternion.Euler(14f, 0f, 0f), color: darkTrim);
+            AddSafeBevelPart(parts, "ForendGrip", new Vector3(0.056f, 0.054f, 0.18f), new Vector3(0f, -0.044f, 0.26f), mat, color: darkTrim);
+        }
+
+        private static void BuildShotgunParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var steel = new Color(0.84f, 0.88f, 0.92f, 1f);
+            var matte = new Color(0.68f, 0.72f, 0.76f, 1f);
+            var darkPoly = new Color(0.50f, 0.53f, 0.56f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            AddSafeBevelPart(parts, "ShotgunReceiver", new Vector3(0.060f, 0.088f, 0.28f), new Vector3(0f, 0.012f, 0.01f), mat, color: matte);
+            AddSafeBevelPart(parts, "TopRail", new Vector3(0.030f, 0.010f, 0.18f), new Vector3(0f, 0.062f, 0.01f), mat, color: darkPoly);
+            AddSafeBevelPart(parts, "GhostRingRear", new Vector3(0.026f, 0.026f, 0.024f), new Vector3(0f, 0.080f, -0.06f), mat, color: darkPoly);
+            AddSafeBevelPart(parts, "FrontBeadRamp", new Vector3(0.018f, 0.026f, 0.024f), new Vector3(0f, 0.070f, 0.72f), mat, color: darkPoly);
+            parts.Add(MakeCyl("ShotgunBarrel", 10, 0.021f, 0.62f, new Vector3(0f, 0.041f, 0.44f), mat, rot: fwdRot, color: steel));
+            parts.Add(MakeCyl("TubeMagazine", 10, 0.019f, 0.56f, new Vector3(0f, -0.002f, 0.42f), mat, rot: fwdRot, color: matte));
+            AddSafeBevelPart(parts, "TubeClamp", new Vector3(0.044f, 0.068f, 0.030f), new Vector3(0f, 0.018f, 0.65f), mat, color: darkPoly);
+            AddSafeBevelPart(parts, "PumpForend", new Vector3(0.056f, 0.056f, 0.22f), new Vector3(0f, -0.014f, 0.27f), mat, color: darkPoly);
+            AddSafeBevelPart(parts, "SideShellCarrier", new Vector3(0.022f, 0.048f, 0.145f), new Vector3(-0.036f, 0.012f, 0.02f), mat, color: darkPoly);
+            var redShell = new Color(0.92f, 0.34f, 0.28f, 1f);
+            for (var s = 0; s < 5; s++)
+            {
+                parts.Add(MakeCyl("SideShell_" + s, 8, 0.0115f, 0.066f, new Vector3(-0.044f, 0.016f, -0.032f + s * 0.026f), mat, color: redShell));
+            }
+            AddSafeBevelPart(parts, "PistolGrip", new Vector3(0.044f, 0.125f, 0.060f), new Vector3(0f, -0.085f, -0.082f), mat, rot: Quaternion.Euler(20f, 0f, 0f), color: darkPoly);
+            AddSafeBevelPart(parts, "MesaStock", new Vector3(0.052f, 0.120f, 0.26f), new Vector3(0f, -0.022f, -0.25f), mat, color: darkPoly);
+            AddSafeBevelPart(parts, "RecoilPad", new Vector3(0.056f, 0.135f, 0.034f), new Vector3(0f, -0.028f, -0.39f), mat, color: matte);
+        }
+
+        private static void BuildRailgunDmrParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var chassis = new Color(0.76f, 0.80f, 0.84f, 1f);
+            var steel = new Color(0.56f, 0.60f, 0.64f, 1f);
+            var darkGrip = new Color(0.50f, 0.53f, 0.56f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            AddSafeBevelPart(parts, "EbrReceiver", new Vector3(0.072f, 0.095f, 0.38f), new Vector3(0f, 0.008f, 0.02f), mat, color: chassis);
+            AddSafeBevelPart(parts, "EbrHandguard", new Vector3(0.068f, 0.072f, 0.34f), new Vector3(0f, 0.008f, 0.34f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "MagwellCollar", new Vector3(0.062f, 0.034f, 0.115f), new Vector3(0f, -0.044f, 0.085f), mat, color: steel);
+            parts.Add(MakeCyl("DmrBarrel", 10, 0.020f, 0.56f, new Vector3(0f, 0.030f, 0.72f), mat, rot: fwdRot, color: steel));
+            parts.Add(MakeCyl("GasCylinder", 8, 0.015f, 0.28f, new Vector3(0f, -0.006f, 0.58f), mat, rot: fwdRot, color: steel));
+            AddSafeBevelPart(parts, "FlashSuppressor", new Vector3(0.038f, 0.038f, 0.095f), new Vector3(0f, 0.030f, 1.00f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "BipodClamp", new Vector3(0.052f, 0.030f, 0.054f), new Vector3(0f, -0.032f, 0.48f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "BipodLegL", new Vector3(0.018f, 0.020f, 0.17f), new Vector3(-0.038f, -0.044f, 0.40f), mat, rot: Quaternion.Euler(8f, 0f, 0f), color: darkGrip);
+            AddSafeBevelPart(parts, "BipodLegR", new Vector3(0.018f, 0.020f, 0.17f), new Vector3(0.038f, -0.044f, 0.40f), mat, rot: Quaternion.Euler(8f, 0f, 0f), color: darkGrip);
+            AddSafeBevelPart(parts, "CantileverRail", new Vector3(0.038f, 0.016f, 0.30f), new Vector3(0f, 0.064f, 0.09f), mat, color: steel);
+            AddSafeBevelPart(parts, "ScopeRingRear", new Vector3(0.040f, 0.042f, 0.026f), new Vector3(0f, 0.086f, 0.00f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "ScopeRingFront", new Vector3(0.040f, 0.042f, 0.026f), new Vector3(0f, 0.086f, 0.17f), mat, color: darkGrip);
+            parts.Add(MakeCyl("DmrScopeTube", 10, 0.026f, 0.38f, new Vector3(0f, 0.114f, 0.09f), mat, rot: fwdRot, color: darkGrip));
+            parts.Add(MakeCyl("ScopeEyepiece", 10, 0.034f, 0.07f, new Vector3(0f, 0.114f, -0.09f), mat, rot: fwdRot, color: chassis));
+            parts.Add(MakeCyl("ScopeObjBell", 10, 0.042f, 0.085f, new Vector3(0f, 0.114f, 0.26f), mat, rot: fwdRot, color: chassis));
+            parts.Add(MakeCyl("StockStrutL", 8, 0.012f, 0.25f, new Vector3(-0.024f, 0.012f, -0.26f), mat, rot: fwdRot, color: steel));
+            parts.Add(MakeCyl("StockStrutR", 8, 0.012f, 0.25f, new Vector3(0.024f, 0.012f, -0.26f), mat, rot: fwdRot, color: steel));
+            AddSafeBevelPart(parts, "CheekRiser", new Vector3(0.050f, 0.042f, 0.15f), new Vector3(0f, 0.036f, -0.28f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "ButtPad", new Vector3(0.056f, 0.145f, 0.040f), new Vector3(0f, -0.025f, -0.40f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "PistolGrip", new Vector3(0.042f, 0.120f, 0.058f), new Vector3(0f, -0.086f, -0.080f), mat, rot: Quaternion.Euler(17f, 0f, 0f), color: darkGrip);
+        }
+
+        private static void BuildRpg7LauncherParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var tubeSteel = new Color(0.76f, 0.80f, 0.84f, 1f);
+            var woodHeat = new Color(0.86f, 0.66f, 0.42f, 1f);
+            var darkGrip = new Color(0.50f, 0.53f, 0.56f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            parts.Add(MakeCyl("LaunchTubeMain", 12, 0.038f, 0.96f, new Vector3(0f, 0.029f, -0.02f), mat, rot: fwdRot, color: tubeSteel));
+            parts.Add(MakeCyl("MuzzleCollar", 12, 0.045f, 0.045f, new Vector3(0f, 0.029f, 0.445f), mat, rot: fwdRot, color: darkGrip));
+            parts.Add(MakeCyl("VenturiThroat", 12, 0.032f, 0.12f, new Vector3(0f, 0.029f, -0.52f), mat, rot: fwdRot, color: darkGrip));
+            parts.Add(MakeCone("VenturiCone", 0.058f, 0.11f, 12, new Vector3(0f, 0.029f, -0.60f), mat, rot: Quaternion.Euler(-90f, 0f, 0f), color: tubeSteel));
+            parts.Add(MakeCyl("HeatShieldWrap", 10, 0.048f, 0.38f, new Vector3(0f, 0.029f, -0.04f), mat, rot: fwdRot, color: woodHeat));
+            AddSafeBevelPart(parts, "ForwardGrip", new Vector3(0.042f, 0.120f, 0.056f), new Vector3(0f, -0.068f, 0.160f), mat, rot: Quaternion.Euler(-6f, 0f, 0f), color: darkGrip);
+            AddSafeBevelPart(parts, "TriggerGrip", new Vector3(0.044f, 0.125f, 0.060f), new Vector3(0f, -0.072f, -0.040f), mat, rot: Quaternion.Euler(14f, 0f, 0f), color: darkGrip);
+            AddSafeBevelPart(parts, "TriggerBar", new Vector3(0.032f, 0.024f, 0.24f), new Vector3(0f, -0.015f, 0.06f), mat, color: tubeSteel);
+            AddSafeBevelPart(parts, "RearIronLeaf", new Vector3(0.024f, 0.034f, 0.022f), new Vector3(0f, 0.088f, 0.12f), mat, color: darkGrip);
+            AddSafeBevelPart(parts, "FrontIronBlade", new Vector3(0.018f, 0.034f, 0.020f), new Vector3(0f, 0.088f, 0.42f), mat, color: darkGrip);
+        }
+
+        private static void BuildAn94Parts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var bodyDark = new Color(0.60f, 0.64f, 0.68f, 1f);
+            var steel = new Color(0.78f, 0.82f, 0.86f, 1f);
+            var darkTrim = new Color(0.48f, 0.51f, 0.55f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            AddSafeBevelPart(parts, "An94Receiver", new Vector3(0.064f, 0.095f, 0.30f), new Vector3(0f, 0.008f, 0.01f), mat, color: bodyDark);
+            AddSafeBevelPart(parts, "MagwellCollar", new Vector3(0.056f, 0.030f, 0.105f), new Vector3(0.006f, -0.045f, 0.082f), mat, color: darkTrim);
+            parts.Add(MakeCyl("DiopterRearSight", 8, 0.018f, 0.028f, new Vector3(0f, 0.068f, -0.09f), mat, color: darkTrim));
+            AddSafeBevelPart(parts, "FrontSightHood", new Vector3(0.022f, 0.030f, 0.024f), new Vector3(0f, 0.064f, 0.72f), mat, color: darkTrim);
+            AddSafeBevelPart(parts, "RibbedHandguard", new Vector3(0.060f, 0.078f, 0.32f), new Vector3(0f, 0.002f, 0.31f), mat, color: bodyDark);
+            parts.Add(MakeCyl("ReciprocatingBarrel", 10, 0.017f, 0.42f, new Vector3(0f, 0.026f, 0.66f), mat, rot: fwdRot, color: steel));
+            parts.Add(MakeCyl("LowerPulleyRod", 8, 0.014f, 0.32f, new Vector3(0f, -0.004f, 0.60f), mat, rot: fwdRot, color: steel));
+            AddSafeBevelPart(parts, "Figure8Brake", new Vector3(0.030f, 0.050f, 0.075f), new Vector3(0f, 0.020f, 0.870f), mat, color: steel);
+            AddSafeBevelPart(parts, "FoldingStock", new Vector3(0.052f, 0.108f, 0.30f), new Vector3(0f, -0.008f, -0.28f), mat, color: bodyDark);
+            AddSafeBevelPart(parts, "ButtPlate", new Vector3(0.056f, 0.130f, 0.030f), new Vector3(0f, -0.016f, -0.43f), mat, color: darkTrim);
+            AddSafeBevelPart(parts, "PistolGrip", new Vector3(0.042f, 0.118f, 0.056f), new Vector3(0f, -0.088f, -0.058f), mat, rot: Quaternion.Euler(14f, 0f, 0f), color: darkTrim);
+        }
+
+        private static void BuildVectorSmgParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var body = new Color(0.66f, 0.70f, 0.75f, 1f);
+            var darkTrim = new Color(0.50f, 0.53f, 0.56f, 1f);
+            var steel = new Color(0.84f, 0.88f, 0.92f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            AddSafeBevelPart(parts, "UpperReceiver", new Vector3(0.058f, 0.068f, 0.52f), new Vector3(0f, 0.034f, 0.16f), mat, color: body);
+            AddSafeBevelPart(parts, "SuperVHousing", new Vector3(0.056f, 0.135f, 0.24f), new Vector3(0f, -0.056f, 0.12f), mat, rot: Quaternion.Euler(-14f, 0f, 0f), color: darkTrim);
+            AddSafeBevelPart(parts, "TriggerWeb", new Vector3(0.044f, 0.044f, 0.16f), new Vector3(0f, -0.024f, -0.01f), mat, color: body);
+            AddSafeBevelPart(parts, "TopRail", new Vector3(0.034f, 0.012f, 0.48f), new Vector3(0f, 0.072f, 0.17f), mat, color: darkTrim);
+            AddSafeBevelPart(parts, "RearFlipIron", new Vector3(0.026f, 0.026f, 0.024f), new Vector3(0f, 0.090f, -0.04f), mat, color: darkTrim);
+            AddSafeBevelPart(parts, "FrontFlipIron", new Vector3(0.022f, 0.026f, 0.022f), new Vector3(0f, 0.090f, 0.36f), mat, color: darkTrim);
+            parts.Add(MakeCyl("SmgBarrel", 10, 0.019f, 0.14f, new Vector3(0f, 0.022f, 0.48f), mat, rot: fwdRot, color: steel));
+            parts.Add(MakeCyl("FlashCompensator", 8, 0.024f, 0.045f, new Vector3(0f, 0.022f, 0.54f), mat, rot: fwdRot, color: darkTrim));
+            parts.Add(MakeCyl("VertForegrip", 8, 0.020f, 0.105f, new Vector3(0f, -0.055f, 0.254f), mat, color: darkTrim));
+            AddSafeBevelPart(parts, "StockStrutTop", new Vector3(0.036f, 0.028f, 0.26f), new Vector3(0f, 0.028f, -0.22f), mat, color: darkTrim);
+            AddSafeBevelPart(parts, "StockStrutBot", new Vector3(0.032f, 0.024f, 0.22f), new Vector3(0f, -0.058f, -0.23f), mat, rot: Quaternion.Euler(14f, 0f, 0f), color: darkTrim);
+            AddSafeBevelPart(parts, "StockButtPad", new Vector3(0.046f, 0.135f, 0.042f), new Vector3(0f, -0.020f, -0.35f), mat, color: darkTrim);
+            AddSafeBevelPart(parts, "PistolGrip", new Vector3(0.044f, 0.125f, 0.060f), new Vector3(0f, -0.088f, -0.048f), mat, rot: Quaternion.Euler(18f, 0f, 0f), color: darkTrim);
+        }
+
+        private static void BuildAk74Parts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var receiver = new Color(0.68f, 0.72f, 0.76f, 1f);
+            var woodPlum = new Color(0.76f, 0.54f, 0.38f, 1f);
+            var darkSteel = new Color(0.52f, 0.55f, 0.58f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            AddSafeBevelPart(parts, "StampedReceiver", new Vector3(0.062f, 0.082f, 0.28f), new Vector3(0f, 0.010f, 0.01f), mat, color: receiver);
+            AddSafeBevelPart(parts, "RibbedDustCover", new Vector3(0.054f, 0.028f, 0.24f), new Vector3(0f, 0.056f, -0.01f), mat, color: darkSteel);
+            AddSafeBevelPart(parts, "RearLeafSight", new Vector3(0.024f, 0.020f, 0.036f), new Vector3(0f, 0.072f, 0.12f), mat, color: darkSteel);
+            AddSafeBevelPart(parts, "HandguardLower", new Vector3(0.060f, 0.068f, 0.26f), new Vector3(0f, 0.006f, 0.28f), mat, color: woodPlum);
+            parts.Add(MakeCyl("GasTube", 8, 0.015f, 0.28f, new Vector3(0f, 0.042f, 0.34f), mat, rot: fwdRot, color: receiver));
+            parts.Add(MakeCyl("AkBarrel", 10, 0.017f, 0.56f, new Vector3(0f, 0.023f, 0.54f), mat, rot: fwdRot, color: darkSteel));
+            AddSafeBevelPart(parts, "FrontSightTower", new Vector3(0.020f, 0.044f, 0.028f), new Vector3(0f, 0.056f, 0.76f), mat, color: darkSteel);
+            parts.Add(MakeCyl("Ak74Brake", 8, 0.023f, 0.085f, new Vector3(0f, 0.023f, 0.835f), mat, rot: fwdRot, color: darkSteel));
+            AddSafeBevelPart(parts, "Stock", new Vector3(0.052f, 0.110f, 0.30f), new Vector3(0f, -0.012f, -0.26f), mat, color: woodPlum);
+            AddSafeBevelPart(parts, "PistolGrip", new Vector3(0.042f, 0.118f, 0.056f), new Vector3(0f, -0.085f, -0.056f), mat, rot: Quaternion.Euler(18f, 0f, 0f), color: darkSteel);
+        }
+
+        private static void BuildPkmParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var steel = new Color(0.80f, 0.84f, 0.88f, 1f);
+            var wood = new Color(0.80f, 0.58f, 0.40f, 1f);
+            var dark = new Color(0.50f, 0.53f, 0.56f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            AddSafeBevelPart(parts, "Receiver", new Vector3(0.092f, 0.115f, 0.40f), new Vector3(0f, 0.005f, 0.04f), mat, color: steel);
+            AddSafeBevelPart(parts, "FeedCover", new Vector3(0.084f, 0.032f, 0.24f), new Vector3(0f, 0.072f, 0.06f), mat, color: dark);
+            AddSafeBevelPart(parts, "RearIronPost", new Vector3(0.026f, 0.022f, 0.028f), new Vector3(0f, 0.096f, -0.03f), mat, color: dark);
+            parts.Add(MakeCyl("HeavyBarrel", 10, 0.022f, 0.72f, new Vector3(0f, 0.028f, 0.56f), mat, rot: fwdRot, color: steel));
+            parts.Add(MakeCyl("GasPistonTube", 8, 0.020f, 0.44f, new Vector3(0f, -0.014f, 0.44f), mat, rot: fwdRot, color: dark));
+            parts.Add(MakeCyl("ConicalFlashHider", 8, 0.028f, 0.09f, new Vector3(0f, 0.028f, 0.93f), mat, rot: fwdRot, color: dark));
+            AddSafeBevelPart(parts, "FrontSightBlock", new Vector3(0.022f, 0.042f, 0.026f), new Vector3(0f, 0.058f, 0.82f), mat, color: dark);
+            AddSafeBevelPart(parts, "FoldedBipodL", new Vector3(0.020f, 0.022f, 0.22f), new Vector3(-0.040f, -0.040f, 0.50f), mat, color: dark);
+            AddSafeBevelPart(parts, "FoldedBipodR", new Vector3(0.020f, 0.022f, 0.22f), new Vector3(0.040f, -0.040f, 0.50f), mat, color: dark);
+            AddSafeBevelPart(parts, "PkmStock", new Vector3(0.058f, 0.135f, 0.30f), new Vector3(0f, -0.020f, -0.30f), mat, color: wood);
+            AddSafeBevelPart(parts, "PistolGrip", new Vector3(0.046f, 0.125f, 0.062f), new Vector3(0f, -0.095f, -0.064f), mat, rot: Quaternion.Euler(16f, 0f, 0f), color: dark);
+        }
+
+        private static void BuildMagStanagParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var coyote = new Color(0.92f, 0.80f, 0.58f, 1f);
+            var trim = new Color(0.52f, 0.55f, 0.58f, 1f);
+
+            AddSafeBevelPart(parts, "StanagUpper", new Vector3(0.042f, 0.105f, 0.088f), new Vector3(0f, 0.045f, 0f), mat, color: coyote);
+            AddSafeBevelPart(parts, "StanagLower", new Vector3(0.042f, 0.095f, 0.088f), new Vector3(0f, -0.042f, 0.014f), mat, rot: Quaternion.Euler(14f, 0f, 0f), color: coyote);
+            AddSafeBevelPart(parts, "FloorPlate", new Vector3(0.050f, 0.022f, 0.098f), new Vector3(0f, -0.090f, 0.026f), mat, rot: Quaternion.Euler(14f, 0f, 0f), color: trim);
+        }
+
+        private static void BuildMagDmrBoxParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var steel = new Color(0.68f, 0.72f, 0.76f, 1f);
+            var pad = new Color(0.50f, 0.53f, 0.56f, 1f);
+
+            AddSafeBevelPart(parts, "DmrMagBody", new Vector3(0.048f, 0.145f, 0.096f), Vector3.zero, mat, color: steel);
+            AddSafeBevelPart(parts, "DmrFloorPlate", new Vector3(0.056f, 0.022f, 0.108f), new Vector3(0f, -0.072f, 0f), mat, color: pad);
+        }
+
+        private static void BuildMagAkCurvedParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var poly = new Color(0.54f, 0.57f, 0.60f, 1f);
+            var tip = new Color(0.76f, 0.78f, 0.80f, 1f);
+
+            AddSafeBevelPart(parts, "AkMagUpper", new Vector3(0.044f, 0.120f, 0.086f), new Vector3(0f, 0.055f, 0f), mat, rot: Quaternion.Euler(6f, 0f, 0f), color: poly);
+            AddSafeBevelPart(parts, "AkMagCurve", new Vector3(0.044f, 0.130f, 0.084f), new Vector3(0f, -0.055f, 0.028f), mat, rot: Quaternion.Euler(24f, 0f, 0f), color: poly);
+            AddSafeBevelPart(parts, "AkFloorPlate", new Vector3(0.050f, 0.022f, 0.094f), new Vector3(0f, -0.118f, 0.052f), mat, rot: Quaternion.Euler(24f, 0f, 0f), color: tip);
+        }
+
+        private static void BuildMagVectorStickParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var poly = new Color(0.52f, 0.55f, 0.58f, 1f);
+            var trim = new Color(0.78f, 0.82f, 0.86f, 1f);
+
+            AddSafeBevelPart(parts, "VectorStickTube", new Vector3(0.038f, 0.215f, 0.052f), Vector3.zero, mat, rot: Quaternion.Euler(-14f, 0f, 0f), color: poly);
+            AddSafeBevelPart(parts, "VectorBasePad", new Vector3(0.046f, 0.024f, 0.064f), new Vector3(0f, -0.106f, -0.026f), mat, rot: Quaternion.Euler(-14f, 0f, 0f), color: trim);
+        }
+
+        private static void BuildMagM249BoxParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var drumOd = new Color(0.66f, 0.82f, 0.54f, 1f);
+            var latch = new Color(0.52f, 0.55f, 0.58f, 1f);
+            var brass = new Color(0.96f, 0.80f, 0.36f, 1f);
+
+            AddSafeBevelPart(parts, "BoxDrum200Rd", new Vector3(0.145f, 0.155f, 0.185f), Vector3.zero, mat, color: drumOd);
+            AddSafeBevelPart(parts, "FeedNeckLatch", new Vector3(0.072f, 0.026f, 0.090f), new Vector3(0f, 0.082f, 0f), mat, color: latch);
+            AddSafeBevelPart(parts, "BeltLinkTrim", new Vector3(0.044f, 0.022f, 0.14f), new Vector3(-0.056f, 0.068f, 0f), mat, color: brass);
+        }
+
+        private static void BuildMagRpgWarheadParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var olive = new Color(0.66f, 0.78f, 0.52f, 1f);
+            var fuseSteel = new Color(0.84f, 0.88f, 0.92f, 1f);
+            var bandYellow = new Color(0.98f, 0.76f, 0.22f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            // Centered around (0,0,0), pointing toward +Z
+            parts.Add(MakeCyl("WarheadStem", 10, 0.028f, 0.12f, new Vector3(0f, 0f, -0.075f), mat, rot: fwdRot, color: olive));
+            parts.Add(MakeCone("WarheadRearFlare", 0.054f, 0.075f, 12, new Vector3(0f, 0f, -0.005f), mat, rot: Quaternion.Euler(90f, 0f, 0f), color: olive));
+            parts.Add(MakeCyl("WarheadBand", 12, 0.055f, 0.025f, new Vector3(0f, 0f, 0.032f), mat, rot: fwdRot, color: bandYellow));
+            parts.Add(MakeCone("WarheadNoseCone", 0.054f, 0.115f, 12, new Vector3(0f, 0f, 0.095f), mat, rot: Quaternion.Euler(90f, 0f, 0f), color: olive));
+            parts.Add(MakeCyl("PiezoFuseTip", 8, 0.012f, 0.045f, new Vector3(0f, 0f, 0.145f), mat, rot: fwdRot, color: fuseSteel));
+        }
+
+        private static void BuildMagM32CylinderParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var drum = new Color(0.90f, 0.93f, 0.96f, 1f);
+            var matte = new Color(0.72f, 0.76f, 0.80f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            parts.Add(MakeCyl("RotaryDrumCore", 12, 0.095f, 0.175f, Vector3.zero, mat, rot: fwdRot, color: drum));
+            for (var i = 0; i < 6; i++)
+            {
+                var rad = i * Mathf.PI * 2f / 6f;
+                var bx = Mathf.Sin(rad) * 0.072f;
+                var by = Mathf.Cos(rad) * 0.072f;
+                parts.Add(MakeCyl("ChamberTube_" + i, 8, 0.026f, 0.18f, new Vector3(bx, by, 0f), mat, rot: fwdRot, color: matte));
+            }
+        }
+
+        private static void BuildShotgunShellParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var redHull = new Color(0.92f, 0.34f, 0.28f, 1f);
+            var brassBase = new Color(0.96f, 0.80f, 0.34f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            parts.Add(MakeCyl("ShellHullRed", 10, 0.018f, 0.078f, new Vector3(0f, 0f, 0.016f), mat, rot: fwdRot, color: redHull));
+            parts.Add(MakeCyl("ShellBrassHead", 10, 0.020f, 0.026f, new Vector3(0f, 0f, -0.034f), mat, rot: fwdRot, color: brassBase));
+        }
+
+        private static void BuildDroppedMagazineParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var magMetal = new Color(0.84f, 0.88f, 0.92f, 1f);
+            var magPad = new Color(0.54f, 0.57f, 0.60f, 1f);
+
+            AddSafeBevelPart(parts, "MagUpperBody", new Vector3(0.065f, 0.14f, 0.105f), new Vector3(0f, 0.04f, 0f), mat, color: magMetal);
+            AddSafeBevelPart(parts, "MagCurvedLower", new Vector3(0.065f, 0.13f, 0.105f), new Vector3(0f, -0.065f, 0.018f), mat, rot: Quaternion.Euler(14f, 0f, 0f), color: magMetal);
+            AddSafeBevelPart(parts, "MagFloorPlate", new Vector3(0.078f, 0.028f, 0.125f), new Vector3(0f, -0.125f, 0.032f), mat, rot: Quaternion.Euler(14f, 0f, 0f), color: magPad);
+            AddSafeBevelPart(parts, "MagFeedLipTrim", new Vector3(0.058f, 0.024f, 0.095f), new Vector3(0f, 0.115f, -0.005f), mat, color: magPad);
+        }
+
+        private static void BuildRiotShieldParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var armorDark = new Color(0.68f, 0.72f, 0.78f, 1f);
+            var armorTrim = new Color(0.86f, 0.90f, 0.94f, 1f);
+            var hazard = new Color(1.00f, 0.74f, 0.24f, 1f);
+
+            AddSafeBevelPart(parts, "ShieldCenterPlate", new Vector3(0.58f, 1.38f, 0.075f), new Vector3(0f, 0f, 0.02f), mat, color: armorDark);
+            AddSafeBevelPart(parts, "ShieldWingL", new Vector3(0.26f, 1.32f, 0.070f), new Vector3(-0.37f, -0.01f, -0.06f), mat, rot: Quaternion.Euler(0f, -26f, 0f), color: armorDark);
+            AddSafeBevelPart(parts, "ShieldWingR", new Vector3(0.26f, 1.32f, 0.070f), new Vector3(0.37f, -0.01f, -0.06f), mat, rot: Quaternion.Euler(0f, 26f, 0f), color: armorDark);
+            AddSafeBevelPart(parts, "TopArmorBrow", new Vector3(0.54f, 0.16f, 0.11f), new Vector3(0f, 0.62f, 0.04f), mat, rot: Quaternion.Euler(12f, 0f, 0f), color: armorTrim);
+            AddSafeBevelPart(parts, "ViewportFrameTop", new Vector3(0.44f, 0.05f, 0.095f), new Vector3(0f, 0.42f, 0.045f), mat, color: hazard);
+            AddSafeBevelPart(parts, "ViewportFrameBot", new Vector3(0.44f, 0.05f, 0.095f), new Vector3(0f, 0.25f, 0.045f), mat, color: armorTrim);
+            AddSafeBevelPart(parts, "SkirtRamBar", new Vector3(0.62f, 0.16f, 0.095f), new Vector3(0f, -0.60f, 0.045f), mat, color: armorTrim);
+            AddSafeBevelPart(parts, "RearGripBar", new Vector3(0.045f, 0.34f, 0.09f), new Vector3(0f, 0.05f, -0.065f), mat, color: armorTrim);
+        }
+
+        private static void BuildSniperRifleParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var body = new Color(0.76f, 0.80f, 0.84f, 1f);
+            var barrel = new Color(0.56f, 0.60f, 0.64f, 1f);
+            var fwdRot = Quaternion.Euler(90f, 0f, 0f);
+
+            AddSafeBevelPart(parts, "ReceiverChassis", new Vector3(0.075f, 0.115f, 0.44f), new Vector3(0f, 0f, 0.02f), mat, color: body);
+            AddSafeBevelPart(parts, "ChassisForend", new Vector3(0.064f, 0.060f, 0.32f), new Vector3(0f, 0.012f, 0.38f), mat, color: body);
+            parts.Add(MakeCyl("FlutedSuppressorBarrel", 10, 0.026f, 0.86f, new Vector3(0f, 0.032f, 0.66f), mat, rot: fwdRot, color: barrel));
+            AddSafeBevelPart(parts, "MuzzleBrakeBlock", new Vector3(0.055f, 0.048f, 0.09f), new Vector3(0f, 0.032f, 1.09f), mat, color: barrel);
+            AddSafeBevelPart(parts, "ScopeRail", new Vector3(0.038f, 0.016f, 0.28f), new Vector3(0f, 0.064f, 0.08f), mat, color: barrel);
+            AddSafeBevelPart(parts, "ScopeRingRear", new Vector3(0.040f, 0.042f, 0.028f), new Vector3(0f, 0.086f, 0.00f), mat, color: barrel);
+            AddSafeBevelPart(parts, "ScopeRingFront", new Vector3(0.040f, 0.042f, 0.028f), new Vector3(0f, 0.086f, 0.16f), mat, color: barrel);
+            parts.Add(MakeCyl("TelescopicScope", 10, 0.028f, 0.38f, new Vector3(0f, 0.108f, 0.09f), mat, rot: fwdRot, color: barrel));
+            parts.Add(MakeCyl("ScopeEyepieceBell", 10, 0.036f, 0.07f, new Vector3(0f, 0.108f, -0.09f), mat, rot: fwdRot, color: body));
+            parts.Add(MakeCyl("ScopeFrontBell", 10, 0.044f, 0.09f, new Vector3(0f, 0.108f, 0.26f), mat, rot: fwdRot, color: body));
+            AddSafeBevelPart(parts, "PrecisionStock", new Vector3(0.062f, 0.135f, 0.32f), new Vector3(0f, -0.015f, -0.34f), mat, color: body);
+            AddSafeBevelPart(parts, "BoxMag", new Vector3(0.052f, 0.135f, 0.095f), new Vector3(0f, -0.105f, 0.10f), mat, color: barrel);
+            AddSafeBevelPart(parts, "BipodMountBlock", new Vector3(0.048f, 0.028f, 0.060f), new Vector3(0f, -0.024f, 0.48f), mat, color: barrel);
+            AddSafeBevelPart(parts, "BipodLegL", new Vector3(0.020f, 0.022f, 0.17f), new Vector3(-0.042f, -0.042f, 0.41f), mat, rot: Quaternion.Euler(14f, -8f, 0f), color: barrel);
+            AddSafeBevelPart(parts, "BipodLegR", new Vector3(0.020f, 0.022f, 0.17f), new Vector3(0.042f, -0.042f, 0.41f), mat, rot: Quaternion.Euler(14f, 8f, 0f), color: barrel);
+            AddSafeBevelPart(parts, "PistolGrip", new Vector3(0.042f, 0.125f, 0.060f), new Vector3(0f, -0.100f, -0.10f), mat, rot: Quaternion.Euler(16f, 0f, 0f), color: barrel);
+        }
+
+        private static void BuildFieldPackParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var pack = new Color(0.78f, 0.82f, 0.74f, 1f);
+            var strap = new Color(0.54f, 0.56f, 0.58f, 1f);
+
+            AddSafeBevelPart(parts, "MainPack", new Vector3(0.34f, 0.40f, 0.20f), new Vector3(0f, 0f, 0f), mat, color: pack);
+            AddSafeBevelPart(parts, "TopFlap", new Vector3(0.36f, 0.11f, 0.22f), new Vector3(0f, 0.17f, 0.01f), mat, color: strap);
+            AddSafeBevelPart(parts, "SidePouchL", new Vector3(0.08f, 0.22f, 0.14f), new Vector3(-0.19f, -0.04f, 0f), mat, color: pack);
+            AddSafeBevelPart(parts, "SidePouchR", new Vector3(0.08f, 0.22f, 0.14f), new Vector3(0.19f, -0.04f, 0f), mat, color: pack);
+            parts.Add(MakeCyl("Bedroll", 8, 0.065f, 0.34f, new Vector3(0f, -0.22f, 0.01f), mat, rot: Quaternion.Euler(0f, 0f, 90f), color: strap));
+            parts.Add(MakeCyl("CommsWhip", 6, 0.012f, 0.32f, new Vector3(-0.12f, 0.32f, -0.04f), mat, color: strap));
+        }
+
+        private static void BuildArmorPauldronParts(List<ProBuilderMesh> parts, Material mat)
+        {
+            var plate = new Color(0.86f, 0.90f, 0.94f, 1f);
+            var trim = new Color(0.60f, 0.64f, 0.68f, 1f);
+
+            AddSafeBevelPart(parts, "PauldronShell", new Vector3(0.22f, 0.16f, 0.24f), new Vector3(0f, 0f, 0f), mat, color: plate);
+            AddSafeBevelPart(parts, "PauldronUpperFlange", new Vector3(0.20f, 0.055f, 0.22f), new Vector3(0f, 0.085f, 0f), mat, color: trim);
+        }
+
         /// <summary>
         /// Builds bespoke ProBuilder ground decks, water basins, canyon shelves, underground wing floors,
         /// alpine suspension bridge, and transit spines tailored uniquely per mission.
@@ -166,8 +1098,11 @@ namespace TopDownShooter.Editor
                 case 3:
                     BuildMission3SubstationDeck(floorRoot.transform, envRoot, mats);
                     break;
-                default:
+                case 4:
                     BuildMission4SummitDeck(floorRoot.transform, envRoot, mats);
+                    break;
+                default:
+                    BuildMission5AegisCitadelDeck(floorRoot.transform, envRoot, mats);
                     break;
             }
         }
@@ -285,11 +1220,29 @@ namespace TopDownShooter.Editor
             MergeParts(plazaRing, "SummitConduitLines_PB", envRoot, castShadows: false, smoothingAngle: DefaultSmoothAngle);
         }
 
+        private static void BuildMission5AegisCitadelDeck(Transform floorRoot, Transform envRoot, SceneSetupBuilder.ArenaMaterialPack mats)
+        {
+            // South Gatehouse + Main AEON Citadel Courtyard (Archive West / SATCOM East) + North Vault & Helipad
+            AddDeckSlab(floorRoot, "SouthGatehouseDeck", new Vector3(0f, -0.2f, -37f), new Vector3(34f, 0.4f, 30f), mats.Road);
+            AddDeckSlab(floorRoot, "MainCitadelCourtyardDeck", new Vector3(0f, -0.2f, 2f), new Vector3(84f, 0.4f, 44f), mats.Floor);
+            AddDeckSlab(floorRoot, "NorthAeonVaultDeck", new Vector3(0f, -0.2f, 40f), new Vector3(48f, 0.4f, 32f), mats.Floor);
+
+            var floorConduits = new List<ProBuilderMesh>
+            {
+                MakeBeveledCube("AeonPromenadeAxis", new Vector3(5.4f, 0.025f, 94f), new Vector3(0f, 0.014f, 2f), mats.Trim, 0.005f),
+                MakeBeveledCube("CourtyardCrossW", new Vector3(26f, 0.028f, 0.55f), new Vector3(-20f, 0.016f, 2f), mats.HeliosGlow, 0f),
+                MakeBeveledCube("CourtyardCrossE", new Vector3(26f, 0.028f, 0.55f), new Vector3(20f, 0.016f, 2f), mats.Accent, 0f),
+                MakeBeveledCube("VaultWarningN", new Vector3(24f, 0.028f, 0.45f), new Vector3(0f, 0.016f, 33f), mats.Accent, 0f),
+            };
+            MergeParts(floorConduits, "AeonFloorConduits_PB", envRoot, castShadows: false, smoothingAngle: DefaultSmoothAngle);
+        }
+
         private static void BuildCargoBarge(Transform parent, string bargeName, Vector3 pos, float yaw, SceneSetupBuilder.ArenaMaterialPack mats)
         {
             var root = new GameObject(bargeName);
             root.transform.SetParent(parent, false);
             root.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f));
+            MarkNavMeshIgnore(root);
 
             var parts = new List<ProBuilderMesh>
             {
@@ -308,6 +1261,7 @@ namespace TopDownShooter.Editor
             var root = new GameObject(name);
             root.transform.SetParent(parent, false);
             root.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, 12f, 0f));
+            MarkNavMeshIgnore(root);
 
             var parts = new List<ProBuilderMesh>
             {
@@ -420,6 +1374,20 @@ namespace TopDownShooter.Editor
                 MakeCone("EmitterNeedle", 1.15f, 3.4f, 10, new Vector3(0f, 10.4f, 0f), mats.HeliosGlow),
             };
             MergeParts(parts, "HeliosOrbitalSpire_PB", root.transform, castShadows: true, smoothingAngle: DefaultSmoothAngle);
+            AddPointLight(root.transform, "SpireCoreLight", new Vector3(0f, 6.2f, 0f), Palette.M3HeliosCoreCyan, 4.4f, 18f);
+        }
+
+        private static void AddPointLight(Transform parent, string name, Vector3 localPos, Color color, float intensity, float range)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            var pt = go.AddComponent<Light>();
+            pt.type = LightType.Point;
+            pt.color = color;
+            pt.intensity = intensity;
+            pt.range = range;
+            pt.shadows = LightShadows.None;
         }
 
         /// <summary>
@@ -427,7 +1395,7 @@ namespace TopDownShooter.Editor
         /// </summary>
         public static void BuildPerimeterWallsAndBuildings(Transform envRoot, SceneSetupBuilder.ArenaMaterialPack mats, int missionIndex)
         {
-            var glow = missionIndex == 4 || missionIndex == 3 ? mats.HeliosGlow : mats.SodiumGlow;
+            var glow = missionIndex >= 3 ? mats.HeliosGlow : mats.SodiumGlow;
 
             if (missionIndex == 1)
             {
@@ -522,7 +1490,7 @@ namespace TopDownShooter.Editor
                 BuildCompoundWarehouse(envRoot, "SubstationGenerator_NW", new Vector3(-34f, 0f, 32f), 90f, new Vector3(16f, 6.2f, 10f), mats, glow);
                 BuildCompoundWarehouse(envRoot, "SubstationGenerator_NE", new Vector3(34f, 0f, 32f), -90f, new Vector3(16f, 6.2f, 10f), mats, glow);
             }
-            else
+            else if (missionIndex == 4)
             {
                 // Mission 4: South Bridge + Chamfered Octagonal Citadel Fortress + North Summit Pad
                 BuildPerimeterWall(envRoot, "Bridge_South", new Vector3(0f, 0f, -54f), new Vector3(21.4f, 1.6f, 1.2f), mats.Walls, mats.Trim, mats.Accent);
@@ -548,6 +1516,31 @@ namespace TopDownShooter.Editor
                 BuildWatchtower(envRoot, "CitadelTower_NE", new Vector3(41.5f, 0f, 27.5f), mats, glow);
                 BuildObservatoryBastion(envRoot, "CitadelTelemetry_W", new Vector3(-49f, 0f, 2f), 90f, mats, glow);
                 BuildObservatoryBastion(envRoot, "CitadelTelemetry_E", new Vector3(49f, 0f, 2f), -90f, mats, glow);
+            }
+            else
+            {
+                // Mission 5: AEON BLACKSITE (Washington Sector Zero Command Compound)
+                BuildPerimeterWall(envRoot, "AeonGatehouse_South", new Vector3(0f, 0f, -52f), new Vector3(35.4f, 2.8f, 1.6f), mats.Walls, mats.Trim, mats.Accent);
+                BuildPerimeterWall(envRoot, "AeonGatehouse_West", new Vector3(-17f, 0f, -36f), new Vector3(1.6f, 2.8f, 32.4f), mats.Walls, mats.Trim, mats.Trim);
+                BuildPerimeterWall(envRoot, "AeonGatehouse_East", new Vector3(17f, 0f, -36f), new Vector3(1.6f, 2.8f, 32.4f), mats.Walls, mats.Trim, mats.Trim);
+
+                BuildPerimeterWall(envRoot, "AeonCourt_SW_Wing", new Vector3(-29.5f, 0f, -20f), new Vector3(26.4f, 3.2f, 1.6f), mats.Walls, mats.Trim, mats.Trim);
+                BuildPerimeterWall(envRoot, "AeonCourt_SE_Wing", new Vector3(29.5f, 0f, -20f), new Vector3(26.4f, 3.2f, 1.6f), mats.Walls, mats.Trim, mats.Trim);
+                BuildPerimeterWall(envRoot, "AeonCourt_West", new Vector3(-42f, 0f, 2f), new Vector3(1.8f, 3.4f, 45.4f), mats.Walls, mats.Trim, mats.HeliosGlow);
+                BuildPerimeterWall(envRoot, "AeonCourt_East", new Vector3(42f, 0f, 2f), new Vector3(1.8f, 3.4f, 45.4f), mats.Walls, mats.Trim, mats.Accent);
+                BuildPerimeterWall(envRoot, "AeonCourt_NW_Wing", new Vector3(-33f, 0f, 24f), new Vector3(19.4f, 3.2f, 1.6f), mats.Walls, mats.Trim, mats.Trim);
+                BuildPerimeterWall(envRoot, "AeonCourt_NE_Wing", new Vector3(33f, 0f, 24f), new Vector3(19.4f, 3.2f, 1.6f), mats.Walls, mats.Trim, mats.Trim);
+
+                BuildPerimeterWall(envRoot, "AeonVault_West", new Vector3(-24f, 0f, 40f), new Vector3(1.6f, 3.2f, 32.4f), mats.Walls, mats.Trim, mats.Trim);
+                BuildPerimeterWall(envRoot, "AeonVault_East", new Vector3(24f, 0f, 40f), new Vector3(1.6f, 3.2f, 32.4f), mats.Walls, mats.Trim, mats.Trim);
+                BuildPerimeterWall(envRoot, "AeonVault_North", new Vector3(0f, 0f, 56f), new Vector3(49.4f, 3.2f, 1.6f), mats.Walls, mats.Trim, mats.Accent);
+
+                BuildWatchtower(envRoot, "AeonTower_SW", new Vector3(-43.5f, 0f, -21.5f), mats, mats.Accent);
+                BuildWatchtower(envRoot, "AeonTower_SE", new Vector3(43.5f, 0f, -21.5f), mats, mats.Accent);
+                BuildWatchtower(envRoot, "AeonTower_NW", new Vector3(-43.5f, 0f, 25.5f), mats, glow);
+                BuildWatchtower(envRoot, "AeonTower_NE", new Vector3(43.5f, 0f, 25.5f), mats, glow);
+                BuildCompoundWarehouse(envRoot, "AeonCommandArchive_W", new Vector3(-51f, 0f, 2f), 90f, new Vector3(18f, 7.6f, 11f), mats, glow);
+                BuildObservatoryBastion(envRoot, "AeonSatcomDome_E", new Vector3(51f, 0f, 2f), -90f, mats, mats.Accent);
             }
         }
 
@@ -608,6 +1601,7 @@ namespace TopDownShooter.Editor
                 MakeCyl("RoofRadar", 8, 0.35f, 0.65f, new Vector3(0.8f, 6.42f, 0.6f), mats.FuelSteel),
             };
             MergeParts(parts, name + "_PB", root.transform, castShadows: false, smoothingAngle: DefaultSmoothAngle);
+            AddPointLight(root.transform, "WatchtowerLight", new Vector3(0f, 5.45f, 0f), Palette.SodiumAmber, 2.8f, 14f);
         }
 
         private static void BuildCompoundWarehouse(Transform parent, string name, Vector3 pos, float yaw, Vector3 size, SceneSetupBuilder.ArenaMaterialPack mats, Material matGlow)
@@ -685,8 +1679,14 @@ namespace TopDownShooter.Editor
         {
             var hills = new GameObject("PerimeterBackdrop");
             hills.transform.SetParent(envRoot, false);
+            MarkNavMeshIgnore(hills);
 
-            var heightScale = missionIndex == 2 ? 1.38f : (missionIndex == 1 ? 0.82f : 1.25f);
+            var heightScale = missionIndex switch
+            {
+                2 => 1.38f,
+                1 => 0.82f,
+                _ => 1.25f
+            };
             var peakSpecs = new (Vector3 pos, float yaw, Vector3 scale)[]
             {
                 (new Vector3(0f, 0f, 79f), 12f, new Vector3(3.4f, 3.0f, 2.5f)),
@@ -715,7 +1715,7 @@ namespace TopDownShooter.Editor
             {
                 var p = peakSpecs[i];
                 var peakPos = p.pos;
-                if (missionIndex == 1 && Mathf.Abs(peakPos.x) > 35f && peakPos.z > -52f && peakPos.z < 64f)
+                if (missionIndex == 1 && Mathf.Abs(peakPos.x) > 35f && peakPos.z is > -52f and < 64f)
                 {
                     peakPos.x += Mathf.Sign(peakPos.x) * 24f;
                 }
@@ -750,9 +1750,15 @@ namespace TopDownShooter.Editor
                 for (var i = 0; i < treeCoords.Length; i++)
                 {
                     var t = treeCoords[i];
-                    if (missionIndex == 1 && t.z > -54f && t.z < 60f) continue;
-                    if (missionIndex == 4 && Mathf.Abs(t.x) < 42f && t.z > -30f && t.z < 56f) continue;
-                    BuildConiferPine(hills.transform, "PerimeterPine_" + i, new Vector3(t.x, -0.35f, t.z), t.s, t.yaw, mats);
+                    switch (missionIndex)
+                    {
+                        case 1 when t.z is > -54f and < 60f:
+                        case >= 4 when Mathf.Abs(t.x) < 44f && t.z is > -30f and < 58f:
+                            continue;
+                        default:
+                            BuildConiferPine(hills.transform, "PerimeterPine_" + i, new Vector3(t.x, -0.35f, t.z), t.s, t.yaw, mats);
+                            break;
+                    }
                 }
 
                 if (missionIndex == 4)
@@ -784,12 +1790,19 @@ namespace TopDownShooter.Editor
             for (var i = 0; i < rockCoords.Length; i++)
             {
                 var r = rockCoords[i];
-                if (missionIndex == 1 && r.z > -54f && r.z < 58f) continue;
-                if (missionIndex == 3) continue; // Underground facility has zero outdoor rocks
-                BuildRockOutcrop(hills.transform, "PerimeterRock_" + i, new Vector3(r.x, missionIndex == 4 ? -2.0f : -0.35f, r.z), new Vector3(r.sx, r.sy, r.sz) * rockBoost, r.yaw, mats.Rock);
+                switch (missionIndex)
+                {
+                    case 1 when r.z is > -54f and < 58f:
+                    // Underground facility has zero outdoor rocks
+                    case 3:
+                        continue;
+                    default:
+                        BuildRockOutcrop(hills.transform, "PerimeterRock_" + i, new Vector3(r.x, missionIndex == 4 ? -2.0f : -0.35f, r.z), new Vector3(r.sx, r.sy, r.sz) * rockBoost, r.yaw, mats.Rock);
+                        break;
+                }
             }
 
-            if (missionIndex == 2)
+            if (missionIndex != 2) return;
             {
                 var canyonBoulders = new (float x, float z, float s, float yaw)[]
                 {
@@ -916,10 +1929,18 @@ namespace TopDownShooter.Editor
             var leaf = new GameObject(leafName);
             leaf.transform.SetParent(parent, false);
             leaf.transform.position = pos;
+            MarkNavMeshIgnore(leaf);
 
             var col = leaf.AddComponent<BoxCollider>();
             col.size = size;
             col.center = new Vector3(0f, size.y * 0.5f, 0f);
+
+            var obstacle = leaf.AddComponent<NavMeshObstacle>();
+            obstacle.shape = NavMeshObstacleShape.Box;
+            obstacle.center = col.center;
+            obstacle.size = size;
+            obstacle.carving = true;
+            obstacle.carveOnlyStationary = true;
 
             var parts = new List<ProBuilderMesh>
             {
@@ -1065,8 +2086,8 @@ namespace TopDownShooter.Editor
                 MakeBeveledCube("SkidBase", new Vector3(size.x * 0.96f, 0.12f, size.z * 0.96f), new Vector3(0f, 0.06f, 0f), mats.Trim, 0.02f)
             };
 
-            const int rows = 3;
-            const int cols = 4;
+            const int rows = 2;
+            const int cols = 3;
             var bagW = (size.x * 0.92f) / cols;
             var bagH = (size.y - 0.10f) / rows;
             for (var r = 0; r < rows; r++)
@@ -1077,7 +2098,7 @@ namespace TopDownShooter.Editor
                 {
                     var bx = -size.x * 0.34f + c * (bagW * 0.95f) + stagger * 0.5f;
                     var by = 0.14f + bagH * (r + 0.45f);
-                    parts.Add(MakeBeveledCube($"Bag_{r}_{c}", new Vector3(bagW * 0.94f, bagH * 0.90f, size.z * 0.88f), new Vector3(bx, by, 0f), mats.Sandbag, 0.055f));
+                    parts.Add(MakeBeveledCube($"Bag_{r}_{c}", new Vector3(bagW * 0.94f, bagH * 0.90f, size.z * 0.88f), new Vector3(bx, by, 0f), mats.Sandbag, 0.025f));
                 }
             }
             MergeParts(parts, name + "_PB", root.transform, castShadows: true, smoothingAngle: DefaultSmoothAngle);
@@ -1126,6 +2147,7 @@ namespace TopDownShooter.Editor
                 MakeCone("EmitterSpire", w * 0.22f, h * 0.22f, 8, new Vector3(0f, h * 1.04f, 0f), mats.FuelSteel),
             };
             MergeParts(parts, name + "_PB", root.transform, castShadows: true, smoothingAngle: DefaultSmoothAngle);
+            AddPointLight(root.transform, "PylonCoreLight", new Vector3(0f, h * 0.68f, 0f), Palette.M3HeliosCoreCyan, 2.8f, 12f);
         }
 
         public static void BuildRadarDish(Transform parent, string name, Vector3 pos, float yaw, SceneSetupBuilder.ArenaMaterialPack mats)
@@ -1190,6 +2212,15 @@ namespace TopDownShooter.Editor
             col.height = 1.15f;
             col.center = new Vector3(0f, 0.575f, 0f);
 
+            MarkNavMeshIgnore(root);
+            var obstacle = root.AddComponent<NavMeshObstacle>();
+            obstacle.shape = NavMeshObstacleShape.Capsule;
+            obstacle.center = new Vector3(0f, 0.575f, 0f);
+            obstacle.radius = 0.46f;
+            obstacle.height = 1.15f;
+            obstacle.carving = true;
+            obstacle.carveOnlyStationary = true;
+
             root.AddComponent<ExplosiveBarrel>();
 
             var parts = new List<ProBuilderMesh>
@@ -1201,6 +2232,7 @@ namespace TopDownShooter.Editor
                 MakeCyl("BungCap", 6, 0.065f, 0.05f, new Vector3(0.14f, 1.14f, 0.10f), mats.Trim),
             };
             var vis = MergeParts(parts, "BarrelVisual", root.transform, castShadows: true, smoothingAngle: DefaultSmoothAngle);
+            AssignTagAndLayerRecursive(root, "Destructible", "Destructible");
             if (vis != null && destructibleLayer >= 0)
             {
                 vis.layer = destructibleLayer;
@@ -1374,12 +2406,47 @@ namespace TopDownShooter.Editor
             primary.ToMesh();
             primary.Refresh();
 
-            var mr = primary.GetComponent<MeshRenderer>();
+            var go = primary.gameObject;
+            var mr = go.GetComponent<MeshRenderer>();
             if (mr != null)
             {
                 mr.shadowCastingMode = castShadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
             }
-            return primary.gameObject;
+
+            var mf = go.GetComponent<MeshFilter>();
+            if (mf != null && mf.sharedMesh != null)
+            {
+                var bakedMesh = Object.Instantiate(mf.sharedMesh);
+                bakedMesh.name = finalName;
+                OptimizeAndCompactMesh(bakedMesh);
+                mf.sharedMesh = bakedMesh;
+            }
+
+            Object.DestroyImmediate(primary);
+
+            if (castShadows && (parent == null || (parent.GetComponent<ExplosiveBarrel>() == null && parent.GetComponent<NavMeshObstacle>() == null)))
+            {
+                GameObjectUtility.SetStaticEditorFlags(go, StaticEditorFlags.BatchingStatic);
+            }
+            return go;
+        }
+
+        private static void OptimizeAndCompactMesh(Mesh m)
+        {
+            if (m == null) return;
+            m.uv2 = null;
+            m.uv3 = null;
+            m.uv4 = null;
+            m.Optimize();
+            UnityEditor.MeshUtility.SetMeshCompression(m, ModelImporterMeshCompression.High);
+        }
+
+        private static void MarkNavMeshIgnore(GameObject go)
+        {
+            if (go == null) return;
+            var mod = go.GetComponent<NavMeshModifier>();
+            if (mod == null) mod = go.AddComponent<NavMeshModifier>();
+            mod.ignoreFromBuild = true;
         }
     }
 }

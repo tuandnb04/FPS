@@ -12,8 +12,8 @@ using UnityEngine.SceneManagement;
 namespace Core
 {
     /// <summary>
-    /// Authoritative game state coordinator driving Title <-> Armory, Playing <-> LevelUpDraft,
-    /// Cutscenes, Paused, Ended, and Multi-Scene Mission Transitions across all 3 campaign acts.
+    /// Authoritative game state coordinator driving Title <-> Armory, Playing,
+    /// Cutscenes, Paused, Ended, and Multi-Scene Mission Transitions across all 4 campaign acts.
     /// </summary>
     public sealed class GameManager : MonoBehaviour
     {
@@ -68,6 +68,7 @@ namespace Core
                 return Mathf.Clamp(spawner.MissionIndex, 1, StoryDirector.CampaignMissionCount);
             }
             var sceneName = SceneManager.GetActiveScene().name;
+            if (sceneName.Contains("Mission05", StringComparison.OrdinalIgnoreCase)) return 5;
             if (sceneName.Contains("Mission04", StringComparison.OrdinalIgnoreCase)) return 4;
             if (sceneName.Contains("Mission03", StringComparison.OrdinalIgnoreCase)) return 3;
             if (sceneName.Contains("Mission02", StringComparison.OrdinalIgnoreCase)) return 2;
@@ -134,8 +135,12 @@ namespace Core
                     CutsceneDirector.Instance?.SkipCurrentCutscene();
                     break;
                 case GameState.Title:
+                    if (UIManager.Instance != null && UIManager.Instance.IsIntelOpen)
+                    {
+                        UIManager.Instance.CloseIntel();
+                    }
+                    break;
                 case GameState.Ended:
-                case GameState.LevelUpDraft:
                 case GameState.Decision:
                     break;
                 default:
@@ -262,6 +267,7 @@ namespace Core
             AudioManager.Instance?.SetPausedDucking(false);
             FeelManager.Instance?.CancelHitStop();
             FeelManager.Instance?.ClearAllFloatingText();
+            VFXManager.Instance?.ClearAllActiveParticles();
             CutsceneDirector.Instance?.ResetCampaignProps();
             EnemySpawner.Instance?.ResetAndClearAll();
             PlayerController.Instance?.ResetPlayer();
@@ -310,18 +316,6 @@ namespace Core
                 }
                 onComplete?.Invoke();
             });
-        }
-
-        public void SelectDraftSkill(RogueliteSkillId skill)
-        {
-            if (CurrentState != GameState.LevelUpDraft) return;
-            AudioManager.Instance?.PlayUIClick();
-            AudioManager.Instance?.SetPausedDucking(false);
-
-            PlayerController.Instance?.ApplyRogueliteSkill(skill);
-            Time.timeScale = 1f;
-            CurrentState = GameState.Playing;
-            UIManager.Instance?.TransitionToState(GameState.Playing);
         }
 
         public void SetPaused(bool paused)

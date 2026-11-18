@@ -33,8 +33,6 @@ namespace Core
         public static readonly Color HitmarkerWhite = FromHex("#F6F5F0");     // Ballistic Hitmarker White
         public static readonly Color HitmarkerCrimson = FromHex("#FF3B30");   // Fatal Kill Hitmarker Red
         public static readonly Color DmzRidgeEarth = FromHex("#3A4738");      // Blackcrest Alpine Ridge Earth
-        public static readonly Color DmzSlateRock = FromHex("#8C96A0");       // Alpine Slate Granite
-        public static readonly Color DmzPineFoliage = FromHex("#EDF4EA");     // Clean Neutral Multiply for Foliage Vertex Colors
         public static readonly Color RoadAsphalt = FromHex("#2E3337");        // Textureless Matte Tarmac Convoy Road
 
         // Multi-Mission Environment & Weather Palettes
@@ -62,7 +60,6 @@ namespace Core
         public static readonly Color MutedText = WithAlpha(CharacterSecondary, 0.72f);
         public static readonly Color ScrimDark = WithAlpha(Shadow, 0.80f);
         public static readonly Color PanelSurface = WithAlpha(FromHex("#15191C"), 0.93f);
-        public static readonly Color PanelBorder = WithAlpha(Props, 0.88f);
         public static readonly Color ButtonTintIdle = FromHex("#FFFFFF");
         public static readonly Color ButtonTintHover = FromHex("#FFF0CF");
         public static readonly Color SecondaryButtonBg = FromHex("#272D2B");
@@ -77,7 +74,6 @@ namespace Core
         public static readonly Color DamageBloodRed = FromHex("#A31419");    // Critical Damage Vignette
         public static readonly Color C4Amber = FromHex("#F2A72E");           // C4 Sabotage Objective Amber
         public static readonly Color RadarGreen = FromHex("#45CC73");        // Extraction LZ & Sweep Green
-        public static readonly Color HudDarkGlass = WithAlpha(FromHex("#101417"), 0.90f);
         public static readonly Color Transparent = new(0f, 0f, 0f, 0f);
         private static readonly int BaseColor = Shader.PropertyToID("_BaseColor");
         private static readonly int Smoothness = Shader.PropertyToID("_Smoothness");

@@ -59,15 +59,6 @@ namespace Core
             return 1f + c3 * tm1 * tm1 * tm1 + c1 * tm1 * tm1;
         }
 
-        public static float OutElastic(float t)
-        {
-            t = Mathf.Clamp01(t);
-            if (t <= 0f) return 0f;
-            if (t >= 1f) return 1f;
-            const float c4 = (2f * Mathf.PI) / 3f;
-            return Mathf.Pow(2f, -10f * t) * Mathf.Sin((t * 10f - 0.75f) * c4) + 1f;
-        }
-
         /// <summary>
         /// Tweens 0..1 over duration seconds. Runs on unscaled time by default so UI/shell
         /// transitions keep animating when Time.timeScale == 0.

@@ -1,5 +1,7 @@
 {
   "dependencies": {
+    "com.fluid.behavior-tree": "https://github.com/ashblue/fluid-behavior-tree.git?path=Assets/com.fluid.behavior-tree#v2.3.0",
+    "com.unity.ai.navigation": "2.0.16",
     "com.unity.cinemachine": "6.6.0",
     "com.unity.collab-proxy": "2.14.0",
     "com.unity.ide.rider": "3.1.0",

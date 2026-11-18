@@ -97,6 +97,7 @@ namespace Combat
             var center = transform.position + Vector3.up * 0.6f;
             VFXManager.Instance?.Play(VfxKind.EnemyDeath, center, Palette.RocketOrange);
             VFXManager.Instance?.Play(VfxKind.LevelUpNova, center, Palette.C4Amber);
+            VFXManager.Instance?.SpawnScorchMark(transform.position, explosionRadius * 0.72f);
             AudioManager.Instance?.PlayEnemyExplode();
             FeelManager.Instance?.TriggerCameraShake(0.48f);
             FeelManager.Instance?.SpawnFloatingText(center + Vector3.up * 0.5f, "FUEL DETONATION!", Palette.RocketOrange);

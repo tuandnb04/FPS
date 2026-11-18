@@ -12,7 +12,8 @@ namespace Feel
         HitSpark,
         EnemyDeath,
         PickupBurst,
-        LevelUpNova
+        LevelUpNova,
+        RocketSmoke
     }
 
     /// <summary>
@@ -35,7 +36,22 @@ namespace Feel
                 _ps = ps;
             }
 
+            private void Update()
+            {
+                if (!isLeased || _pool == null || _ps == null) return;
+                if (!_ps.IsAlive(true))
+                {
+                    isLeased = false;
+                    _pool.Release(_ps);
+                }
+            }
+
             private void OnParticleSystemStopped()
+            {
+                ForceReturnToPool();
+            }
+
+            public void ForceReturnToPool()
             {
                 if (!isLeased || _pool == null || _ps == null) return;
                 isLeased = false;
@@ -43,10 +59,38 @@ namespace Feel
             }
         }
 
+        private struct ScorchEntry
+        {
+            public GameObject Go;
+            public MeshRenderer Renderer;
+            public float Elapsed;
+            public float Duration;
+            public float BaseScale;
+        }
+
+        private struct ShockwaveEntry
+        {
+            public GameObject Go;
+            public MeshRenderer Renderer;
+            public float Elapsed;
+            public float Duration;
+            public float MaxScale;
+            public Color BaseColor;
+        }
+
         [SerializeField] private Transform poolRoot;
         private Material _particleMaterial;
+        private Material _scorchMaterial;
+        private Material _shockwaveMaterial;
         private readonly Dictionary<VfxKind, ObjectPool<ParticleSystem>> _pools = new();
         private readonly Dictionary<ParticleSystem, PooledParticleReturner> _returners = new();
+        private readonly List<ParticleSystem> _activeLeased = new(64);
+        private readonly List<ScorchEntry> _scorchDecals = new(24);
+        private readonly List<ShockwaveEntry> _shockwaveRings = new(12);
+        private readonly Stack<ScorchEntry> _scorchPool = new(24);
+        private readonly Stack<ShockwaveEntry> _shockwavePool = new(12);
+        private MaterialPropertyBlock _decalMpb;
+        private static readonly int ColorId = Shader.PropertyToID("_Color");
         private ParticleSystem _ambientMotes;
 
         public Transform PoolRoot => poolRoot;
@@ -73,8 +117,71 @@ namespace Feel
             }
 
             _particleMaterial = Palette.CreateParticleMaterial(UISpriteFactory.GetSoftParticleTexture());
+            _scorchMaterial = Palette.CreateParticleMaterial("Mat_ScorchDecalRuntime", UISpriteFactory.GetSoftParticleTexture());
+            _shockwaveMaterial = Palette.CreateParticleMaterial("Mat_ShockwaveRingRuntime", UISpriteFactory.GetTelegraphRingTexture());
             InitializePools();
             EnsureAmbientMotes();
+        }
+
+        private void Update()
+        {
+            var dt = Time.deltaTime;
+            if (dt <= 0f) return;
+            _decalMpb ??= new MaterialPropertyBlock();
+
+            for (var i = _scorchDecals.Count - 1; i >= 0; i--)
+            {
+                var entry = _scorchDecals[i];
+                if (entry.Go == null)
+                {
+                    _scorchDecals.RemoveAt(i);
+                    continue;
+                }
+                entry.Elapsed += dt;
+                if (entry.Elapsed >= entry.Duration)
+                {
+                    RecycleScorchAt(i);
+                    continue;
+                }
+                var t = entry.Elapsed / entry.Duration;
+                var alpha = t < 0.72f ? 0.68f : Mathf.Lerp(0.68f, 0f, (t - 0.72f) / 0.28f);
+                if (entry.Renderer != null)
+                {
+                    entry.Renderer.GetPropertyBlock(_decalMpb);
+                    _decalMpb.SetColor(ColorId, new Color(0.05f, 0.05f, 0.06f, alpha));
+                    entry.Renderer.SetPropertyBlock(_decalMpb);
+                }
+                _scorchDecals[i] = entry;
+            }
+
+            for (var i = _shockwaveRings.Count - 1; i >= 0; i--)
+            {
+                var ring = _shockwaveRings[i];
+                if (ring.Go == null)
+                {
+                    _shockwaveRings.RemoveAt(i);
+                    continue;
+                }
+                ring.Elapsed += dt;
+                if (ring.Elapsed >= ring.Duration)
+                {
+                    RecycleShockwaveAt(i);
+                    continue;
+                }
+                var t = Mathf.Clamp01(ring.Elapsed / ring.Duration);
+                var easeOut = 1f - (1f - t) * (1f - t);
+                var s = Mathf.Lerp(0.45f, ring.MaxScale, easeOut);
+                ring.Go.transform.localScale = new Vector3(s, s, 1f);
+                if (ring.Renderer != null)
+                {
+                    var col = ring.BaseColor;
+                    col.a = Mathf.Lerp(0.92f, 0f, t);
+                    ring.Renderer.GetPropertyBlock(_decalMpb);
+                    _decalMpb.SetColor(ColorId, col);
+                    ring.Renderer.SetPropertyBlock(_decalMpb);
+                }
+                _shockwaveRings[i] = ring;
+            }
         }
 
         private void OnDestroy()
@@ -87,11 +194,12 @@ namespace Feel
 
         private void InitializePools()
         {
-            CreatePool(VfxKind.MuzzleFlash, 8, 24, 0.28f, Palette.Accent, 0.35f, 10, 4.5f);
+            CreatePool(VfxKind.MuzzleFlash, 8, 24, 0.16f, Palette.Accent, 0.22f, 8, 3.6f);
             CreatePool(VfxKind.HitSpark, 12, 32, 0.35f, Palette.CyanGlow, 0.28f, 12, 6.0f);
             CreatePool(VfxKind.EnemyDeath, 10, 28, 0.55f, Palette.EnemySecondary, 0.45f, 22, 8.0f);
             CreatePool(VfxKind.PickupBurst, 10, 28, 0.42f, Palette.HealthGreen, 0.30f, 14, 5.0f);
             CreatePool(VfxKind.LevelUpNova, 4, 8, 0.72f, Palette.Accent, 0.55f, 36, 9.5f);
+            CreatePool(VfxKind.RocketSmoke, 14, 48, 0.38f, new Color(0.76f, 0.78f, 0.82f, 0.82f), 0.34f, 4, 1.35f);
         }
 
         private void CreatePool(
@@ -104,12 +212,13 @@ namespace Feel
             int burstCount,
             float speed)
         {
-            var pool = new ObjectPool<ParticleSystem>(
+            ObjectPool<ParticleSystem> pool = null;
+            pool = new ObjectPool<ParticleSystem>(
                 createFunc: () =>
                 {
                     var ps = BuildParticleSystem(kind, lifetime, baseColor, startSize, burstCount, speed);
                     var ret = ps.gameObject.AddComponent<PooledParticleReturner>();
-                    ret.Bind(null, ps);
+                    ret.Bind(pool, ps);
                     _returners[ps] = ret;
                     return ps;
                 },
@@ -117,6 +226,7 @@ namespace Feel
                 actionOnRelease: ps =>
                 {
                     if (_returners.TryGetValue(ps, out var ret)) ret.isLeased = false;
+                    _activeLeased.Remove(ps);
                     ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
                     ps.gameObject.SetActive(false);
                 },
@@ -161,12 +271,13 @@ namespace Feel
             main.playOnAwake = false;
             main.loop = false;
             main.stopAction = ParticleSystemStopAction.Callback;
+            main.cullingMode = ParticleSystemCullingMode.AlwaysSimulate;
             main.duration = lifetime;
             main.startLifetime = new ParticleSystem.MinMaxCurve(lifetime * 0.65f, lifetime);
             main.startSpeed = new ParticleSystem.MinMaxCurve(speed * 0.45f, speed);
             main.startSize = new ParticleSystem.MinMaxCurve(startSize * 0.6f, startSize);
             main.startColor = new ParticleSystem.MinMaxGradient(baseColor, Palette.Lerp(baseColor, Palette.CharacterPrimary, 0.35f));
-            main.gravityModifier = 0.08f;
+            main.gravityModifier = kind == VfxKind.RocketSmoke ? -0.16f : 0.08f;
             main.simulationSpace = ParticleSystemSimulationSpace.World;
             main.maxParticles = burstCount + 8;
 
@@ -178,7 +289,7 @@ namespace Feel
             var shape = ps.shape;
             shape.enabled = true;
             shape.shapeType = kind == VfxKind.LevelUpNova ? ParticleSystemShapeType.Circle : ParticleSystemShapeType.Sphere;
-            shape.radius = kind == VfxKind.LevelUpNova ? 0.55f : 0.16f;
+            shape.radius = kind == VfxKind.LevelUpNova ? 0.55f : (kind == VfxKind.MuzzleFlash ? 0.035f : (kind == VfxKind.RocketSmoke ? 0.08f : 0.16f));
             if (kind == VfxKind.LevelUpNova)
             {
                 shape.rotation = new Vector3(90f, 0f, 0f);
@@ -257,8 +368,158 @@ namespace Feel
             {
                 ret.isLeased = true;
             }
+            if (!_activeLeased.Contains(ps))
+            {
+                _activeLeased.Add(ps);
+            }
             ps.Clear(true);
             ps.Play(true);
+        }
+
+        private (GameObject go, MeshRenderer renderer) CreateQuadRenderer(string quadName, Material sharedMat)
+        {
+            var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            quad.name = quadName;
+            quad.transform.SetParent(poolRoot, false);
+            var col = quad.GetComponent<Collider>();
+            if (col != null) Destroy(col);
+            var mr = quad.GetComponent<MeshRenderer>();
+            if (mr != null)
+            {
+                mr.sharedMaterial = sharedMat;
+                mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                mr.receiveShadows = false;
+            }
+            return (quad, mr);
+        }
+
+        private void RecycleScorchAt(int idx)
+        {
+            var entry = _scorchDecals[idx];
+            _scorchDecals.RemoveAt(idx);
+            if (entry.Go == null) return;
+            entry.Go.SetActive(false);
+            _scorchPool.Push(entry);
+        }
+
+        private void RecycleShockwaveAt(int idx)
+        {
+            var entry = _shockwaveRings[idx];
+            _shockwaveRings.RemoveAt(idx);
+            if (entry.Go == null) return;
+            entry.Go.SetActive(false);
+            _shockwavePool.Push(entry);
+        }
+
+        public void SpawnScorchMark(Vector3 worldPos, float radius = 2.2f)
+        {
+            if (poolRoot == null) return;
+            var r = Mathf.Clamp(radius, 0.9f, 5.2f);
+            if (_scorchDecals.Count >= 22)
+            {
+                RecycleScorchAt(0);
+            }
+
+            ScorchEntry entry;
+            if (_scorchPool.Count > 0)
+            {
+                entry = _scorchPool.Pop();
+                if (entry.Go == null)
+                {
+                    var created = CreateQuadRenderer("FX_ScorchDecal", _scorchMaterial);
+                    entry.Go = created.go;
+                    entry.Renderer = created.renderer;
+                }
+                entry.Go.SetActive(true);
+            }
+            else
+            {
+                var created = CreateQuadRenderer("FX_ScorchDecal", _scorchMaterial);
+                entry = new ScorchEntry { Go = created.go, Renderer = created.renderer };
+            }
+
+            entry.Go.transform.position = new Vector3(worldPos.x, 0.022f, worldPos.z);
+            entry.Go.transform.rotation = Quaternion.Euler(90f, UnityEngine.Random.Range(0f, 360f), 0f);
+            entry.Go.transform.localScale = new Vector3(r * 2f, r * 2f, 1f);
+            entry.Elapsed = 0f;
+            entry.Duration = 11.5f;
+            entry.BaseScale = r * 2f;
+
+            if (entry.Renderer != null)
+            {
+                _decalMpb ??= new MaterialPropertyBlock();
+                _decalMpb.SetColor(ColorId, new Color(0.05f, 0.05f, 0.06f, 0.68f));
+                entry.Renderer.SetPropertyBlock(_decalMpb);
+            }
+            _scorchDecals.Add(entry);
+
+            SpawnShockwaveRing(worldPos, r * 2.5f, Palette.C4Amber);
+        }
+
+        public void SpawnShockwaveRing(Vector3 worldPos, float maxDiameter, Color ringColor)
+        {
+            if (poolRoot == null) return;
+            if (_shockwaveRings.Count >= 10)
+            {
+                RecycleShockwaveAt(0);
+            }
+
+            ShockwaveEntry entry;
+            if (_shockwavePool.Count > 0)
+            {
+                entry = _shockwavePool.Pop();
+                if (entry.Go == null)
+                {
+                    var created = CreateQuadRenderer("FX_ShockwaveRing", _shockwaveMaterial);
+                    entry.Go = created.go;
+                    entry.Renderer = created.renderer;
+                }
+                entry.Go.SetActive(true);
+            }
+            else
+            {
+                var created = CreateQuadRenderer("FX_ShockwaveRing", _shockwaveMaterial);
+                entry = new ShockwaveEntry { Go = created.go, Renderer = created.renderer };
+            }
+
+            entry.Go.transform.position = new Vector3(worldPos.x, 0.055f, worldPos.z);
+            entry.Go.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            entry.Go.transform.localScale = new Vector3(0.45f, 0.45f, 1f);
+            entry.Elapsed = 0f;
+            entry.Duration = 0.24f;
+            entry.MaxScale = Mathf.Max(1.8f, maxDiameter);
+            entry.BaseColor = ringColor;
+
+            if (entry.Renderer != null)
+            {
+                _decalMpb ??= new MaterialPropertyBlock();
+                _decalMpb.SetColor(ColorId, ringColor);
+                entry.Renderer.SetPropertyBlock(_decalMpb);
+            }
+            _shockwaveRings.Add(entry);
+        }
+
+        public void ClearAllActiveParticles()
+        {
+            for (var i = _activeLeased.Count - 1; i >= 0; i--)
+            {
+                var ps = _activeLeased[i];
+                if (ps != null && _returners.TryGetValue(ps, out var ret) && ret != null)
+                {
+                    ret.ForceReturnToPool();
+                }
+            }
+            _activeLeased.Clear();
+
+            for (var i = _scorchDecals.Count - 1; i >= 0; i--)
+            {
+                RecycleScorchAt(i);
+            }
+
+            for (var i = _shockwaveRings.Count - 1; i >= 0; i--)
+            {
+                RecycleShockwaveAt(i);
+            }
         }
     }
 }

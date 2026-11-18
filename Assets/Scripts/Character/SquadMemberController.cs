@@ -1,11 +1,15 @@
-using System;
+using AI;
 using Audio;
+using CleverCrow.Fluid.BTs.Tasks;
+using CleverCrow.Fluid.BTs.Trees;
 using Core;
 using Enemies;
 using Feel;
 using UI;
 using UnityEngine;
+using UnityEngine.AI;
 using UnityEngine.InputSystem;
+using UnityEngine.Serialization;
 
 namespace Character
 {
@@ -24,30 +28,54 @@ namespace Character
     }
 
     /// <summary>
-    /// AI-controlled Vanguard-09 squadmate with two-hand weapon IK, cover line-of-sight awareness,
-    /// player muzzle-lane avoidance, 20-second critical bleedout requiring manual stabilization or Trauma Kit,
-    /// and irreversible K.I.A. permadeath synced to SaveManager.
+    /// AI-controlled Vanguard-09 squadmate driven by NavMeshAgent pathfinding and Fluid Behavior Tree:
+    /// two-hand weapon IK, tactical cover seeking on critical trauma, LoS flanking around cover,
+    /// player muzzle-lane avoidance, 20s bleedout stabilization, and irreversible K.I.A. permadeath.
     /// </summary>
     public sealed class SquadMemberController : MonoBehaviour
     {
-        private CharacterController _controller;
         private ProceduralCharacterMotion _characterMotion;
         private MeshRenderer[] _bodyRenderers;
         private Transform _visualRoot;
         private Transform _muzzleTip;
+        [FormerlySerializedAs("_ejectionPort")] [SerializeField] private Transform ejectionPort;
+
+        private BehaviorTree _behaviorTree;
+        private EnemyController _targetEnemy;
+        private Vector3 _activeDestination;
+        private Vector3 _lastIssuedDest;
+        private Vector3 _cachedCoverPos;
+        private bool _hasCachedCover;
+        private float _coverRefreshTimer;
+        private float _repathTimer;
+        private float _frameDt;
+        private bool _isSettledAtAnchor;
 
         private Vector3 _formationOffset = new(-2.3f, 0f, -0.9f);
         private Vector3 _holdAnchorWorld;
         private bool _hasHoldAnchor;
+        private bool _showingStabilizePrompt;
 
         private float _timeSinceLastHit = 10f;
         private float _fireCooldown;
         private int _burstRemaining;
         private float _burstTimer;
+        private int _clipCapacity = 18;
+        private int _ammoInClip = 18;
+        private float _reloadDuration = 1.20f;
+        private float _reloadTimer;
+        [FormerlySerializedAs("_droppedMagMesh")] [SerializeField] private Mesh droppedMagMesh;
+        [FormerlySerializedAs("_droppedMagMat")] [SerializeField] private Material droppedMagMat;
+        [FormerlySerializedAs("_attachedMagVisual")] [SerializeField] private Transform attachedMagVisual;
         private float _hitFlashTimer;
         private float _prevYaw;
 
+        public bool IsReloading => _reloadTimer > 0f;
+        private float ReloadProgress => _reloadDuration > 0.001f ? Mathf.Clamp01(1f - (_reloadTimer / _reloadDuration)) : 1f;
+        public int AmmoInClip => _ammoInClip;
+
         private const float BleedOutMaxSeconds = 20.0f;
+        private static readonly RaycastHit[] LineOfFireBuffer = new RaycastHit[16];
         private MaterialPropertyBlock _mpb;
 
         public SquadRole Role { get; private set; }
@@ -72,20 +100,26 @@ namespace Character
 
         public int ShotsFiredCount { get; private set; }
 
+        public string CurrentBehaviorState { get; private set; } = "INIT";
+
+        public NavMeshAgent NavAgent { get; private set; }
+
         public void InitializeRig(
             SquadRole assignedRole,
-            CharacterController cc,
+            NavMeshAgent agent,
             ProceduralCharacterMotion motion,
             MeshRenderer[] renderers,
             Transform visual,
-            Transform muzzle)
+            Transform muzzle,
+            Transform ejectionPort = null)
         {
             Role = assignedRole;
-            _controller = cc;
+            NavAgent = agent != null ? agent : GetComponent<NavMeshAgent>();
             _characterMotion = motion;
             _bodyRenderers = renderers;
             _visualRoot = visual;
             _muzzleTip = muzzle;
+            this.ejectionPort = ejectionPort;
 
             switch (assignedRole)
             {
@@ -94,12 +128,16 @@ namespace Character
                     RoleTag = "IRONWOOD-1";
                     _formationOffset = new Vector3(-2.35f, 0f, -0.85f);
                     MaxHp = 175f;
+                    _clipCapacity = 18;
+                    _reloadDuration = 1.20f;
                     break;
                 case SquadRole.MarksmanBishop:
                     Callsign = "KOZLOWSKI";
                     RoleTag = "WRAITH-2";
                     _formationOffset = new Vector3(2.65f, 0f, -1.65f);
                     MaxHp = 145f;
+                    _clipCapacity = 8;
+                    _reloadDuration = 1.35f;
                     break;
                 case SquadRole.BreacherTorres:
                 default:
@@ -107,11 +145,68 @@ namespace Character
                     RoleTag = "SPARK-3";
                     _formationOffset = new Vector3(2.05f, 0f, 0.95f);
                     MaxHp = 165f;
+                    _clipCapacity = 16;
+                    _reloadDuration = 1.15f;
                     break;
             }
 
             CurrentHp = MaxHp;
+            _ammoInClip = _clipCapacity;
+            BuildBehaviorTree();
             ResetForMission(transform.position);
+        }
+
+        public void BindDroppedMagazine(Mesh magMesh, Material magMat, Transform attachedMagVisual = null)
+        {
+            droppedMagMesh = magMesh;
+            droppedMagMat = magMat;
+            if (attachedMagVisual != null) this.attachedMagVisual = attachedMagVisual;
+        }
+
+        private void Awake()
+        {
+            if (NavAgent == null) NavAgent = GetComponent<NavMeshAgent>();
+            if (_behaviorTree == null) BuildBehaviorTree();
+        }
+
+        private void BuildBehaviorTree()
+        {
+            _behaviorTree = new BehaviorTreeBuilder(gameObject)
+                .Selector("SquadTacticalRoot")
+                    .Sequence("BleedOut")
+                        .Condition("IsDowned", () => IsDowned)
+                        .Do("StepBleedOut", () =>
+                        {
+                            HaltNavAgent();
+                            _reloadTimer = 0f;
+                            _characterMotion?.SetReloadState(false, 0f);
+                            StepDownedState(PlayerController.Instance, _frameDt);
+                            _characterMotion?.StepMotion(Vector3.zero, 0f, isAimingWeapon: false);
+                            CurrentBehaviorState = "BLEEDOUT";
+                            return TaskStatus.Success;
+                        })
+                    .End()
+                    .Sequence("YieldPlayerMuzzleLane")
+                        .Condition("BlockingPlayerMuzzle", () => TryComputeMuzzleAvoidancePoint(PlayerController.Instance, out _activeDestination))
+                        .Do("SideStepLane", () => ExecuteTacticalMove(_activeDestination, 1.1f, "CLEAR_LANE"))
+                    .End()
+                    .Sequence("TakeCoverCriticalHp")
+                        .Condition("CriticalHpNeedsCover", () => CurrentHp <= MaxHp * 0.42f && _timeSinceLastHit < 3.6f && AcquireCoverCandidate(out _activeDestination))
+                        .Do("SeekTacticalCover", () => ExecuteTacticalMove(_activeDestination, 1.18f, "SEEK_COVER"))
+                    .End()
+                    .Sequence("OrderHoldOverwatch")
+                        .Condition("OrderIsHold", () => GetCurrentOrder() == SquadOrder.Hold && _hasHoldAnchor)
+                        .Do("HoldAnchorOverwatch", () => ExecuteTacticalMove(ClampToUnlockedBounds(_holdAnchorWorld), 1.0f, "HOLD_OVERWATCH"))
+                    .End()
+                    .Sequence("OrderBreachObjective")
+                        .Condition("OrderIsBreach", () => GetCurrentOrder() == SquadOrder.Breach && EnemySpawner.Instance != null)
+                        .Do("BreachPushDestination", () => ExecuteTacticalMove(ComputeBreachDestination(PlayerController.Instance), 1.08f, "BREACH_ASSAULT"))
+                    .End()
+                    .Sequence("DefaultFollowSupport")
+                        .Do("DiamondSupportAndFlank", () => ExecuteTacticalMove(ComputeFollowOrFlankDestination(PlayerController.Instance), 1.0f, "FOLLOW_SUPPORT"))
+                    .End()
+                .End()
+                .Build();
         }
 
         public void ResetForMission(Vector3 spawnPos)
@@ -125,9 +220,17 @@ namespace Character
             _fireCooldown = 0.25f + (int)Role * 0.14f;
             _burstRemaining = 0;
             _burstTimer = 0f;
+            _ammoInClip = _clipCapacity;
+            _reloadTimer = 0f;
+            _characterMotion?.SetReloadState(false, 0f);
             _hitFlashTimer = 0f;
             _hasHoldAnchor = false;
+            _hasCachedCover = false;
+            _coverRefreshTimer = UnityEngine.Random.Range(0f, 0.25f);
+            _repathTimer = UnityEngine.Random.Range(0f, 0.14f);
+            _isSettledAtAnchor = false;
             ShotsFiredCount = 0;
+            CurrentBehaviorState = "READY";
             gameObject.SetActive(true);
             SetVisualCrouch(false);
             ApplyHitFlash(0f);
@@ -137,12 +240,14 @@ namespace Character
 
         public void ApplyPreexistingKiaState()
         {
+            HaltNavAgent();
             IsDowned = false;
             IsKia = true;
             BleedOutRemaining = 0f;
             StabilizeProgress = 0f;
             CurrentHp = 0f;
             _burstRemaining = 0;
+            CurrentBehaviorState = "KIA";
             gameObject.SetActive(false);
         }
 
@@ -154,7 +259,9 @@ namespace Character
             StabilizeProgress = 0f;
             CurrentHp = MaxHp * 0.65f;
             _timeSinceLastHit = 4f;
+            _hasCachedCover = false;
             SetVisualCrouch(false);
+            ResumeNavAgent();
             FeelManager.Instance?.SpawnFloatingText(transform.position + Vector3.up * 0.85f, Callsign + " STABILIZED", Palette.HealthGreen);
             AudioManager.Instance?.PlayPickupBlip();
             return true;
@@ -162,16 +269,24 @@ namespace Character
 
         public void Teleport(Vector3 pos, Quaternion rot)
         {
-            if (_controller != null)
+            transform.rotation = rot;
+            if (NavAgent != null && NavAgent.enabled)
             {
-                _controller.enabled = false;
-                transform.SetPositionAndRotation(pos, rot);
-                _controller.enabled = true;
+                if (!TacticalNavigationUtility.EnsureAgentOnNavMesh(NavAgent, pos, 8f))
+                {
+                    transform.SetPositionAndRotation(pos, rot);
+                }
+                else if (NavAgent.isOnNavMesh)
+                {
+                    NavAgent.ResetPath();
+                    NavAgent.velocity = Vector3.zero;
+                }
             }
             else
             {
                 transform.SetPositionAndRotation(pos, rot);
             }
+            _lastIssuedDest = transform.position;
             _prevYaw = transform.eulerAngles.y;
         }
 
@@ -201,6 +316,7 @@ namespace Character
             BleedOutRemaining = BleedOutMaxSeconds;
             StabilizeProgress = 0f;
             _burstRemaining = 0;
+            HaltNavAgent();
             SetVisualCrouch(true);
             StoryDirector.NotifySquadDowned(Callsign);
             UIManager.Instance?.TriggerThreatWarning($"!! TRAUMA: {RoleTag} BLEEDING OUT — STABILIZE ({Mathf.RoundToInt(BleedOutMaxSeconds)}S) !!", 2.5f);
@@ -213,12 +329,16 @@ namespace Character
             if (IsKia) return;
             if (GameManager.Instance == null || GameManager.Instance.CurrentState != GameState.Playing)
             {
+                HaltNavAgent();
                 _characterMotion?.StepMotion(Vector3.zero, 0f, isAimingWeapon: true);
                 return;
             }
 
             var dt = Time.deltaTime;
             if (dt <= 0f) return;
+            _frameDt = dt;
+            _repathTimer -= dt;
+            _coverRefreshTimer -= dt;
 
             if (_hitFlashTimer > 0f)
             {
@@ -226,86 +346,131 @@ namespace Character
                 ApplyHitFlash(Mathf.Clamp01(_hitFlashTimer / 0.12f));
             }
 
-            var player = PlayerController.Instance;
-            if (IsDowned)
+            if (!IsDowned)
             {
-                StepDownedState(player, dt);
-                _characterMotion?.StepMotion(Vector3.zero, 0f, isAimingWeapon: false);
-                return;
-            }
-
-            // Out-of-combat CoD health regeneration
-            _timeSinceLastHit += dt;
-            if (_timeSinceLastHit >= 3.6f && CurrentHp < MaxHp)
-            {
-                CurrentHp = Mathf.Min(MaxHp, CurrentHp + 18f * dt);
-            }
-
-            var targetEnemy = AcquireTargetEnemy();
-            var desiredAnchor = ComputeDesiredAnchor(player);
-
-            var toAnchor = desiredAnchor - transform.position;
-            toAnchor.y = 0f;
-            var velocity = Vector3.zero;
-            var moveSpeed = Role == SquadRole.BreacherTorres ? 5.65f : (Role == SquadRole.SquadLeadHayes ? 5.45f : 5.15f);
-
-            var anchorDist = toAnchor.magnitude;
-            if (anchorDist > 0.65f)
-            {
-                var speedScale = Mathf.Clamp01((anchorDist - 0.55f) / 1.4f);
-                if (anchorDist > 6.5f) speedScale = 1.15f;
-                velocity = toAnchor.normalized * (moveSpeed * speedScale);
-            }
-
-            // Avoid lingering inside player's immediate line of fire
-            if (player != null && !player.IsDead)
-            {
-                var fromPlayer = transform.position - player.transform.position;
-                fromPlayer.y = 0f;
-                var pDist = fromPlayer.magnitude;
-                if (pDist is < 3.4f and > 0.05f)
+                // Out-of-combat CoD health regeneration
+                _timeSinceLastHit += dt;
+                if (_timeSinceLastHit >= 3.6f && CurrentHp < MaxHp)
                 {
-                    var aimFwd = player.transform.forward;
-                    aimFwd.y = 0f;
-                    aimFwd.Normalize();
-                    var proj = Vector3.Dot(fromPlayer, aimFwd);
-                    if (proj > 0.1f)
+                    CurrentHp = Mathf.Min(MaxHp, CurrentHp + 18f * dt);
+                }
+
+                _targetEnemy = AcquireTargetEnemy();
+            }
+
+            _behaviorTree?.Tick();
+        }
+
+        private TaskStatus ExecuteTacticalMove(Vector3 desiredDest, float speedMultiplier, string stateName)
+        {
+            CurrentBehaviorState = stateName;
+            var baseSpeed = GetBaseMoveSpeed();
+            var toDest = desiredDest - transform.position;
+            toDest.y = 0f;
+            var dist = toDest.magnitude;
+            if (dist > 6.5f) speedMultiplier = Mathf.Max(speedMultiplier, 1.15f);
+
+            var velocity = DriveNavigationTo(desiredDest, baseSpeed * speedMultiplier, _frameDt);
+            StepFacingAndWeapon(_targetEnemy, PlayerController.Instance, velocity, _frameDt);
+            return TaskStatus.Success;
+        }
+
+        private float GetBaseMoveSpeed()
+        {
+            return Role == SquadRole.BreacherTorres ? 5.65f : (Role == SquadRole.SquadLeadHayes ? 5.45f : 5.15f);
+        }
+
+        private Vector3 DriveNavigationTo(Vector3 destination, float targetSpeed, float dt)
+        {
+            destination = ClampToUnlockedBounds(destination);
+
+            if (NavAgent != null && NavAgent.enabled)
+            {
+                if (!NavAgent.isOnNavMesh)
+                {
+                    TacticalNavigationUtility.EnsureAgentOnNavMesh(NavAgent, transform.position, 6f);
+                }
+
+                if (NavAgent.isOnNavMesh)
+                {
+                    NavAgent.isStopped = false;
+                    NavAgent.speed = targetSpeed;
+
+                    var delta = destination - transform.position;
+                    delta.y = 0f;
+                    var distToGoal = delta.magnitude;
+                    var stopThreshold = _isSettledAtAnchor ? 0.72f : 0.45f;
+                    if (distToGoal <= stopThreshold)
                     {
-                        var side = Vector3.Dot(fromPlayer, player.transform.right);
-                        if (Mathf.Abs(side) < 1.05f)
-                        {
-                            var dodgeSide = player.transform.right * (side >= 0f ? 1f : -1f);
-                            velocity += dodgeSide * 3.4f;
-                        }
+                        _isSettledAtAnchor = true;
+                        if (NavAgent.hasPath) NavAgent.ResetPath();
+                        return Vector3.zero;
                     }
+                    _isSettledAtAnchor = false;
+
+                    if (_repathTimer <= 0f || Vector3.Distance(_lastIssuedDest, destination) > 0.55f || !NavAgent.hasPath)
+                    {
+                        var navTarget = TacticalNavigationUtility.TryGetReachablePoint(transform.position, destination, out var reachable, 4.5f)
+                            ? reachable
+                            : destination;
+                        NavAgent.SetDestination(navTarget);
+                        _lastIssuedDest = destination;
+                        _repathTimer = 0.14f;
+                    }
+
+                    return NavAgent.velocity;
                 }
             }
 
-            if (velocity.sqrMagnitude > 0.01f)
+            // Direct kinematic fallback for unbaked synthetic test scenes
+            var toAnchor = destination - transform.position;
+            toAnchor.y = 0f;
+            if (toAnchor.magnitude <= 0.55f) return Vector3.zero;
+
+            var vel = toAnchor.normalized * targetSpeed;
+            var clamped = ClampToUnlockedBounds(transform.position + vel * dt);
+            var safeVel = (clamped - transform.position) / Mathf.Max(0.001f, dt);
+            transform.position = clamped;
+            return safeVel;
+        }
+
+        private void HaltNavAgent()
+        {
+            if (NavAgent == null || !NavAgent.enabled || !NavAgent.isOnNavMesh) return;
+            NavAgent.isStopped = true;
+            if (NavAgent.hasPath) NavAgent.ResetPath();
+            NavAgent.velocity = Vector3.zero;
+        }
+
+        private void ResumeNavAgent()
+        {
+            if (NavAgent != null && NavAgent.enabled && NavAgent.isOnNavMesh)
             {
-                var clampedStep = ClampToUnlockedBounds(transform.position + velocity * dt) - transform.position;
-                var safeVel = clampedStep / Mathf.Max(0.001f, dt);
-                if (_controller != null && _controller.enabled)
-                {
-                    _controller.Move((safeVel + Vector3.down * 5f) * dt);
-                }
-                else
-                {
-                    transform.position += safeVel * dt;
-                }
-                velocity = safeVel;
+                NavAgent.isStopped = false;
             }
+        }
 
-            // Aiming + Weapon Firing
+        private Vector3 ComputeBarrelAimDirection(Vector3 targetWorldPos)
+        {
+            var centerToTarget = targetWorldPos - transform.position;
+            centerToTarget.y = 0f;
+            var dist = centerToTarget.magnitude;
+            if (dist < 0.05f) return transform.forward;
+
+            var lateralOffset = _muzzleTip != null ? transform.InverseTransformPoint(_muzzleTip.position).x : 0.11f;
+            var bearingRad = Mathf.Atan2(centerToTarget.x, centerToTarget.z);
+            if (!(dist > Mathf.Abs(lateralOffset) + 0.06f)) return centerToTarget / dist;
+            var parallaxRad = Mathf.Asin(Mathf.Clamp(lateralOffset / dist, -0.92f, 0.92f));
+            var correctedRad = bearingRad - parallaxRad;
+            return new Vector3(Mathf.Sin(correctedRad), 0f, Mathf.Cos(correctedRad));
+        }
+
+        private void StepFacingAndWeapon(EnemyController targetEnemy, PlayerController player, Vector3 velocity, float dt)
+        {
             var lookDir = velocity.sqrMagnitude > 0.25f ? velocity.normalized : transform.forward;
             if (targetEnemy != null)
             {
-                var toTarget = targetEnemy.transform.position - transform.position;
-                toTarget.y = 0f;
-                if (toTarget.sqrMagnitude > 0.02f)
-                {
-                    lookDir = toTarget.normalized;
-                }
+                lookDir = ComputeBarrelAimDirection(targetEnemy.transform.position);
             }
             else if (player != null)
             {
@@ -317,15 +482,139 @@ namespace Character
             if (lookDir.sqrMagnitude > 0.001f)
             {
                 var targetRot = Quaternion.LookRotation(lookDir, Vector3.up);
-                transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, 1f - Mathf.Exp(-14f * dt));
+                transform.rotation = targetEnemy != null
+                    ? targetRot
+                    : Quaternion.Slerp(transform.rotation, targetRot, 1f - Mathf.Exp(-14f * dt));
             }
 
             var currentYaw = transform.eulerAngles.y;
             var yawRate = Mathf.DeltaAngle(_prevYaw, currentYaw) / Mathf.Max(0.001f, dt);
             _prevYaw = currentYaw;
 
+            if (_reloadTimer > 0f)
+            {
+                _reloadTimer = Mathf.Max(0f, _reloadTimer - dt);
+                if (_reloadTimer <= 0f)
+                {
+                    _ammoInClip = _clipCapacity;
+                    _characterMotion?.SetReloadState(false, 0f);
+                }
+                else
+                {
+                    _characterMotion?.SetReloadState(true, ReloadProgress);
+                }
+            }
+
+            var isAimingDownSights = targetEnemy != null && velocity.sqrMagnitude < 1.25f;
+            _characterMotion?.SetAimDownSightsState(isAimingDownSights);
             _characterMotion?.StepMotion(velocity, yawRate, isAimingWeapon: true);
             StepCombatFire(targetEnemy, dt);
+        }
+
+        private bool TryComputeMuzzleAvoidancePoint(PlayerController player, out Vector3 escapePoint)
+        {
+            escapePoint = transform.position;
+            if (player == null || player.IsDead) return false;
+
+            var fromPlayer = transform.position - player.transform.position;
+            fromPlayer.y = 0f;
+            var pDist = fromPlayer.magnitude;
+            if (pDist is >= 3.4f or <= 0.05f) return false;
+
+            var aimFwd = player.transform.forward;
+            aimFwd.y = 0f;
+            if (aimFwd.sqrMagnitude < 0.001f) return false;
+            aimFwd.Normalize();
+
+            if (Vector3.Dot(fromPlayer, aimFwd) <= 0.1f) return false;
+            var side = Vector3.Dot(fromPlayer, player.transform.right);
+            if (Mathf.Abs(side) >= 1.05f) return false;
+
+            var dodgeSide = player.transform.right * (side >= 0f ? 1f : -1f);
+            escapePoint = ClampToUnlockedBounds(transform.position + dodgeSide * 2.4f);
+            return true;
+        }
+
+        private bool AcquireCoverCandidate(out Vector3 coverPoint)
+        {
+            coverPoint = _cachedCoverPos;
+            if (_hasCachedCover && _coverRefreshTimer > 0f)
+            {
+                return true;
+            }
+
+            var threatPos = _targetEnemy != null
+                ? _targetEnemy.transform.position
+                : (PlayerController.Instance != null ? PlayerController.Instance.transform.position + PlayerController.Instance.transform.forward * 10f : transform.position + transform.forward * 10f);
+
+            if (TacticalNavigationUtility.FindTacticalCoverPosition(transform.position, threatPos, 9.5f, 4.5f, out var foundCover))
+            {
+                _cachedCoverPos = ClampToUnlockedBounds(foundCover);
+                _hasCachedCover = true;
+                _coverRefreshTimer = 1.4f;
+                coverPoint = _cachedCoverPos;
+                return true;
+            }
+
+            _hasCachedCover = false;
+            return false;
+        }
+
+        private Vector3 ComputeBreachDestination(PlayerController player)
+        {
+            var playerPos = player != null ? player.transform.position : transform.position;
+            var objPos = EnemySpawner.Instance.GetActiveObjectiveWorldPoint();
+            var toObj = objPos - playerPos;
+            toObj.y = 0f;
+
+            var candidate = playerPos + _formationOffset;
+            if (toObj.sqrMagnitude > 1f)
+            {
+                var breachForward = Vector3.Lerp(playerPos, objPos, Role == SquadRole.BreacherTorres ? 0.72f : 0.45f);
+                var right = Vector3.Cross(Vector3.up, toObj.normalized).normalized;
+                var lateral = Role == SquadRole.SquadLeadHayes ? -2.0f : (Role == SquadRole.MarksmanBishop ? 2.4f : 0.75f);
+                candidate = breachForward + right * lateral;
+            }
+
+            return ClampToUnlockedBounds(candidate);
+        }
+
+        private Vector3 ComputeFollowOrFlankDestination(PlayerController player)
+        {
+            var playerPos = player != null ? player.transform.position : Vector3.zero;
+            var offset = player != null
+                ? Quaternion.Euler(0f, player.transform.eulerAngles.y, 0f) * _formationOffset
+                : _formationOffset;
+            var desired = playerPos + offset;
+
+            if (EnemySpawner.Instance != null && Role == SquadRole.BreacherTorres)
+            {
+                var objPos = EnemySpawner.Instance.GetActiveObjectiveWorldPoint();
+                if (Vector3.Distance(playerPos, objPos) < 8.5f)
+                {
+                    desired = Vector3.Lerp(desired, objPos + new Vector3(1.1f, 0f, -0.6f), 0.55f);
+                }
+            }
+
+            // If stationary behind cover relative to current target, step sideways onto an unobstructed firing lane
+            if (_targetEnemy != null &&
+                Vector3.Distance(transform.position, desired) < 3.6f &&
+                !TacticalNavigationUtility.HasClearLineOfSight(transform.position + Vector3.up * 1.15f, _targetEnemy.transform.position + Vector3.up * 0.9f))
+            {
+                var flankSign = Role == SquadRole.MarksmanBishop ? 1f : -1f;
+                if (TacticalNavigationUtility.FindFlankPosition(transform.position, _targetEnemy.transform.position, flankSign, 5.8f, out var flankPos) &&
+                    Vector3.Distance(flankPos, playerPos) <= 11.5f)
+                {
+                    desired = flankPos;
+                }
+            }
+
+            return ClampToUnlockedBounds(desired);
+        }
+
+        private static SquadOrder GetCurrentOrder()
+        {
+            return SquadDirector.Instance != null ? SquadDirector.Instance.CurrentOrder : SquadOrder.Follow;
         }
 
         private void StepDownedState(PlayerController player, float dt)
@@ -340,9 +629,11 @@ namespace Character
                     stabilizing = true;
                     var eHeld = Keyboard.current != null && Keyboard.current.eKey.isPressed;
                     StabilizeProgress += (eHeld ? 0.95f : 0.48f) * dt;
+                    _showingStabilizePrompt = true;
                     UIManager.Instance?.UpdateContextPrompt($"STABILIZING {Callsign} [{Mathf.RoundToInt(Mathf.Clamp01(StabilizeProgress) * 100f)}%] — HOLD [E]");
                     if (StabilizeProgress >= 1f)
                     {
+                        _showingStabilizePrompt = false;
                         UIManager.Instance?.UpdateContextPrompt(string.Empty);
                         ApplyEmergencyTraumaPatch();
                         return;
@@ -351,6 +642,12 @@ namespace Character
             }
 
             if (stabilizing) return;
+
+            if (_showingStabilizePrompt)
+            {
+                _showingStabilizePrompt = false;
+                UIManager.Instance?.UpdateContextPrompt(string.Empty);
+            }
             StabilizeProgress = Mathf.Max(0f, StabilizeProgress - 0.15f * dt);
             BleedOutRemaining -= dt;
             if (BleedOutRemaining > 0f) return;
@@ -361,11 +658,18 @@ namespace Character
         public void MarkKilledInAction(bool broadcastRadio = true)
         {
             if (IsKia) return;
+            HaltNavAgent();
             IsKia = true;
+            if (_showingStabilizePrompt)
+            {
+                _showingStabilizePrompt = false;
+                UIManager.Instance?.UpdateContextPrompt(string.Empty);
+            }
             IsDowned = false;
             BleedOutRemaining = 0f;
             StabilizeProgress = 0f;
             CurrentHp = 0f;
+            CurrentBehaviorState = "KIA";
 
             SaveManager.EnsureInstance().MarkOperatorKia(RoleTag);
             FeelManager.Instance?.SpawnFloatingText(transform.position + Vector3.up * 0.95f, Callsign + " K.I.A.", Palette.HitmarkerCrimson);
@@ -380,50 +684,6 @@ namespace Character
             gameObject.SetActive(false);
         }
 
-        private Vector3 ComputeDesiredAnchor(PlayerController player)
-        {
-            var order = SquadDirector.Instance != null ? SquadDirector.Instance.CurrentOrder : SquadOrder.Follow;
-            var playerPos = player != null ? player.transform.position : Vector3.zero;
-
-            switch (order)
-            {
-                case SquadOrder.Hold when _hasHoldAnchor:
-                    return ClampToUnlockedBounds(_holdAnchorWorld);
-                case SquadOrder.Breach when EnemySpawner.Instance != null:
-                {
-                    var objPos = EnemySpawner.Instance.GetActiveObjectiveWorldPoint();
-                    var toObj = objPos - playerPos;
-                    toObj.y = 0f;
-                    if (toObj.sqrMagnitude > 1f)
-                    {
-                        var breachForward = Vector3.Lerp(playerPos, objPos, Role == SquadRole.BreacherTorres ? 0.72f : 0.45f);
-                        var right = Vector3.Cross(Vector3.up, toObj.normalized).normalized;
-                        var lateral = Role == SquadRole.SquadLeadHayes ? -2.0f : (Role == SquadRole.MarksmanBishop ? 2.4f : 0.75f);
-                        return ClampToUnlockedBounds(breachForward + right * lateral);
-                    }
-
-                    break;
-                }
-                case SquadOrder.Follow:
-                    break;
-                default:
-                    throw new ArgumentOutOfRangeException();
-            }
-
-            // Default Follow wedge formation oriented slightly by advance/aim
-            var desired = playerPos + _formationOffset;
-            if (EnemySpawner.Instance == null || Role != SquadRole.BreacherTorres)
-                return ClampToUnlockedBounds(desired);
-            {
-                var objPos = EnemySpawner.Instance.GetActiveObjectiveWorldPoint();
-                if (Vector3.Distance(playerPos, objPos) < 8.5f)
-                {
-                    desired = Vector3.Lerp(desired, objPos + new Vector3(1.1f, 0f, -0.6f), 0.55f);
-                }
-            }
-            return ClampToUnlockedBounds(desired);
-        }
-
         private EnemyController AcquireTargetEnemy()
         {
             if (EnemySpawner.Instance == null) return null;
@@ -433,8 +693,10 @@ namespace Character
             EnemyController best = null;
             var bestScore = float.MaxValue;
             var enemies = EnemySpawner.Instance.ActiveEnemies;
-            foreach (var e in enemies)
+            var designated = SquadDirector.Instance != null ? SquadDirector.Instance.PriorityTarget : null;
+            for (var i = 0; i < enemies.Count; i++)
             {
+                var e = enemies[i];
                 if (e == null || e.IsDead || !e.gameObject.activeInHierarchy) continue;
 
                 var diff = e.transform.position - transform.position;
@@ -447,6 +709,10 @@ namespace Character
                 {
                     priorityWeight *= 0.55f;
                 }
+                if (e == designated)
+                {
+                    priorityWeight *= 0.25f;
+                }
 
                 if (!(priorityWeight < bestScore)) continue;
                 bestScore = priorityWeight;
@@ -457,9 +723,20 @@ namespace Character
 
         private void StepCombatFire(EnemyController target, float dt)
         {
+            if (_reloadTimer > 0f)
+            {
+                _burstRemaining = 0;
+                CurrentBehaviorState = "RELOADING";
+                return;
+            }
+
             if (target == null || SquadDirector.Instance == null)
             {
                 _burstRemaining = 0;
+                if (_ammoInClip > 0 && _ammoInClip <= Mathf.Max(2, _clipCapacity / 3))
+                {
+                    BeginSquadReload();
+                }
                 return;
             }
 
@@ -503,8 +780,6 @@ namespace Character
             FireRoundAt(target);
         }
 
-        private static readonly RaycastHit[] LineOfFireBuffer = new RaycastHit[16];
-
         private bool HasClearLineOfFire(EnemyController target)
         {
             var origin = _muzzleTip != null ? _muzzleTip.position : transform.position + Vector3.up * 1.18f;
@@ -532,16 +807,21 @@ namespace Character
 
         private void FireRoundAt(EnemyController target)
         {
-            var origin = _muzzleTip != null ? _muzzleTip.position : transform.position + transform.forward * 0.65f + Vector3.up * 1.18f;
-            var dest = target.transform.position + Vector3.up * 0.95f;
-            var flatDir = dest - origin;
-            flatDir.y = 0f;
-            if (flatDir.sqrMagnitude < 0.01f) flatDir = transform.forward;
-            flatDir.Normalize();
+            if (target != null)
+            {
+                var barrelAim = ComputeBarrelAimDirection(target.transform.position);
+                if (barrelAim.sqrMagnitude > 0.001f)
+                {
+                    transform.rotation = Quaternion.LookRotation(barrelAim, Vector3.up);
+                    _characterMotion?.AlignWeaponBarrelWithBodyYaw();
+                }
+            }
 
-            var spread = Role == SquadRole.MarksmanBishop ? 0.6f : (Role == SquadRole.BreacherTorres ? 1.8f : 2.1f);
-            var jitter = UnityEngine.Random.Range(-spread, spread);
-            var shotDir = Quaternion.Euler(0f, jitter, 0f) * flatDir;
+            var origin = _muzzleTip != null ? _muzzleTip.position : transform.position + transform.forward * 0.65f + Vector3.up * 1.18f;
+            var shotDir = _muzzleTip != null
+                ? new Vector3(_muzzleTip.forward.x, 0f, _muzzleTip.forward.z)
+                : new Vector3(transform.forward.x, 0f, transform.forward.z);
+            shotDir = shotDir.sqrMagnitude > 0.0001f ? shotDir.normalized : transform.forward;
 
             var spd = Role == SquadRole.MarksmanBishop ? 50f : 38f;
             var dmg = Role == SquadRole.MarksmanBishop ? 42f : (Role == SquadRole.SquadLeadHayes ? 22f : 20f);
@@ -550,9 +830,63 @@ namespace Character
 
             SquadDirector.Instance.SpawnSquadBullet(origin, Quaternion.LookRotation(shotDir, Vector3.up), spd, dmg, pierce, visScale);
             ShotsFiredCount++;
-            _characterMotion?.TriggerWeaponRecoil(new Vector3(0f, 0.01f, -0.055f));
+            _ammoInClip = Mathf.Max(0, _ammoInClip - 1);
+
+            if (ejectionPort != null)
+            {
+                Combat.DroppedMagazine.SpawnShellCasing(ejectionPort.position, ejectionPort.right);
+            }
+            else
+            {
+                var fallbackPort = transform.position + transform.right * 0.16f + Vector3.up * 1.18f + transform.forward * 0.25f;
+                Combat.DroppedMagazine.SpawnShellCasing(fallbackPort, transform.right);
+            }
+
+            _characterMotion?.TriggerWeaponRecoil(
+                new Vector3(0f, 0.014f, -0.082f),
+                Role == SquadRole.MarksmanBishop ? 10.5f : 7.0f);
             VFXManager.Instance?.Play(VfxKind.MuzzleFlash, origin, Palette.RailgunCyan);
-            AudioManager.Instance?.PlayEnemyShoot(Role == SquadRole.MarksmanBishop ? 0.78f : 1.08f, 0.16f);
+            AudioManager.Instance?.PlayWeaponFire(
+                GetSquadWeaponType(),
+                Role == SquadRole.MarksmanBishop ? 0.94f : (Role == SquadRole.BreacherTorres ? 1.05f : 1.0f),
+                Role == SquadRole.MarksmanBishop ? 0.26f : 0.22f);
+
+            if (_ammoInClip <= 0)
+            {
+                BeginSquadReload();
+            }
+        }
+
+        private Combat.WeaponType GetSquadWeaponType()
+        {
+            return Role switch
+            {
+                SquadRole.MarksmanBishop => Combat.WeaponType.PlasmaRailgun,
+                SquadRole.BreacherTorres => Combat.WeaponType.An94Abakan,
+                _ => Combat.WeaponType.PulseRifle
+            };
+        }
+
+        private void BeginSquadReload()
+        {
+            if (_reloadTimer > 0f) return;
+            _reloadTimer = _reloadDuration;
+            _burstRemaining = 0;
+            CurrentBehaviorState = "RELOADING";
+            _characterMotion?.SetReloadState(true, 0f);
+
+            var ejectPos = _muzzleTip != null
+                ? _muzzleTip.position - transform.forward * 0.28f - Vector3.up * 0.09f
+                : transform.position + transform.forward * 0.28f + Vector3.up * 1.06f;
+            var ejectVel = (-transform.right * 1.1f - transform.forward * 0.45f) + Vector3.up * 0.95f;
+            Combat.DroppedMagazine.SpawnFromVisual(attachedMagVisual, droppedMagMesh, droppedMagMat, ejectPos, transform.rotation, ejectVel);
+        }
+
+        private void OnDisable()
+        {
+            if (!_showingStabilizePrompt) return;
+            _showingStabilizePrompt = false;
+            UIManager.Instance?.UpdateContextPrompt(string.Empty);
         }
 
         private static Vector3 ClampToUnlockedBounds(Vector3 pos)
@@ -562,9 +896,16 @@ namespace Character
 
         private void SetVisualCrouch(bool crouched)
         {
-            if (_visualRoot != null)
+            if (_visualRoot == null) return;
+            if (crouched)
             {
-                _visualRoot.localPosition = crouched ? new Vector3(0f, -0.36f, 0f) : Vector3.zero;
+                _visualRoot.localPosition = new Vector3(0f, -0.48f, -0.14f);
+                _visualRoot.localRotation = Quaternion.Euler(46f, -14f, -20f);
+            }
+            else
+            {
+                _visualRoot.localPosition = Vector3.zero;
+                _visualRoot.localRotation = Quaternion.identity;
             }
         }
 

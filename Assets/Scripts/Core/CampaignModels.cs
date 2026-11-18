@@ -17,7 +17,8 @@ namespace Core
         WardenBarge = 0,
         GoliathRail = 1,
         VolkovJuggernaut = 2,
-        RadekApex = 3
+        RadekApex = 3,
+        ChenOverwatch = 4
     }
 
     public enum CampaignEndingKind

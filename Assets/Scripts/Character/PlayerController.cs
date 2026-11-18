@@ -9,58 +9,19 @@ using Feel;
 using UI;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.Pool;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
 namespace Character
 {
-    public enum RogueliteSkillId
-    {
-        DamageBoost = 0,
-        FireRateBoost = 1,
-        MultiShot = 2,
-        MaxHpUp = 3,
-        MagnetSpeed = 4,
-        DashCool = 5,
-        VampiricSiphon = 6,
-        CritPayload = 7
-    }
-
-    public readonly struct RogueliteSkillInfo
-    {
-        public readonly RogueliteSkillId Id;
-        public readonly string Title;
-        public readonly string Description;
-
-        public RogueliteSkillInfo(RogueliteSkillId id, string title, string description)
-        {
-            Id = id;
-            Title = title;
-            Description = description;
-        }
-    }
-
     /// <summary>
-    /// Top-down player controller integrating hybrid PC (WASD/Mouse/Keys 1-4) and Mobile Twin-Stick
-    /// Virtual Joystick controls, Meta Save upgrades, Armor Skins, and Roguelite Skill Draft scaling.
+    /// Top-down player controller integrating PC controls (WASD/Mouse/Hotkeys 1-8),
+    /// tactical ordnance/med-plate systems, and Armory progression scaling.
     /// </summary>
     [RequireComponent(typeof(CharacterController))]
     public sealed class PlayerController : MonoBehaviour
     {
         public static PlayerController Instance { get; private set; }
-
-        private static readonly RogueliteSkillInfo[] SkillCatalog =
-        {
-            new(RogueliteSkillId.DamageBoost, "STOPPING POWER", "+18% All Ballistic Weapon Damage"),
-            new(RogueliteSkillId.FireRateBoost, "DOUBLE TAP", "+16% Weapon Fire Rate"),
-            new(RogueliteSkillId.MultiShot, "MULTI-BURST", "+1 Bonus Round Per Trigger Pull"),
-            new(RogueliteSkillId.MaxHpUp, "JUGGERNAUT", "+25 Max Armor HP & Heal +25 HP"),
-            new(RogueliteSkillId.MagnetSpeed, "LIGHTWEIGHT", "+0.45 Sprint Speed & +1.4m Pickup Radius"),
-            new(RogueliteSkillId.DashCool, "SLEIGHT OF HAND", "-15% Tactical Sprint Cooldown"),
-            new(RogueliteSkillId.VampiricSiphon, "QUICK FIX", "Restore +4 HP On Every Confirmed Kill"),
-            new(RogueliteSkillId.CritPayload, "DEADSHOT", "+15% Chance For 1.65x Headshot Crit")
-        };
 
         private static readonly int BaseColor = Shader.PropertyToID("_BaseColor");
         private static readonly int EmissionColor = Shader.PropertyToID("_EmissionColor");
@@ -97,7 +58,8 @@ namespace Character
         private float _grenadeCooldownTimer;
         private float _prevYaw;
 
-        private readonly int[] _skillRanks = new int[8];
+        private float _blastRadiusMult = 1f;
+        private float _blastDamageMult = 1f;
         private MaterialPropertyBlock _mpb;
         private UnityEngine.Camera _mainCamera;
         private UnityEngine.Pool.ObjectPool<GameObject> _fragGrenadePool;
@@ -112,14 +74,6 @@ namespace Character
         private static readonly Collider[] BlastOverlapBuffer = new Collider[32];
         private static readonly HashSet<EnemyController> BlastDamagedBuffer = new(16);
 
-        // Deterministic verification & automated demo hooks
-        private bool _hasSimulatedInput;
-        private Vector2 _simulatedMove;
-        private Vector3? _simulatedAimPoint;
-        private bool _simulatedFire;
-        private bool _simulatedDash;
-        private bool _autoPlayBot;
-        private float _botAngle;
         private Vector3? _latestAimWorldTarget;
 
         public float CurrentHp { get; private set; } = 100f;
@@ -133,17 +87,12 @@ namespace Character
         public int TraumaKits { get; private set; } = 2;
         private const int MaxTraumaKits = 4;
 
-        public int CurrentHeartRateBpm { get; private set; } = 74;
-        private float _smoothedBpm = 74f;
         private float _armorCooldownTimer;
-
-        private int CurrentXp { get; set; }
-
-        private int XpToNextLevel { get; set; } = 100;
-
-        private int CurrentLevel { get; set; } = 1;
+        private float _footstepDistanceAccum;
+        private bool _simAimDownSights;
 
         public bool IsDead { get; private set; }
+        public bool IsAimingDownSights { get; private set; }
 
         public int FragGrenades { get; private set; } = 3;
 
@@ -348,37 +297,12 @@ namespace Character
             _sprintAction ??= new InputAction("Sprint", InputActionType.Button, "<Keyboard>/leftShift");
         }
 
-        public void SetSimulatedInput(Vector2 move, Vector3? aimWorldPoint, bool fire, bool dash = false)
-        {
-            _hasSimulatedInput = true;
-            _simulatedMove = Vector2.ClampMagnitude(move, 1f);
-            _simulatedAimPoint = aimWorldPoint;
-            _simulatedFire = fire;
-            _simulatedDash = dash;
-        }
-
-        public void ClearSimulatedInput()
-        {
-            _hasSimulatedInput = false;
-            _simulatedMove = Vector2.zero;
-            _simulatedAimPoint = null;
-            _simulatedFire = false;
-            _simulatedDash = false;
-        }
-
-        public void SetAutoPlayBot(bool enabled)
-        {
-            _autoPlayBot = enabled;
-        }
-
         public void ApplySaveLoadout()
         {
             var save = SaveManager.EnsureInstance();
             var d = save.Data;
 
-            var permMaxHp = baseMaxHp + d.armorRank * 20f;
-            var skillHp = _skillRanks[(int)RogueliteSkillId.MaxHpUp] * 25f;
-            MaxHp = permMaxHp + skillHp;
+            MaxHp = baseMaxHp + d.armorRank * 20f;
             CurrentHp = Mathf.Min(CurrentHp > 0f ? CurrentHp : MaxHp, MaxHp);
 
             if (weaponController != null)
@@ -395,28 +319,23 @@ namespace Character
             var save = SaveManager.EnsureInstance();
             var d = save.Data;
 
-            var speedRank = _skillRanks[(int)RogueliteSkillId.MagnetSpeed];
-            var dashRank = _skillRanks[(int)RogueliteSkillId.DashCool];
-            var dmgRank = _skillRanks[(int)RogueliteSkillId.DamageBoost];
-            var rateRank = _skillRanks[(int)RogueliteSkillId.FireRateBoost];
-            var multiRank = _skillRanks[(int)RogueliteSkillId.MultiShot];
-            var critRank = _skillRanks[(int)RogueliteSkillId.CritPayload];
+            MaxArmor = 50f + d.armorRank * 15f;
+            CurrentArmor = Mathf.Min(CurrentArmor, MaxArmor);
 
             var weaponSpeedMult = weaponController != null ? weaponController.MoveSpeedMultiplier : 1f;
-            _currentMoveSpeed = (baseMoveSpeed + d.thrusterRank * 0.35f + speedRank * 0.45f) * weaponSpeedMult;
+            _currentMoveSpeed = (baseMoveSpeed + d.thrusterRank * 0.35f) * weaponSpeedMult;
             var permCooldownMult = Mathf.Max(0.55f, 1f - d.thrusterRank * 0.08f);
-            var skillCooldownMult = Mathf.Pow(0.85f, dashRank);
-            _currentDashCooldown = Mathf.Max(0.45f, baseDashCooldown * permCooldownMult * skillCooldownMult);
+            _currentDashCooldown = Mathf.Max(0.45f, baseDashCooldown * permCooldownMult);
 
-            PickupMagnetBonus = d.greedRank * 0.35f + speedRank * 1.4f;
+            PickupMagnetBonus = d.greedRank * 0.35f;
             CreditMultiplier = 1f + d.greedRank * 0.18f;
 
             var permDmgMult = 1f + d.firepowerRank * 0.12f;
-            var skillDmgMult = 1f + dmgRank * 0.18f;
-            var skillRateMult = 1f + rateRank * 0.16f;
-            var critChance = Mathf.Min(0.75f, critRank * 0.15f);
+            var magCapMult = 1f + d.firepowerRank * 0.08f;
+            _blastRadiusMult = 1f + d.firepowerRank * 0.06f;
+            _blastDamageMult = 1f + d.firepowerRank * 0.08f;
 
-            weaponController?.SetStatModifiers(permDmgMult, skillDmgMult, skillRateMult, multiRank, critChance);
+            weaponController?.SetStatModifiers(permDmgMult, permCooldownMult, magCapMult, _blastRadiusMult);
         }
 
         private void ApplySkinTint(int skinId)
@@ -455,43 +374,6 @@ namespace Character
             return true;
         }
 
-        public int GetSkillRank(RogueliteSkillId skill)
-        {
-            return _skillRanks[(int)skill];
-        }
-
-        public void ApplyRogueliteSkill(RogueliteSkillId skill)
-        {
-            var idx = (int)skill;
-            _skillRanks[idx]++;
-
-            if (skill == RogueliteSkillId.MaxHpUp)
-            {
-                MaxHp += 25f;
-                CurrentHp = Mathf.Min(MaxHp, CurrentHp + 25f);
-            }
-
-            RecalculateDerivedStats();
-            SyncHud();
-            AudioManager.Instance?.PlayMilestoneSting();
-            FeelManager.Instance?.SpawnFloatingText(transform.position + Vector3.up * 0.6f, SkillCatalog[idx].Title, Palette.Accent);
-        }
-
-        public List<RogueliteSkillInfo> RollDraftOptions(int count = 3)
-        {
-            var pool = new List<int>(SkillCatalog.Length);
-            for (var i = 0; i < SkillCatalog.Length; i++) pool.Add(i);
-
-            var picks = new List<RogueliteSkillInfo>(count);
-            for (var i = 0; i < count && pool.Count > 0; i++)
-            {
-                var randIdx = Random.Range(0, pool.Count);
-                picks.Add(SkillCatalog[pool[randIdx]]);
-                pool.RemoveAt(randIdx);
-            }
-            return picks;
-        }
-
         public void OnEnemyKilled()
         {
             KillStreakCount++;
@@ -511,11 +393,6 @@ namespace Character
                     break;
             }
 
-            var siphonRank = _skillRanks[(int)RogueliteSkillId.VampiricSiphon];
-            if (siphonRank > 0 && !IsDead)
-            {
-                Heal(4f * siphonRank);
-            }
             UIManager.Instance?.UpdateEquipmentHud(FragGrenades, MortarStrikeCharges, KillStreakCount, IsUavReconActive, IsRegeneratingHealth, TraumaKits);
         }
 
@@ -523,6 +400,7 @@ namespace Character
         {
             if (GameManager.Instance != null && GameManager.Instance.CurrentState != GameState.Playing)
             {
+                characterMotion?.SetReloadState(false, 0f);
                 characterMotion?.StepMotion(Vector3.zero, 0f, isAimingWeapon: true);
                 weaponController?.SyncActiveMuzzle();
                 UIManager.Instance?.UpdateDamageVignette(0f);
@@ -573,15 +451,7 @@ namespace Character
             var vignetteAlpha = Mathf.Clamp01(Mathf.Max(hitPulse * 0.72f, lowHpFactor * (0.60f + 0.18f * Mathf.Sin(Time.time * 5.5f))));
             UIManager.Instance?.UpdateDamageVignette(vignetteAlpha);
 
-            // Live operator BPM biometrics (combat stress, armor broken, fallen squadmates)
-            var downedPenalty = SquadDirector.Instance != null ? SquadDirector.Instance.DownedCount * 14f : 0f;
-            var armorBrokenPenalty = CurrentArmor <= 0.1f ? 15f : 0f;
-            var recentCombatStress = _timeSinceLastDamage < 3.5f ? 22f : 0f;
-            var targetBpm = 74f + lowHpFactor * 54f + armorBrokenPenalty + recentCombatStress + downedPenalty;
-            _smoothedBpm = Mathf.MoveTowards(_smoothedBpm, targetBpm, dt * 18f);
-            CurrentHeartRateBpm = Mathf.RoundToInt(_smoothedBpm);
-
-            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, CurrentHeartRateBpm, TraumaKits);
+            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, TraumaKits);
             UIManager.Instance?.UpdateEquipmentHud(FragGrenades, MortarStrikeCharges, KillStreakCount, IsUavReconActive, IsRegeneratingHealth, TraumaKits);
 
             if (Keyboard.current != null)
@@ -595,6 +465,12 @@ namespace Character
 
             ReadInputs(out var moveVec, out var aimDir, out var fireHeld, out var dashPressed, out var aimWorldTarget);
             _latestAimWorldTarget = aimWorldTarget;
+
+            var rmbHeld = Mouse.current != null && Mouse.current.rightButton.isPressed;
+            var adsActive = (_simAimDownSights || rmbHeld) && (weaponController == null || !weaponController.IsReloading);
+            IsAimingDownSights = adsActive;
+            weaponController?.SetAimDownSights(adsActive);
+            characterMotion?.SetAimDownSightsState(adsActive);
 
             // Dash activation
             if (dashPressed && _dashTimer <= 0f && _dashCooldownTimer <= 0f)
@@ -621,7 +497,23 @@ namespace Character
             {
                 var moveDir = new Vector3(moveVec.x, 0f, moveVec.y);
                 if (moveDir.sqrMagnitude > 1f) moveDir.Normalize();
-                horizontalVelocity = moveDir * _currentMoveSpeed;
+                var adsSpeedFactor = IsAimingDownSights ? 0.82f : 1.0f;
+                horizontalVelocity = moveDir * (_currentMoveSpeed * adsSpeedFactor);
+            }
+
+            var planarSpeed = new Vector2(horizontalVelocity.x, horizontalVelocity.z).magnitude;
+            if (_dashTimer <= 0f && planarSpeed > 0.55f)
+            {
+                _footstepDistanceAccum += planarSpeed * dt;
+                if (_footstepDistanceAccum >= 1.95f)
+                {
+                    _footstepDistanceAccum -= 1.95f;
+                    AudioManager.Instance?.PlayFootstep();
+                }
+            }
+            else if (planarSpeed <= 0.25f)
+            {
+                _footstepDistanceAccum = 0.85f;
             }
 
             if (characterController != null && characterController.enabled)
@@ -643,11 +535,11 @@ namespace Character
                 transform.position += horizontalVelocity * dt;
             }
 
-            // Aim orientation & camera look-ahead (snap body yaw on fire so gun barrel aligns 1:1 with bullet)
+            // Aim orientation & camera look-ahead (keep body & gun barrel 1:1 aligned toward cursor)
             if (aimDir.sqrMagnitude > 0.001f)
             {
                 var targetRot = Quaternion.LookRotation(aimDir, Vector3.up);
-                transform.rotation = fireHeld
+                transform.rotation = (fireHeld || IsAimingDownSights || aimWorldTarget.HasValue)
                     ? targetRot
                     : Quaternion.Slerp(transform.rotation, targetRot, 1f - Mathf.Exp(-45f * dt));
                 TopDownCameraRig.Instance?.UpdateAimLookAhead(aimDir);
@@ -657,7 +549,33 @@ namespace Character
             var yawRate = Mathf.DeltaAngle(_prevYaw, currentYaw) / Mathf.Max(0.001f, dt);
             _prevYaw = currentYaw;
 
+            if (weaponController != null)
+            {
+                characterMotion?.SetReloadState(
+                    weaponController.IsReloading,
+                    weaponController.ReloadProgress,
+                    weaponController.ActiveReloadStyle,
+                    weaponController.ActiveHeldReloadMesh,
+                    weaponController.IsShotgunPumpPhase,
+                    weaponController.ShotgunShellPhase,
+                    weaponController.ActiveHeldReloadMaterial,
+                    weaponController.ActiveHeldReloadScale);
+            }
+            else
+            {
+                characterMotion?.SetReloadState(false, 0f);
+            }
             characterMotion?.StepMotion(horizontalVelocity, yawRate, isAimingWeapon: true);
+            if (aimWorldTarget.HasValue)
+            {
+                aimDir = ComputeAimDirectionToWorldTarget(aimWorldTarget.Value, weaponController != null ? weaponController.MuzzleTransform : null);
+            }
+            if (aimDir.sqrMagnitude > 0.001f)
+            {
+                transform.rotation = Quaternion.LookRotation(aimDir, Vector3.up);
+                characterMotion?.AlignWeaponBarrelWithBodyYaw();
+            }
+            weaponController?.SetAimInput(aimDir, aimWorldTarget);
             weaponController?.TryFire(fireHeld, aimDir, aimWorldTarget);
             if (fireHeld && weaponController != null && !weaponController.IsReloading)
             {
@@ -679,6 +597,10 @@ namespace Character
             else if (Keyboard.current.digit4Key.wasPressedThisFrame) TrySwitchWeapon(3);
             else if (Keyboard.current.digit5Key.wasPressedThisFrame) TrySwitchWeapon(4);
             else if (Keyboard.current.digit6Key.wasPressedThisFrame) TrySwitchWeapon(5);
+            else if (Keyboard.current.digit7Key.wasPressedThisFrame) TrySwitchWeapon(6);
+            else if (Keyboard.current.digit8Key.wasPressedThisFrame) TrySwitchWeapon(7);
+            else if (Keyboard.current.digit9Key.wasPressedThisFrame) TrySwitchWeapon(8);
+            else if (Keyboard.current.digit0Key.wasPressedThisFrame) TrySwitchWeapon(9);
         }
 
         private Vector3 ComputeAimDirectionToWorldTarget(Vector3 worldTarget, Transform muzzleTf)
@@ -690,10 +612,17 @@ namespace Character
 
             var lateralOffset = muzzleTf != null ? transform.InverseTransformPoint(muzzleTf.position).x : 0.11f;
             var bearingRad = Mathf.Atan2(centerToTarget.x, centerToTarget.z);
-            if (!(dist > Mathf.Abs(lateralOffset) + 0.55f)) return centerToTarget / dist;
-            var parallaxRad = Mathf.Asin(Mathf.Clamp(lateralOffset / dist, -0.55f, 0.55f));
+            if (!(dist > Mathf.Abs(lateralOffset) + 0.06f)) return centerToTarget / dist;
+            var parallaxRad = Mathf.Asin(Mathf.Clamp(lateralOffset / dist, -0.92f, 0.92f));
             var correctedRad = bearingRad - parallaxRad;
             return new Vector3(Mathf.Sin(correctedRad), 0f, Mathf.Cos(correctedRad));
+        }
+
+        public void SetSimulatedAimDownSights(bool active)
+        {
+            _simAimDownSights = active;
+            IsAimingDownSights = active;
+            weaponController?.SetAimDownSights(IsAimingDownSights);
         }
 
         private void ReadInputs(out Vector2 moveVec, out Vector3 aimDir, out bool fireHeld, out bool dashPressed, out Vector3? aimWorldTarget)
@@ -701,52 +630,8 @@ namespace Character
             aimWorldTarget = null;
             var muzzleTf = weaponController != null ? weaponController.MuzzleTransform : null;
 
-            if (_hasSimulatedInput)
-            {
-                moveVec = _simulatedMove;
-                fireHeld = _simulatedFire;
-                dashPressed = _simulatedDash;
-                _simulatedDash = false;
-                if (_simulatedAimPoint.HasValue)
-                {
-                    aimWorldTarget = _simulatedAimPoint.Value;
-                    aimDir = ComputeAimDirectionToWorldTarget(_simulatedAimPoint.Value, muzzleTf);
-                }
-                else
-                {
-                    aimDir = transform.forward;
-                }
-                return;
-            }
-
-            if (_autoPlayBot)
-            {
-                StepAutoBotInput(out moveVec, out aimDir, out fireHeld, out dashPressed);
-                return;
-            }
-
-            // Hybrid PC (WASD + Mouse) + Mobile Twin-Stick Touch Joysticks
             moveVec = _moveAction?.ReadValue<Vector2>() ?? Vector2.zero;
-            var leftStick = UIManager.Instance?.LeftJoystick;
-            if (leftStick != null && (leftStick.IsHeld || leftStick.Value.sqrMagnitude > 0.01f))
-            {
-                moveVec = leftStick.Value;
-            }
-
-            var touchDash = UIManager.Instance != null && UIManager.Instance.ConsumeTouchDashPressed();
-            dashPressed = touchDash || (_sprintAction != null && _sprintAction.WasPressedThisFrame());
-
-            var rightStick = UIManager.Instance?.RightJoystick;
-            if (rightStick != null && (rightStick.IsHeld || rightStick.Value.sqrMagnitude > 0.04f))
-            {
-                var aim2D = rightStick.Value;
-                aimDir = aim2D.sqrMagnitude > 0.01f
-                    ? new Vector3(aim2D.x, 0f, aim2D.y).normalized
-                    : transform.forward;
-                fireHeld = true;
-                return;
-            }
-
+            dashPressed = _sprintAction != null && _sprintAction.WasPressedThisFrame();
             fireHeld = _attackAction != null && _attackAction.IsPressed();
 
             // Raycast PC mouse cursor onto exact active muzzle elevation plane so crosshair and bullet trajectory align 1:1
@@ -768,29 +653,6 @@ namespace Character
             {
                 aimDir = new Vector3(moveVec.x, 0f, moveVec.y).normalized;
             }
-        }
-
-        private void StepAutoBotInput(out Vector2 moveVec, out Vector3 aimDir, out bool fireHeld, out bool dashPressed)
-        {
-            _botAngle += Time.deltaTime * 1.1f;
-            var desiredOrbit = new Vector3(Mathf.Cos(_botAngle) * 4.5f, 0f, Mathf.Sin(_botAngle) * 4.5f);
-            var toOrbit = desiredOrbit - new Vector3(transform.position.x, 0f, transform.position.z);
-            moveVec = toOrbit.sqrMagnitude > 0.25f ? new Vector2(toOrbit.x, toOrbit.z).normalized : Vector2.zero;
-
-            var activeEnemies = EnemySpawner.Instance != null ? EnemySpawner.Instance.ActiveEnemies : null;
-            if (activeEnemies is { Count: > 0 } && activeEnemies[0] != null && !activeEnemies[0].IsDead)
-            {
-                var toEnemy = activeEnemies[0].transform.position - transform.position;
-                toEnemy.y = 0f;
-                aimDir = toEnemy.sqrMagnitude > 0.01f ? toEnemy.normalized : transform.forward;
-                fireHeld = true;
-            }
-            else
-            {
-                aimDir = toOrbit.sqrMagnitude > 0.05f ? toOrbit.normalized : transform.forward;
-                fireHeld = false;
-            }
-            dashPressed = false;
         }
 
         public void AddFragGrenades(int count)
@@ -848,7 +710,7 @@ namespace Character
             yield return Ease.GetWait(0.24f);
             _fragGrenadePool.Release(gren);
 
-            DetonateTacticalBlast(target, 4.8f, 145f, Palette.RocketOrange, "M67 DETONATION");
+            DetonateTacticalBlast(target, 4.8f * _blastRadiusMult, 145f * _blastDamageMult, Palette.RocketOrange, "M67 DETONATION");
         }
 
         public bool TryCallMortarStrike()
@@ -875,7 +737,7 @@ namespace Character
                 var impact = center + t;
                 VFXManager.Instance?.Play(VfxKind.MuzzleFlash, impact + Vector3.up * 0.4f, Palette.C4Amber);
                 yield return Ease.GetWait(0.32f);
-                DetonateTacticalBlast(impact, 5.6f, 185f, Palette.RocketOrange, "155MM IMPACT");
+                DetonateTacticalBlast(impact, 5.6f * _blastRadiusMult, 185f * _blastDamageMult, Palette.RocketOrange, "155MM IMPACT");
             }
         }
 
@@ -883,6 +745,7 @@ namespace Character
         {
             VFXManager.Instance?.Play(VfxKind.EnemyDeath, center + Vector3.up * 0.6f, vfxColor);
             VFXManager.Instance?.Play(VfxKind.LevelUpNova, center + Vector3.up * 0.4f, Palette.C4Amber);
+            VFXManager.Instance?.SpawnScorchMark(center, radius * 0.72f);
             AudioManager.Instance?.PlayEnemyExplode();
             FeelManager.Instance?.TriggerCameraShake(0.42f);
 
@@ -927,23 +790,6 @@ namespace Character
             }
         }
 
-        public void AddXp(int amount)
-        {
-            if (IsDead || amount <= 0) return;
-            CurrentXp += amount;
-
-            while (CurrentXp >= XpToNextLevel)
-            {
-                CurrentXp -= XpToNextLevel;
-                CurrentLevel++;
-                XpToNextLevel = Mathf.RoundToInt(XpToNextLevel * 1.35f);
-                weaponController?.SetWeaponTier(CurrentLevel);
-                FeelManager.Instance?.TriggerLevelUpSequence(CurrentLevel, transform);
-            }
-
-            UIManager.Instance?.UpdateXp(CurrentXp, XpToNextLevel, CurrentLevel);
-        }
-
         public void Heal(float amount)
         {
             if (IsDead || amount <= 0f) return;
@@ -970,7 +816,7 @@ namespace Character
             VFXManager.Instance?.Play(VfxKind.HitSpark, transform.position + Vector3.up * 0.9f, Palette.M3HeliosCoreCyan);
             FeelManager.Instance?.SpawnFloatingText(transform.position + Vector3.up * 1.1f,
                 patchedSquad ? "TRAUMA PATCH + PLATES" : "PLATES LOCKED // +45 HP", Palette.M3HeliosCoreCyan);
-            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, CurrentHeartRateBpm, TraumaKits);
+            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, TraumaKits);
             UIManager.Instance?.UpdateEquipmentHud(FragGrenades, MortarStrikeCharges, KillStreakCount, IsUavReconActive, IsRegeneratingHealth, TraumaKits);
             return true;
         }
@@ -985,7 +831,7 @@ namespace Character
             {
                 TraumaKits = Mathf.Clamp(TraumaKits + kitGain, 0, MaxTraumaKits);
             }
-            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, CurrentHeartRateBpm, TraumaKits);
+            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, TraumaKits);
         }
 
         public void TakeDamage(float dmg, Vector3? sourceWorldPos = null)
@@ -1009,7 +855,7 @@ namespace Character
                 if (beforeArmor > 0.1f && CurrentArmor <= 0.1f)
                 {
                     FeelManager.Instance?.SpawnFloatingText(transform.position + Vector3.up * 1.1f, "PLATES SHATTERED!", Palette.C4Amber);
-                    UIManager.Instance?.TriggerThreatWarning("!! BALLISTIC PLATES SHATTERED — PRESS [Q] TO RE-PLATE !!", 2.4f);
+                    UIManager.Instance?.TriggerThreatWarning("!! BALLISTIC PLATES SHATTERED — PRESS [Q] TO RE-PLATE !!");
                 }
             }
 
@@ -1018,12 +864,12 @@ namespace Character
             _damageFlashTimer = 0.14f;
             ApplyDamageFlash(1f);
 
-            characterMotion?.TriggerSquash(new Vector3(1.24f, 0.78f, 1.24f), 0.14f);
+            characterMotion?.TriggerSquash(new Vector3(1.24f, 0.78f, 1.24f));
             FeelManager.Instance?.TriggerCameraShake(0.38f);
             FeelManager.Instance?.SpawnFloatingText(transform.position, "-" + Mathf.RoundToInt(remainingDmg), Palette.EnemySecondary);
             AudioManager.Instance?.PlayHit();
             UIManager.Instance?.UpdateHealth(CurrentHp, MaxHp);
-            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, CurrentHeartRateBpm, TraumaKits);
+            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, TraumaKits);
 
             if (!(CurrentHp <= 0f)) return;
             IsDead = true;
@@ -1058,16 +904,11 @@ namespace Character
         public void ResetPlayer()
         {
             IsDead = false;
-            CurrentXp = 0;
-            XpToNextLevel = 100;
-            CurrentLevel = 1;
             _dashTimer = 0f;
             _dashCooldownTimer = 0f;
             _invulnTimer = 0f;
             _damageFlashTimer = 0f;
             _armorCooldownTimer = 0f;
-            _smoothedBpm = 74f;
-            CurrentHeartRateBpm = 74;
             _timeSinceLastDamage = 10f;
             IsRegeneratingHealth = false;
             FragGrenades = 3;
@@ -1077,11 +918,6 @@ namespace Character
             MortarStrikeCharges = 0;
             _grenadeCooldownTimer = 0f;
             transform.localScale = Vector3.one;
-
-            for (var i = 0; i < _skillRanks.Length; i++)
-            {
-                _skillRanks[i] = 0;
-            }
 
             var save = SaveManager.EnsureInstance();
             MaxHp = baseMaxHp + save.Data.armorRank * 20f;
@@ -1105,7 +941,6 @@ namespace Character
             weaponController?.ReturnAllActive();
             ApplySaveLoadout();
             ApplyDamageFlash(0f);
-            ClearSimulatedInput();
             characterMotion?.ResetMotionState();
             SyncHud();
         }
@@ -1113,8 +948,7 @@ namespace Character
         private void SyncHud()
         {
             UIManager.Instance?.UpdateHealth(CurrentHp, MaxHp);
-            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, CurrentHeartRateBpm, TraumaKits);
-            UIManager.Instance?.UpdateXp(CurrentXp, XpToNextLevel, CurrentLevel);
+            UIManager.Instance?.UpdateOperatorVitals(CurrentHp, MaxHp, CurrentArmor, MaxArmor, TraumaKits);
             UIManager.Instance?.UpdateDashCooldown(1f);
             UIManager.Instance?.RefreshWeaponBar();
             UIManager.Instance?.UpdateEquipmentHud(FragGrenades, MortarStrikeCharges, KillStreakCount, IsUavReconActive, IsRegeneratingHealth, TraumaKits);

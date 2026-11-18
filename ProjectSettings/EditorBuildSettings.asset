@@ -17,5 +17,8 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Mission04_BlackcrestSummit.unity
     guid: 7c9385f5538a1bf46ac1698ca652575a
+  - enabled: 1
+    path: Assets/Scenes/Mission05_AegisCitadel.unity
+    guid: e62e6875415250449a93a6f9103b68fd
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}

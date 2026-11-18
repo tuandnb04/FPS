@@ -1,12 +1,15 @@
+using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using Audio;
 using Combat;
 using Core;
+using Enemies;
+using Feel;
 using UI;
 using UnityEngine;
+using UnityEngine.AI;
 using UnityEngine.InputSystem;
-using UnityEngine.Pool;
+using UnityEngine.Rendering;
 using UnityEngine.Serialization;
 
 namespace Character
@@ -34,16 +37,29 @@ namespace Character
         [SerializeField] private Mesh rifleM4Mesh;
         [FormerlySerializedAs("rifleMK14Mesh")] [SerializeField] private Mesh rifleMk14Mesh;
         [FormerlySerializedAs("rifleAN94Mesh")] [SerializeField] private Mesh rifleAn94Mesh;
+        [SerializeField] private Mesh droppedMagMesh;
+        [SerializeField] private Mesh pauldronMesh;
+        [SerializeField] private Mesh magStanagMesh;
+        [SerializeField] private Mesh magDmrBoxMesh;
+        [SerializeField] private Mesh magAkCurvedMesh;
+        [SerializeField] private Material magStanagMat;
+        [SerializeField] private Material magDmrBoxMat;
+        [SerializeField] private Material magAkCurvedMat;
 
         private readonly List<SquadMemberController> _members = new(3);
-        private ObjectPool<Projectile> _squadBulletPool;
+        private UnityEngine.Pool.ObjectPool<Projectile> _squadBulletPool;
         private Transform _squadRoot;
         private Transform _bulletPoolRoot;
         private Material _squadBulletMat;
         private Material _weaponSteelMat;
         private Material _nvgLensMat;
 
+        private float _squadFragCooldown;
+        private static readonly Collider[] SquadFragBuffer = new Collider[24];
+        private static readonly HashSet<EnemyController> SquadFragDamaged = new(12);
+
         public SquadOrder CurrentOrder { get; private set; } = SquadOrder.Follow;
+        public EnemyController PriorityTarget { get; private set; }
 
         public IReadOnlyList<SquadMemberController> Members => _members;
         public int MemberCount => _members.Count;
@@ -52,7 +68,12 @@ namespace Character
         {
             get
             {
-                return _members.Count(t => t != null && !t.IsDowned && !t.IsKia);
+                var count = 0;
+                foreach (var m in _members)
+                {
+                    if (m != null && !m.IsDowned && !m.IsKia) count++;
+                }
+                return count;
             }
         }
 
@@ -60,7 +81,12 @@ namespace Character
         {
             get
             {
-                return _members.Count(t => t != null && !t.IsKia);
+                var count = 0;
+                foreach (var m in _members)
+                {
+                    if (m != null && !m.IsKia) count++;
+                }
+                return count;
             }
         }
 
@@ -68,7 +94,12 @@ namespace Character
         {
             get
             {
-                return _members.Count(t => t != null && t.IsDowned && !t.IsKia);
+                var count = 0;
+                foreach (var m in _members)
+                {
+                    if (m != null && m.IsDowned && !m.IsKia) count++;
+                }
+                return count;
             }
         }
 
@@ -76,7 +107,15 @@ namespace Character
             Mesh torso, Mesh chestRig, Mesh helmet, Mesh boonieHat, Mesh visor,
             Mesh upperArm, Mesh forearm, Mesh limb, Mesh backpack,
             Mesh m4, Mesh mk14, Mesh an94,
-            Mesh skullMask = null)
+            Mesh skullMask = null,
+            Mesh droppedMag = null,
+            Mesh armorPauldron = null,
+            Mesh magStanag = null,
+            Mesh magDmr = null,
+            Mesh magAk = null,
+            Material stanagMat = null,
+            Material dmrMat = null,
+            Material akMat = null)
         {
             torsoMesh = torso;
             chestRigMesh = chestRig;
@@ -91,6 +130,14 @@ namespace Character
             rifleM4Mesh = m4;
             rifleMk14Mesh = mk14;
             rifleAn94Mesh = an94;
+            if (droppedMag != null) droppedMagMesh = droppedMag;
+            if (armorPauldron != null) pauldronMesh = armorPauldron;
+            if (magStanag != null) magStanagMesh = magStanag;
+            if (magDmr != null) magDmrBoxMesh = magDmr;
+            if (magAk != null) magAkCurvedMesh = magAk;
+            if (stanagMat != null) magStanagMat = stanagMat;
+            if (dmrMat != null) magDmrBoxMat = dmrMat;
+            if (akMat != null) magAkCurvedMat = akMat;
         }
 
         private void Awake()
@@ -109,10 +156,11 @@ namespace Character
             _bulletPoolRoot.SetParent(transform, false);
 
             _squadBulletMat = Palette.CreateLitMaterial("Mat_SquadTracerRuntime", Palette.RailgunCyan, 0.1f, 0.25f, true, 1.4f);
-            _weaponSteelMat = Palette.CreateLitMaterial("Mat_SquadWeaponSteelRuntime", Palette.Gunmetal, 0.78f, 0.56f, false, 0f);
+            _squadBulletMat.enableInstancing = true;
+            _weaponSteelMat = Palette.CreateLitMaterial("Mat_SquadWeaponSteelRuntime", new Color(0.48f, 0.52f, 0.56f, 1f), 0.35f, 0.50f, false, 0f);
             _nvgLensMat = Palette.CreateLitMaterial("Mat_SquadNvgRuntime", Palette.NvgGreen, 0.25f, 0.68f, false, 0f);
 
-            _squadBulletPool = new ObjectPool<Projectile>(
+            _squadBulletPool = new UnityEngine.Pool.ObjectPool<Projectile>(
                 createFunc: CreateSquadBulletInstance,
                 actionOnGet: p => p.gameObject.SetActive(true),
                 actionOnRelease: p => p.gameObject.SetActive(false),
@@ -121,6 +169,15 @@ namespace Character
                 defaultCapacity: 24,
                 maxSize: 64
             );
+
+            PrewarmBulletPool(10);
+        }
+
+        private void PrewarmBulletPool(int count)
+        {
+            var warmed = new Projectile[count];
+            for (var i = 0; i < count; i++) warmed[i] = _squadBulletPool.Get();
+            for (var i = 0; i < count; i++) _squadBulletPool.Release(warmed[i]);
         }
 
         private void Start()
@@ -139,6 +196,12 @@ namespace Character
 
         private void Update()
         {
+            if (_squadFragCooldown > 0f) _squadFragCooldown = Mathf.Max(0f, _squadFragCooldown - Time.deltaTime);
+            if (PriorityTarget != null && (PriorityTarget.IsDead || !PriorityTarget.gameObject.activeInHierarchy))
+            {
+                PriorityTarget = null;
+            }
+
             if (GameManager.Instance != null && GameManager.Instance.CurrentState != GameState.Playing)
             {
                 return;
@@ -153,10 +216,20 @@ namespace Character
         public void SetOrder(SquadOrder order, bool quiet = false)
         {
             CurrentOrder = order;
-            foreach (var t in _members.Where(t => t != null && !t.IsKia))
+            foreach (var t in _members)
             {
+                if (t == null || t.IsKia) continue;
                 if (order == SquadOrder.Hold) t.CaptureHoldAnchor();
                 else t.ClearHoldAnchor();
+            }
+
+            if (order == SquadOrder.Breach)
+            {
+                DesignatePriorityTargetAndSupport(!quiet);
+            }
+            else
+            {
+                PriorityTarget = null;
             }
 
             UIManager.Instance?.UpdateSquadOrderUI(order);
@@ -167,9 +240,81 @@ namespace Character
             {
                 SquadOrder.Follow => "Closing diamond formation on Lead.",
                 SquadOrder.Hold => "Locking perimeter firing sectors.",
-                _ => "Stacking up — weapons free ahead."
+                _ => "Stacking up, weapons free ahead."
             };
             StoryDirector.NotifySquadOrder(msg);
+        }
+
+        private void DesignatePriorityTargetAndSupport(bool allowSupportFrag)
+        {
+            if (EnemySpawner.Instance == null || StandingCount <= 0)
+            {
+                PriorityTarget = null;
+                return;
+            }
+
+            var enemies = EnemySpawner.Instance.ActiveEnemies;
+            var player = PlayerController.Instance;
+            var refPos = player != null ? player.transform.position : Vector3.zero;
+            var refFwd = player != null ? player.transform.forward : Vector3.forward;
+
+            EnemyController best = null;
+            var bestScore = float.MaxValue;
+            foreach (var e in enemies)
+            {
+                if (e == null || e.IsDead || !e.gameObject.activeInHierarchy) continue;
+                var toEnemy = e.transform.position - refPos;
+                toEnemy.y = 0f;
+                var dist = toEnemy.magnitude;
+                var aimAlignment = dist > 0.25f ? Mathf.Clamp01(1f - Vector3.Dot(toEnemy / dist, refFwd)) : 0f;
+                var threatMult = e.Archetype == EnemyArchetype.Boss ? 0.55f : (e.Archetype == EnemyArchetype.Heavy || e.Archetype == EnemyArchetype.Shielder ? 0.72f : 1.0f);
+                var score = (dist + aimAlignment * 10f) * threatMult;
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    best = e;
+                }
+            }
+
+            PriorityTarget = best;
+            if (PriorityTarget == null) return;
+
+            if (allowSupportFrag)
+            {
+                FeelManager.Instance?.SpawnFloatingText(PriorityTarget.transform.position + Vector3.up * 2.15f, "TARGET DESIGNATED!", Palette.C4Amber);
+            }
+
+            if (allowSupportFrag && _squadFragCooldown <= 0f)
+            {
+                _squadFragCooldown = 8.5f;
+                StartCoroutine(LaunchSquadFragRoutine(PriorityTarget.transform.position));
+            }
+        }
+
+        private IEnumerator LaunchSquadFragRoutine(Vector3 targetPos)
+        {
+            VFXManager.Instance?.Play(VfxKind.MuzzleFlash, targetPos + Vector3.up * 0.25f, Palette.SquadBlue);
+            yield return Ease.GetWait(0.55f);
+
+            var center = new Vector3(targetPos.x, 0.25f, targetPos.z);
+            VFXManager.Instance?.Play(VfxKind.EnemyDeath, center + Vector3.up * 0.4f, Palette.C4Amber);
+            VFXManager.Instance?.Play(VfxKind.LevelUpNova, center + Vector3.up * 0.2f, Palette.SquadBlue);
+            VFXManager.Instance?.SpawnScorchMark(center, 2.5f);
+            AudioManager.Instance?.PlayEnemyExplode();
+            FeelManager.Instance?.TriggerCameraShake(0.24f);
+
+            var hitCount = Physics.OverlapSphereNonAlloc(center, 3.6f, SquadFragBuffer, ~0, QueryTriggerInteraction.Ignore);
+            SquadFragDamaged.Clear();
+            for (var i = 0; i < hitCount; i++)
+            {
+                var c = SquadFragBuffer[i];
+                if (c == null) continue;
+                var enemy = c.GetComponentInParent<EnemyController>();
+                if (enemy == null || enemy.IsDead || !SquadFragDamaged.Add(enemy)) continue;
+                var push = enemy.transform.position - center;
+                push.y = 0f;
+                enemy.ApplyDamage(85f, enemy.transform.position + Vector3.up * 0.9f, push.sqrMagnitude > 0.01f ? push.normalized : Vector3.forward, isCrit: true, isExplosive: true);
+            }
         }
 
         public bool TryPatchNearestDownedMember(Vector3 origin, float radius)
@@ -182,11 +327,9 @@ namespace Character
                 if (m == null || m.IsKia || !m.IsDowned) continue;
                 var d = m.transform.position - origin;
                 d.y = 0f;
-                if (d.sqrMagnitude <= rSq && d.sqrMagnitude < bestDist)
-                {
-                    bestDist = d.sqrMagnitude;
-                    best = m;
-                }
+                if (!(d.sqrMagnitude <= rSq) || !(d.sqrMagnitude < bestDist)) continue;
+                bestDist = d.sqrMagnitude;
+                best = m;
             }
             return best != null && best.ApplyEmergencyTraumaPatch();
         }
@@ -213,9 +356,9 @@ namespace Character
             _members.Clear();
 
             var wraithHead = skullMaskMesh != null ? skullMaskMesh : helmetMesh;
-            _members.Add(BuildSquadMemberRig(SquadRole.SquadLeadHayes, Palette.CharacterPrimary, Palette.CoyoteTan, boonieHatMesh != null ? boonieHatMesh : helmetMesh, useVisor: false, rifleM4Mesh, 0.65f, new Vector3(0f, -0.028f, 0.165f), new Vector3(0f, -0.060f, -0.033f), new Vector3(0f, 0.020f, 0.555f), Palette.CharacterPrimary));
-            _members.Add(BuildSquadMemberRig(SquadRole.MarksmanBishop, Palette.SkinCrimsonPrimary, Palette.GuardTowerDark, wraithHead, useVisor: skullMaskMesh == null, rifleMk14Mesh, 0.66f, new Vector3(0f, -0.010f, 0.195f), new Vector3(0f, -0.058f, -0.052f), new Vector3(0f, 0.020f, 0.690f), Palette.SkullMaskBone));
-            _members.Add(BuildSquadMemberRig(SquadRole.BreacherTorres, Palette.SkinGoldPrimary, Palette.CoyoteTan, helmetMesh, useVisor: true, rifleAn94Mesh, 0.66f, new Vector3(0f, -0.024f, 0.180f), new Vector3(0f, -0.060f, -0.038f), new Vector3(0f, 0.017f, 0.598f), Palette.SkinGoldPrimary));
+            _members.Add(BuildSquadMemberRig(SquadRole.SquadLeadHayes, Palette.CharacterPrimary, Palette.CoyoteTan, boonieHatMesh != null ? boonieHatMesh : helmetMesh, useVisor: false, rifleM4Mesh, 0.65f, new Vector3(0f, -0.028f, 0.165f), new Vector3(0f, -0.060f, -0.033f), new Vector3(0f, 0.020f, 0.555f), Palette.CharacterPrimary, magStanagMesh != null ? magStanagMesh : droppedMagMesh, new Vector3(0f, -0.105f, 0.080f), Vector3.zero, magStanagMat));
+            _members.Add(BuildSquadMemberRig(SquadRole.MarksmanBishop, Palette.SkinCrimsonPrimary, Palette.GuardTowerDark, wraithHead, useVisor: skullMaskMesh == null, rifleMk14Mesh, 0.66f, new Vector3(0f, -0.010f, 0.195f), new Vector3(0f, -0.058f, -0.052f), new Vector3(0f, 0.020f, 0.690f), Palette.SkullMaskBone, magDmrBoxMesh != null ? magDmrBoxMesh : droppedMagMesh, new Vector3(0f, -0.105f, 0.085f), Vector3.zero, magDmrBoxMat));
+            _members.Add(BuildSquadMemberRig(SquadRole.BreacherTorres, Palette.SkinGoldPrimary, Palette.CoyoteTan, helmetMesh, useVisor: true, rifleAn94Mesh, 0.66f, new Vector3(0f, -0.024f, 0.180f), new Vector3(0f, -0.060f, -0.038f), new Vector3(0f, 0.017f, 0.598f), Palette.SkinGoldPrimary, magAkCurvedMesh != null ? magAkCurvedMesh : droppedMagMesh, new Vector3(0.008f, -0.105f, 0.085f), new Vector3(0f, 0f, 5f), magAkCurvedMat));
         }
 
         public void ResetSquadForMission()
@@ -299,20 +442,20 @@ namespace Character
         {
             var go = new GameObject("Squad_TracerBolt");
             go.transform.SetParent(_bulletPoolRoot, false);
+            try { go.tag = "Projectile"; } catch (UnityException) { }
+            var projLayer = LayerMask.NameToLayer("Projectile");
+            if (projLayer >= 0) go.layer = projLayer;
 
-            var meshGo = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            meshGo.name = "BoltVisual";
+            var meshGo = new GameObject("BoltVisual");
             meshGo.transform.SetParent(go.transform, false);
+            if (projLayer >= 0) meshGo.layer = projLayer;
             meshGo.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             meshGo.transform.localScale = new Vector3(0.065f, 0.25f, 0.065f);
-            var c = meshGo.GetComponent<Collider>();
-            if (c != null) Destroy(c);
-            var mr = meshGo.GetComponent<MeshRenderer>();
-            if (mr != null)
-            {
-                mr.sharedMaterial = _squadBulletMat;
-                mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            }
+            meshGo.AddComponent<MeshFilter>().sharedMesh = Projectile.GetOrCreateSharedBulletMesh();
+            var mr = meshGo.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = _squadBulletMat;
+            mr.shadowCastingMode = ShadowCastingMode.Off;
+            mr.receiveShadows = false;
 
             var proj = go.AddComponent<Projectile>();
             go.SetActive(false);
@@ -330,7 +473,11 @@ namespace Character
             Vector3 leftGripLocal,
             Vector3 rightGripLocal,
             Vector3 muzzleLocal,
-            Color? headGearColor = null)
+            Color? headGearColor = null,
+            Mesh weaponMagMesh = null,
+            Vector3 magLocalOffsetUnscaled = default,
+            Vector3 magLocalEuler = default,
+            Material weaponMagMaterial = null)
         {
             var matPrimary = Palette.CreateLitMaterial($"Mat_Squad_{role}_Primary", primaryColor, 0.12f, 0.34f, false, 0f);
             var matSecondary = Palette.CreateLitMaterial($"Mat_Squad_{role}_Secondary", secondaryColor, 0.10f, 0.30f, false, 0f);
@@ -340,14 +487,28 @@ namespace Character
 
             var root = new GameObject($"Squadmate_{role}");
             root.transform.SetParent(_squadRoot, false);
+            try { root.tag = "SquadAlly"; } catch (UnityException) { }
             var allyLayer = LayerMask.NameToLayer("SquadAlly");
             if (allyLayer >= 0) root.layer = allyLayer;
 
-            var cc = root.AddComponent<CharacterController>();
-            cc.radius = 0.42f;
-            cc.height = 1.74f;
-            cc.center = new Vector3(0f, 0.87f, 0f);
-            cc.stepOffset = 0.25f;
+            var hitCol = root.AddComponent<CapsuleCollider>();
+            hitCol.radius = 0.42f;
+            hitCol.height = 1.74f;
+            hitCol.center = new Vector3(0f, 0.87f, 0f);
+
+            var navAgent = root.AddComponent<NavMeshAgent>();
+            navAgent.agentTypeID = 0;
+            navAgent.speed = role == SquadRole.BreacherTorres ? 5.65f : (role == SquadRole.SquadLeadHayes ? 5.45f : 5.15f);
+            navAgent.angularSpeed = 0f;
+            navAgent.acceleration = 28f;
+            navAgent.stoppingDistance = 0.35f;
+            navAgent.radius = 0.40f;
+            navAgent.height = 1.75f;
+            navAgent.autoBraking = true;
+            navAgent.autoRepath = true;
+            navAgent.updateRotation = false;
+            navAgent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
+            navAgent.avoidancePriority = 40 + (int)role;
 
             var motion = root.AddComponent<ProceduralCharacterMotion>();
             var ctrl = root.AddComponent<SquadMemberController>();
@@ -372,6 +533,11 @@ namespace Character
 
             var leftArm = BuildArm("Left", visualRoot.transform, new Vector3(-0.28f, 1.24f, 0.07f), matPrimary, out var leftElbow);
             var rightArm = BuildArm("Right", visualRoot.transform, new Vector3(0.30f, 1.24f, -0.02f), matPrimary, out var rightElbow);
+            if (pauldronMesh != null)
+            {
+                CreateFit("LeftPauldron", pauldronMesh, PrimitiveType.Cube, leftArm, new Vector3(-0.02f, -0.02f, 0f), new Vector3(0.20f, 0.14f, 0.22f), matSecondary);
+                CreateFit("RightPauldron", pauldronMesh, PrimitiveType.Cube, rightArm, new Vector3(0.02f, -0.02f, 0f), new Vector3(0.20f, 0.14f, 0.22f), matSecondary);
+            }
 
             var weaponAnchor = new GameObject("WeaponAnchor");
             weaponAnchor.transform.SetParent(visualRoot.transform, false);
@@ -397,6 +563,20 @@ namespace Character
                 cube.GetComponent<MeshRenderer>().sharedMaterial = _weaponSteelMat;
             }
 
+            var resolvedMagMat = weaponMagMaterial != null ? weaponMagMaterial : _weaponSteelMat;
+            Transform attachedMagTf = null;
+            if (weaponMagMesh != null && weaponMesh != null)
+            {
+                var magGo = new GameObject("WeaponMagVisual");
+                magGo.transform.SetParent(weaponAnchor.transform, false);
+                magGo.transform.localPosition = magLocalOffsetUnscaled * weaponScale;
+                magGo.transform.localRotation = Quaternion.Euler(magLocalEuler);
+                magGo.transform.localScale = Vector3.one * weaponScale;
+                magGo.AddComponent<MeshFilter>().sharedMesh = weaponMagMesh;
+                magGo.AddComponent<MeshRenderer>().sharedMaterial = resolvedMagMat;
+                attachedMagTf = magGo.transform;
+            }
+
             var leftGrip = new GameObject("LeftHandGrip");
             leftGrip.transform.SetParent(weaponAnchor.transform, false);
             leftGrip.transform.localPosition = leftGripLocal;
@@ -409,15 +589,13 @@ namespace Character
             muzzle.transform.SetParent(weaponAnchor.transform, false);
             muzzle.transform.localPosition = muzzleLocal;
 
-            var leftLeg = new GameObject("LeftLegPivot");
-            leftLeg.transform.SetParent(visualRoot.transform, false);
-            leftLeg.transform.localPosition = new Vector3(-0.15f, 0.74f, 0f);
-            CreateFit("LeftLeg", limbMesh, PrimitiveType.Cube, leftLeg.transform, new Vector3(0f, -0.35f, 0f), new Vector3(0.21f, 0.68f, 0.22f), matSecondary);
+            var ejectionPort = new GameObject("EjectionPort");
+            ejectionPort.transform.SetParent(weaponAnchor.transform, false);
+            ejectionPort.transform.localPosition = new Vector3(0.034f, 0.022f, 0.065f);
+            ejectionPort.transform.localRotation = Quaternion.Euler(0f, 18f, 0f);
 
-            var rightLeg = new GameObject("RightLegPivot");
-            rightLeg.transform.SetParent(visualRoot.transform, false);
-            rightLeg.transform.localPosition = new Vector3(0.15f, 0.74f, 0f);
-            CreateFit("RightLeg", limbMesh, PrimitiveType.Cube, rightLeg.transform, new Vector3(0f, -0.35f, 0f), new Vector3(0.21f, 0.68f, 0.22f), matSecondary);
+            var leftLeg = BuildSquadArticulatedLeg("Left", visualRoot.transform, new Vector3(-0.15f, 0.74f, 0f), limbMesh, matSecondary, _weaponSteelMat);
+            var rightLeg = BuildSquadArticulatedLeg("Right", visualRoot.transform, new Vector3(0.15f, 0.74f, 0f), limbMesh, matSecondary, _weaponSteelMat);
 
             var pack = new GameObject("BackpackPivot");
             pack.transform.SetParent(visualRoot.transform, false);
@@ -439,14 +617,48 @@ namespace Character
             if (rmr != null)
             {
                 rmr.sharedMaterial = ringMat;
-                rmr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                rmr.shadowCastingMode = ShadowCastingMode.Off;
             }
 
+            var resolvedMagMesh = weaponMagMesh != null ? weaponMagMesh : droppedMagMesh;
             motion.BindPivots(visualRoot.transform, headPivot.transform, leftArm, rightArm, leftLeg.transform, rightLeg.transform, pack.transform);
-            motion.BindWeaponArmIk(leftElbow, rightElbow, weaponAnchor.transform, leftGrip.transform, rightGrip.transform, 0.34f, 0.35f);
-            ctrl.InitializeRig(role, cc, motion, root.GetComponentsInChildren<MeshRenderer>(true), visualRoot.transform, muzzle.transform);
+            motion.BindWeaponArmIk(leftElbow, rightElbow, weaponAnchor.transform, leftGrip.transform, rightGrip.transform);
+            motion.BindReloadMagVisual(resolvedMagMesh, resolvedMagMat);
+            if (attachedMagTf != null)
+            {
+                motion.BindAttachedMagVisual(attachedMagTf);
+            }
+            ctrl.InitializeRig(role, navAgent, motion, root.GetComponentsInChildren<MeshRenderer>(true), visualRoot.transform, muzzle.transform, ejectionPort.transform);
+            ctrl.BindDroppedMagazine(resolvedMagMesh, resolvedMagMat, attachedMagTf);
 
             return ctrl;
+        }
+
+        private static Transform BuildSquadArticulatedLeg(
+            string side,
+            Transform parent,
+            Vector3 hipLocalPos,
+            Mesh limbMesh,
+            Material trouserMat,
+            Material bootArmorMat)
+        {
+            var hipPivot = new GameObject(side + "LegPivot");
+            hipPivot.transform.SetParent(parent, false);
+            hipPivot.transform.localPosition = hipLocalPos;
+            CreateFit(side + "Thigh", limbMesh, PrimitiveType.Cube, hipPivot.transform, new Vector3(0f, -0.17f, 0f), new Vector3(0.21f, 0.34f, 0.22f), trouserMat);
+
+            var kneePivot = new GameObject(side + "KneePivot");
+            kneePivot.transform.SetParent(hipPivot.transform, false);
+            kneePivot.transform.localPosition = new Vector3(0f, -0.34f, 0f);
+            CreateFit(side + "KneePad", null, PrimitiveType.Cube, kneePivot.transform, new Vector3(0f, 0.01f, 0.035f), new Vector3(0.18f, 0.11f, 0.15f), bootArmorMat);
+            CreateFit(side + "Shin", limbMesh, PrimitiveType.Cube, kneePivot.transform, new Vector3(0f, -0.16f, 0f), new Vector3(0.17f, 0.32f, 0.18f), trouserMat);
+
+            var bootPivot = new GameObject(side + "BootPivot");
+            bootPivot.transform.SetParent(kneePivot.transform, false);
+            bootPivot.transform.localPosition = new Vector3(0f, -0.32f, 0f);
+            CreateFit(side + "Boot", null, PrimitiveType.Cube, bootPivot.transform, new Vector3(0f, -0.04f, 0.045f), new Vector3(0.18f, 0.09f, 0.28f), bootArmorMat);
+
+            return hipPivot.transform;
         }
 
         private Transform BuildArm(string side, Transform parent, Vector3 shoulderPos, Material sleeveMat, out Transform elbowOut)

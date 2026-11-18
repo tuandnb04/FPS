@@ -1,4 +1,5 @@
 using System;
+using Audio;
 using Character;
 using Core;
 using Feel;
@@ -9,13 +10,13 @@ namespace Pickups
 {
     public enum PickupKind
     {
-        XpShard,
         Medkit,
-        CreditCoin
+        CreditCoin,
+        MunitionCache
     }
 
     /// <summary>
-    /// Pooled XP shard, Medkit, or Cyber-Credit collectible. Features idle spin,
+    /// Pooled Medkit, Cyber-Credit, or Munition Resupply Cache collectible. Features idle spin,
     /// scaled magnetic pull, and multi-mesh shape swapping per pickup kind.
     /// </summary>
     public sealed class PickupItem : MonoBehaviour
@@ -23,38 +24,36 @@ namespace Pickups
         private static readonly int BaseColor = Shader.PropertyToID("_BaseColor");
         private static readonly int EmissionColor = Shader.PropertyToID("_EmissionColor");
         private ObjectPool<PickupItem> _ownerPool;
-        private int _xpValue;
         private float _healValue;
         private int _creditValue;
         private float _spinAngle;
         private Vector3 _baseLocalVisualPos;
         private Transform _visualTransform;
-        private MeshRenderer _visualRenderer;
-        private GameObject _xpVisual;
         private GameObject _medkitVisual;
         private GameObject _creditVisual;
-        private MeshRenderer _xpRenderer;
+        private GameObject _munitionVisual;
         private MeshRenderer _medkitRenderer;
         private MeshRenderer _creditRenderer;
+        private MeshRenderer _munitionRenderer;
         private MaterialPropertyBlock _mpb;
         private Action<PickupItem> _onReleasedCallback;
         private bool _collected;
 
-        public PickupKind Kind { get; private set; }
+        private PickupKind Kind { get; set; }
 
         public void ConfigureMultiVisuals(
             Transform visualRoot,
-            GameObject xpObj, MeshRenderer xpMr,
             GameObject medObj, MeshRenderer medMr,
-            GameObject credObj, MeshRenderer credMr)
+            GameObject credObj, MeshRenderer credMr,
+            GameObject munitionObj = null, MeshRenderer munitionMr = null)
         {
             _visualTransform = visualRoot;
-            _xpVisual = xpObj;
-            _xpRenderer = xpMr;
             _medkitVisual = medObj;
             _medkitRenderer = medMr;
             _creditVisual = credObj;
             _creditRenderer = credMr;
+            _munitionVisual = munitionObj;
+            _munitionRenderer = munitionMr;
             if (_visualTransform != null)
             {
                 _baseLocalVisualPos = _visualTransform.localPosition;
@@ -65,14 +64,12 @@ namespace Pickups
             ObjectPool<PickupItem> pool,
             Vector3 worldPos,
             PickupKind pickupKind,
-            int xpAmount,
             float healAmount,
             Action<PickupItem> onReleased,
             int creditAmount = 15)
         {
             _ownerPool = pool;
             Kind = pickupKind;
-            _xpValue = xpAmount;
             _healValue = healAmount;
             _creditValue = creditAmount;
             _onReleasedCallback = onReleased;
@@ -84,17 +81,20 @@ namespace Pickups
             var col = Kind switch
             {
                 PickupKind.Medkit => Palette.HealthGreen,
-                PickupKind.CreditCoin => Palette.CreditGold,
-                _ => Palette.Accent
+                PickupKind.MunitionCache => Palette.NvgGreen,
+                _ => Palette.CreditGold
             };
 
-            if (_xpVisual != null) _xpVisual.SetActive(Kind == PickupKind.XpShard);
             if (_medkitVisual != null) _medkitVisual.SetActive(Kind == PickupKind.Medkit);
             if (_creditVisual != null) _creditVisual.SetActive(Kind == PickupKind.CreditCoin);
+            if (_munitionVisual != null) _munitionVisual.SetActive(Kind == PickupKind.MunitionCache);
 
-            var activeMr = Kind == PickupKind.Medkit
-                ? (_medkitRenderer != null ? _medkitRenderer : _visualRenderer)
-                : (Kind == PickupKind.CreditCoin ? (_creditRenderer != null ? _creditRenderer : _visualRenderer) : (_xpRenderer != null ? _xpRenderer : _visualRenderer));
+            var activeMr = Kind switch
+            {
+                PickupKind.Medkit => _medkitRenderer,
+                PickupKind.MunitionCache => _munitionRenderer != null ? _munitionRenderer : _creditRenderer,
+                _ => _creditRenderer
+            };
 
             if (activeMr == null) return;
             _mpb ??= new MaterialPropertyBlock();
@@ -139,7 +139,8 @@ namespace Pickups
 
         private void OnTriggerEnter(Collider other)
         {
-            if (_collected) return;
+            if (_collected || other == null) return;
+            if (!other.CompareTag("Player") && other.gameObject.layer != 6) return;
             var player = other.GetComponentInParent<PlayerController>();
             if (player != null && !player.IsDead)
             {
@@ -167,10 +168,12 @@ namespace Pickups
                     FeelManager.Instance?.OnCreditCollected(transform.position, gained);
                     break;
                 }
-                case PickupKind.XpShard:
-                default:
-                    player.AddXp(_xpValue);
-                    FeelManager.Instance?.OnPickupCollected(transform.position, _xpValue, isHealth: false);
+                case PickupKind.MunitionCache:
+                    player.Weapon?.InstantRefillCurrentMagazine();
+                    player.AddFragGrenades(1);
+                    player.AddArmorAndTrauma(15f);
+                    AudioManager.Instance?.PlayPickupBlip();
+                    FeelManager.Instance?.SpawnFloatingText(transform.position + Vector3.up * 0.7f, "RESUPPLY // +MAG +FRAG +ARMOR", Palette.NvgGreen);
                     break;
             }
 

@@ -26,7 +26,18 @@ namespace Feel
         private Transform _cachedPlayerRoot;
         private UnityEngine.Camera _mainCamera;
         private ObjectPool<TextMeshPro> _floatingTextPool;
-        private readonly List<TextMeshPro> _activeTexts = new(24);
+
+        private struct ActiveFloatingText
+        {
+            public TextMeshPro Tmp;
+            public Vector3 StartPos;
+            public Vector3 EndPos;
+            public Color BaseColor;
+            public float Elapsed;
+            public float Duration;
+        }
+
+        private readonly List<ActiveFloatingText> _activeFloatingTexts = new(24);
 
         public void BindComponents(CinemachineImpulseSource impulse, Transform textRoot)
         {
@@ -217,46 +228,75 @@ namespace Feel
 
         public void SpawnFloatingText(Vector3 worldPos, string text, Color color)
         {
-            StartCoroutine(FloatingTextRoutine(worldPos, text, color));
-        }
-
-        private IEnumerator FloatingTextRoutine(Vector3 worldPos, string label, Color baseColor)
-        {
-            if (floatingTextRoot == null) yield break;
+            if (floatingTextRoot == null) return;
             InitializeFloatingTextPool();
 
             var tmp = _floatingTextPool.Get();
-            if (tmp == null) yield break;
+            if (tmp == null) return;
 
-            var go = tmp.gameObject;
-            go.transform.position = worldPos + new Vector3(Random.Range(-0.2f, 0.2f), 1.35f, Random.Range(-0.15f, 0.15f));
-            tmp.text = label;
-            tmp.color = baseColor;
-            _activeTexts.Add(tmp);
+            var startPos = worldPos + new Vector3(Random.Range(-0.2f, 0.2f), 1.35f, Random.Range(-0.15f, 0.15f));
+            var tr = tmp.transform;
+            tr.position = startPos;
+            tr.localScale = Vector3.one * 0.75f;
+            if (_mainCamera == null) _mainCamera = UnityEngine.Camera.main;
+            if (_mainCamera != null) tr.rotation = _mainCamera.transform.rotation;
 
-            var startPos = go.transform.position;
-            var endPos = startPos + Vector3.up * 0.85f;
-            const float lifetime = 0.62f;
-
-            yield return Ease.Tween(lifetime, t =>
+            tmp.text = text;
+            tmp.color = color;
+            _activeFloatingTexts.Add(new ActiveFloatingText
             {
-                if (tmp == null || !go.activeSelf) return;
-                if (_mainCamera == null) _mainCamera = UnityEngine.Camera.main;
-                if (_mainCamera != null)
+                Tmp = tmp,
+                StartPos = startPos,
+                EndPos = startPos + Vector3.up * 0.85f,
+                BaseColor = color,
+                Elapsed = 0f,
+                Duration = 0.62f
+            });
+        }
+
+        private void Update()
+        {
+            if (_activeFloatingTexts.Count == 0) return;
+            var dt = Time.unscaledDeltaTime;
+            if (dt <= 0f) return;
+
+            if (_mainCamera == null) _mainCamera = UnityEngine.Camera.main;
+            var hasCam = _mainCamera != null;
+            var camRot = hasCam ? _mainCamera.transform.rotation : Quaternion.identity;
+
+            for (var i = _activeFloatingTexts.Count - 1; i >= 0; i--)
+            {
+                var entry = _activeFloatingTexts[i];
+                var tmp = entry.Tmp;
+                if (tmp == null || !tmp.gameObject.activeSelf)
                 {
-                    go.transform.rotation = _mainCamera.transform.rotation;
+                    _activeFloatingTexts.RemoveAt(i);
+                    continue;
                 }
-                var moveT = Ease.OutCubic(t);
-                go.transform.position = Vector3.Lerp(startPos, endPos, moveT);
-                var scalePop = t < 0.2f ? Mathf.Lerp(0.75f, 1.15f, t / 0.2f) : Mathf.Lerp(1.15f, 0.95f, (t - 0.2f) / 0.8f);
-                go.transform.localScale = Vector3.one * scalePop;
-                var alpha = t < 0.55f ? 1f : Mathf.Lerp(1f, 0f, (t - 0.55f) / 0.45f);
-                tmp.color = Palette.WithAlpha(baseColor, alpha);
-            }, Ease.Linear, unscaled: true);
 
-            if (_activeTexts.Remove(tmp))
-            {
-                _floatingTextPool.Release(tmp);
+                entry.Elapsed += dt;
+                var t = Mathf.Clamp01(entry.Elapsed / entry.Duration);
+                var tr = tmp.transform;
+                if (hasCam) tr.rotation = camRot;
+                tr.position = Vector3.Lerp(entry.StartPos, entry.EndPos, Ease.OutCubic(t));
+                var scalePop = t < 0.2f
+                    ? Mathf.Lerp(0.75f, 1.15f, t / 0.2f)
+                    : Mathf.Lerp(1.15f, 0.95f, (t - 0.2f) / 0.8f);
+                tr.localScale = Vector3.one * scalePop;
+
+                var c = entry.BaseColor;
+                c.a = t < 0.55f ? 1f : Mathf.Lerp(1f, 0f, (t - 0.55f) / 0.45f);
+                tmp.color = c;
+
+                if (t >= 1f)
+                {
+                    _activeFloatingTexts.RemoveAt(i);
+                    _floatingTextPool.Release(tmp);
+                }
+                else
+                {
+                    _activeFloatingTexts[i] = entry;
+                }
             }
         }
 
@@ -285,44 +325,17 @@ namespace Feel
             TriggerPlayerScalePop(1.18f, 0.14f);
         }
 
-        public void TriggerLevelUpSequence(int newLevel, Transform playerTransform)
-        {
-            if (playerTransform != null)
-            {
-                _cachedPlayerRoot = playerTransform;
-            }
-            StartCoroutine(LevelUpSequenceRoutine(newLevel));
-        }
-
-        private IEnumerator LevelUpSequenceRoutine(int newLevel)
-        {
-            // t = 0.00s: Shockwave VFX + Triad Audio + Hitstop + Camera Shake
-            var center = _cachedPlayerRoot != null ? _cachedPlayerRoot.position + Vector3.up * 0.4f : Vector3.zero;
-            VFXManager.Instance?.Play(VfxKind.LevelUpNova, center, Palette.Accent);
-            AudioManager.Instance?.PlayMilestoneSting();
-            TriggerCameraShake(0.45f);
-            TriggerHitStop(0.06f, 0.12f);
-
-            // t = 0.05s: Player celebratory punch
-            yield return Ease.GetWaitRealtime(0.05f);
-            TriggerPlayerScalePop(1.32f, 0.25f);
-
-            // t = 0.10s: HUD milestone banner pop
-            yield return Ease.GetWaitRealtime(0.05f);
-            UIManager.Instance?.ShowMilestoneBanner("RANK " + newLevel + " // SUPPLY DROP");
-        }
-
         public void ClearAllFloatingText()
         {
-            for (var i = _activeTexts.Count - 1; i >= 0; i--)
+            for (var i = _activeFloatingTexts.Count - 1; i >= 0; i--)
             {
-                var tmp = _activeTexts[i];
+                var tmp = _activeFloatingTexts[i].Tmp;
                 if (tmp != null && _floatingTextPool != null)
                 {
                     _floatingTextPool.Release(tmp);
                 }
             }
-            _activeTexts.Clear();
+            _activeFloatingTexts.Clear();
         }
     }
 }

@@ -41,7 +41,7 @@ namespace Core
         private static SaveManager Instance { get; set; }
 
         public const int MaxUpgradeRank = 5;
-        public const int WeaponCount = 6;
+        public const int WeaponCount = 10;
         private const string SaveFileName = "vanguard_save.dat";
         private const string EncryptionKey = "VANGUARD_NEON_STORE_2026_KEY!";
 

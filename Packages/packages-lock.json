@@ -1,5 +1,21 @@
 {
   "dependencies": {
+    "com.fluid.behavior-tree": {
+      "version": "https://github.com/ashblue/fluid-behavior-tree.git?path=Assets/com.fluid.behavior-tree#v2.3.0",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {},
+      "hash": "8ef28a249d93e84d3159bdf8ba6e5f4a0a5f30f5"
+    },
+    "com.unity.ai.navigation": {
+      "version": "2.0.16",
+      "depth": 0,
+      "source": "registry",
+      "dependencies": {
+        "com.unity.modules.ai": "1.0.0"
+      },
+      "url": "https://packages.unity.com"
+    },
     "com.unity.burst": {
       "version": "2.0.0",
       "depth": 2,
